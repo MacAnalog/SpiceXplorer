@@ -1,3 +1,6 @@
 [submodule "submodules/AnalogGym"]
 	path = submodules/AnalogGym
 	url = https://github.com/CODA-Team/AnalogGym
+[submodule "submodules/cora.opamp"]
+	path = submodules/cora.opamp
+	url = https://gitlab.tugraz.at/00BDBB47257F60E4/cora.opamp
