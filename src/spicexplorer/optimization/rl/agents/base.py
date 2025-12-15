@@ -10,10 +10,13 @@ import numpy as np
 import torch
 
 from ..utils.hyperparameters import BaseHyperparameters
+from ..models.base import BaseActor, BaseCritic
+from ..utils.typing import ExperienceBatch
 
 # ------------------ Module Logger ------------------
 
 logger = logging.getLogger("spicexplorer.optimization.rl.agents.base")
+
 
 # ------------------ Classes ------------------
 
@@ -52,7 +55,10 @@ class BaseRLAgent(ABC):
             torch.manual_seed(self.seed)
             np.random.seed(self.seed)
             random.seed(self.seed)
-
+    
+    # ----------------------------------------
+    # Abstract Methods
+    # ----------------------------------------
     @abstractmethod
     def step(
         self,
@@ -72,10 +78,13 @@ class BaseRLAgent(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def learn(self, experiences: Any, gamma: float) -> None:
+    def learn(self, experiences: ExperienceBatch, gamma: float) -> None:
         """Update the agent's networks."""
         raise NotImplementedError
 
+    # ----------------------------------------
+    # Implemented Methods
+    # ----------------------------------------
     def soft_update(self, local_model, target_model, tau):
         for target_param, local_param in zip(
             target_model.parameters(), local_model.parameters()
@@ -141,3 +150,39 @@ class BaseRLAgent(ABC):
             raise FileNotFoundError(
                 "No agent state files found at prefix. Agent will start fresh."
             )
+
+
+class BaseActorCriticRLAgent(BaseRLAgent):
+    """Abstract base class for reinforcement learning agents that use Actor-Critic architecture."""
+    def __init__(
+        self,
+        state_dim: int,
+        action_dim: int,
+        hyperparams: BaseHyperparameters,
+        device: torch.device,
+        seed: int,
+    ) -> None:
+        """Initialize the reinforcement learning agent.
+        Args:
+            state_dim: Dimension of the state space.
+            action_dim: Dimension of the action space.
+            hyperparams: Dictionary of hyperparameters.
+            device: PyTorch device.
+            seed: Random seed.
+        """
+        super().__init__(state_dim, action_dim, hyperparams, device, seed)
+
+    @abstractmethod
+    def _create_actor(self, actor_model_class: BaseActor):
+        """Instantiates the agent's Actor"""
+        raise NotImplementedError
+
+    @abstractmethod
+    def _create_critic(self, critic_model_class: BaseCritic):
+        """Instantiates the agent's Actor"""
+        raise NotImplementedError
+    
+    @abstractmethod
+    def _configure_model_save(self):
+        """Configures self.models, self.optimizers, and self.agent_var_keys to be saved/loaded."""
+        raise NotImplementedError

@@ -47,6 +47,7 @@ class TrainingHyperparameters(BaseHyperparameters):
     tau: float = 0.005
     update_every: int = 1
     initial_random_steps: int = 1000
+    policy_update_freq: int = 2
 
 
 # --------------------------------------------
@@ -64,7 +65,6 @@ class CriticMLPHyperparameters(BaseHyperparameters):
     grad_clip: float = 1.0
     hidden_units: Tuple[int, ...] = (256, 128)
 
-
 # --------------------------------------------
 # Hyperparameters - Agent Type
 # --------------------------------------------
@@ -78,6 +78,7 @@ class DDPGHyperparameters(BaseHyperparameters):
     memory: MemoryHyperparameters = field(default_factory=MemoryHyperparameters)
     training: TrainingHyperparameters = field(default_factory=TrainingHyperparameters)
 
+    # [Optional]
     def to_dict(self) -> dict:
         """Converts the hyperparameters to a dictionary for compatibility."""
         return {
@@ -97,4 +98,41 @@ class DDPGHyperparameters(BaseHyperparameters):
             "tau": self.training.tau,
             "update_every": self.training.update_every,
             "initial_random_steps": self.training.initial_random_steps,
+        }
+
+# [SAC] Hyperparameters
+@dataclass
+class AlphaHyperparameters(BaseHyperparameters):
+    """Hyperparameters for the entropy temperature alpha in SAC."""
+    learn_alpha: bool = True
+    alpha_init: float = 0.2
+    lr_alpha: float = 0.0003
+
+@dataclass
+class SACHyperparameters(BaseHyperparameters):
+    actor: ActorMLPHyperparameters = field(default_factory=ActorMLPHyperparameters)
+    critic: CriticMLPHyperparameters = field(default_factory=CriticMLPHyperparameters)
+    alpha: AlphaHyperparameters = field(default_factory=AlphaHyperparameters)
+    memory: MemoryHyperparameters = field(default_factory=MemoryHyperparameters)
+    training: TrainingHyperparameters = field(default_factory=TrainingHyperparameters)
+
+    def to_dict(self) -> dict:
+        """Converts the hyperparameters to a dictionary for compatibility."""
+        return {
+            "lr_actor": self.actor.lr,
+            "hidden_units_actor": self.actor.hidden_units,
+            "lr_critic": self.critic.lr,
+            "weight_decay_critic": self.critic.weight_decay,
+            "grad_clip_critic": self.critic.grad_clip,
+            "hidden_units_critic": self.critic.hidden_units,
+            "learn_alpha": self.alpha.learn_alpha,
+            "alpha_init": self.alpha.alpha_init,
+            "lr_alpha": self.alpha.lr_alpha,
+            "buffer_size": self.memory.buffer_size,
+            "batch_size": self.memory.batch_size,
+            "gamma": self.training.gamma,
+            "tau": self.training.tau,
+            "update_every": self.training.update_every,
+            "initial_random_steps": self.training.initial_random_steps,
+            "policy_update_freq": self.training.policy_update_freq,
         }

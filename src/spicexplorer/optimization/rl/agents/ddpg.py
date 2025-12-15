@@ -6,13 +6,15 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
-from .base import BaseRLAgent
+from .base import BaseActorCriticRLAgent
+from ..models.base import BaseActor, BaseCritic
 from ..models.actor import MLPActor
 from ..models.critic import MLPCritic
 
 from ..utils.hyperparameters import DDPGHyperparameters
 from ..utils.replay_buffer import ReplayBuffer
 from ..utils.utils import trunc_normal
+from ..utils.typing import ExperienceBatch
 
 # ------------------ Module Logger ------------------
 
@@ -20,7 +22,7 @@ logger = logging.getLogger("spicexplorer.optimization.rl.agents.ddpg")
 
 # ------------------ Classes ------------------
 
-class DDPGAgent(BaseRLAgent):
+class DDPGAgent(BaseActorCriticRLAgent):
     """Interacts with and learns from the environment using DDPG."""
 
     def __init__(
@@ -42,33 +44,15 @@ class DDPGAgent(BaseRLAgent):
 
         logger.info(f"DDPG Agent Initializing with seed: {self.seed}")
         logger.info(f"Using device: {self.device}")
-        logger.info(f"Hyperparameters: {self.hyperparams}")
+
+        # Initialize time step (for updating every UPDATE_EVERY steps)
+        self.t_step = 0
 
         # Actor Network (w/ Target Network)
-        self.actor_local = actor_model_class(
-            state_dim, action_dim, seed=self.seed, hyperparams=self.hyperparams
-        ).to(self.device)
-        self.actor_target = actor_model_class(
-            state_dim, action_dim, seed=self.seed, hyperparams=self.hyperparams
-        ).to(self.device)
-        self.actor_optimizer = optim.Adam(
-            self.actor_local.parameters(), lr=self.hyperparams.actor.lr
-        )
-        self.hard_update(self.actor_local, self.actor_target)
+        self._create_actor(actor_model_class=actor_model_class)
 
         # Critic Network (w/ Target Network)
-        self.critic_local = critic_model_class(
-            state_dim, action_dim, seed=self.seed, hyperparams=self.hyperparams
-        ).to(self.device)
-        self.critic_target = critic_model_class(
-            state_dim, action_dim, seed=self.seed, hyperparams=self.hyperparams
-        ).to(self.device)
-        self.critic_optimizer = optim.Adam(
-            self.critic_local.parameters(),
-            lr=self.hyperparams.critic.lr,
-            weight_decay=self.hyperparams.critic.weight_decay,
-        )
-        self.hard_update(self.critic_local, self.critic_target)
+        self._create_critic(critic_model_class=critic_model_class)
 
         # Noise process
         self.current_noise_sigma = self.hyperparams.noise.sigma_initial
@@ -81,10 +65,49 @@ class DDPGAgent(BaseRLAgent):
             self.seed,
         )
 
-        # Initialize time step (for updating every UPDATE_EVERY steps)
-        self.t_step = 0
-
         # Populate models and optimizers for state saving/loading
+        self._configure_model_save()
+
+        if model_load_path:
+            try:
+                self.load_state(model_load_path)
+            except FileNotFoundError:
+                logger.warning("No agent state files found. Agent will start fresh.")
+    
+    # Abstract method overwrite [Private]
+    def _create_actor(self, actor_model_class: BaseActor):
+        self.actor_local = actor_model_class(
+            self.state_dim, self.action_dim, seed=self.seed, hyperparams=self.hyperparams.actor
+        ).to(self.device)
+        
+        self.actor_target = actor_model_class(
+            self.state_dim, self.action_dim, seed=self.seed, hyperparams=self.hyperparams.actor
+        ).to(self.device)
+
+        # Create optimizer
+        self.actor_optimizer = optim.Adam(
+            self.actor_local.parameters(), lr=self.hyperparams.actor.lr
+        )
+        self.hard_update(self.actor_local, self.actor_target)
+
+    def _create_critic(self, critic_model_class: BaseCritic):
+
+        self.critic_local = critic_model_class(
+            self.state_dim, self.action_dim, seed=self.seed, hyperparams=self.hyperparams.critic
+        ).to(self.device)
+
+        self.critic_target = critic_model_class(
+            self.state_dim, self.action_dim, seed=self.seed, hyperparams=self.hyperparams.critic
+        ).to(self.device)
+
+        self.critic_optimizer = optim.Adam(
+            self.critic_local.parameters(),
+            lr=self.hyperparams.critic.lr,
+            weight_decay=self.hyperparams.critic.weight_decay,
+        )
+        self.hard_update(self.critic_local, self.critic_target)
+    
+    def _configure_model_save(self):
         self.models = {
             "actor_local": self.actor_local,
             "actor_target": self.actor_target,
@@ -97,12 +120,7 @@ class DDPGAgent(BaseRLAgent):
         }
         self.agent_var_keys = ["total_env_steps", "current_noise_sigma", "t_step"]
 
-        if model_load_path:
-            try:
-                self.load_state(model_load_path)
-            except FileNotFoundError:
-                logger.warning("No agent state files found. Agent will start fresh.")
-
+    # Abstract method overwrite [Public]
     def step(
         self,
         state: np.ndarray,
@@ -169,15 +187,16 @@ class DDPGAgent(BaseRLAgent):
 
         return action.astype(np.float32)
 
-    def learn(self, experiences, gamma: float):
-        states, actions, rewards, next_states, dones = experiences
+    def learn(self, experiences: ExperienceBatch, gamma: float):
 
         # Update critic
-        actions_next = self.actor_target(next_states)
-        Q_targets_next = self.critic_target(next_states, actions_next)
-        Q_targets = rewards + (gamma * Q_targets_next * (1 - dones))
-        Q_expected = self.critic_local(states, actions)
+        actions_next    = self.actor_target(experiences.next_states)
+        Q_targets_next  = self.critic_target(experiences.next_states, actions_next)
+        Q_targets       = experiences.rewards + (gamma * Q_targets_next * (1 - experiences.dones))
+        Q_expected      = self.critic_local(experiences.states, experiences.actions)
+        
         critic_loss = F.mse_loss(Q_expected, Q_targets)
+        
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         torch.nn.utils.clip_grad_norm_(
@@ -186,8 +205,8 @@ class DDPGAgent(BaseRLAgent):
         self.critic_optimizer.step()
 
         # Update actor
-        actions_pred = self.actor_local(states)
-        actor_loss = -self.critic_local(states, actions_pred).mean()
+        actions_pred = self.actor_local(experiences.states)
+        actor_loss = -self.critic_local(experiences.states, actions_pred).mean()
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()

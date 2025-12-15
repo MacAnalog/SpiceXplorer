@@ -6,6 +6,8 @@ import numpy as np
 from collections import deque, namedtuple
 import logging
 
+from .typing import ExperienceBatch
+
 logger = logging.getLogger("SpiceXplorer")
 
 class ReplayBuffer:
@@ -50,7 +52,7 @@ class ReplayBuffer:
         next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(self.device)
         dones       = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(self.device)
 
-        return (states, actions, rewards, next_states, dones)
+        return ExperienceBatch(states, actions, rewards, next_states, dones)
 
     def __len__(self):
         """Return the current size of internal memory."""
