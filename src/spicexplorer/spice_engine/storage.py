@@ -33,7 +33,7 @@ MetricSet = Mapping[str, float]
 @dataclass
 class Spice_Simulation_Point:
     parameters: ParameterSet
-    scalarized_metric: float
+    scalarized_metric: float # AKA "fitness" or "objective value"
     metrics: Optional[MetricSet] = None
 
     def get_metric(self, name: str, default: Optional[float] = None) -> Optional[float]:

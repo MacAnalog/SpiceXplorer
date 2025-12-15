@@ -9,7 +9,7 @@ from    pathlib     import Path
 from    abc         import ABC, abstractmethod
 
 # Symxplorer Specific Imports
-from    spicexplorer.spice_engine              import Spicelib_Wrapper, Sim_Execution_Type
+from    spicexplorer.spice_engine              import NGSpice_Wrapper, Sim_Execution_Type
 from    spicexplorer.designer_tools.domains    import Project_Setup
 
 from    .base           import Spice_Base_Optimizer, Base_Optimizer
@@ -54,7 +54,7 @@ class Circuit_Optimizer_Orchestrator_Base(ABC):
         self.project_setup:     Project_Setup   = self.read_project_setup()
         logger.debug(f"created the project setup for {self.project_setup.name}")
 
-        self.spicelib_wrapper:  Spicelib_Wrapper = self.create_spicelib_wrapper()
+        self.spicelib_wrapper:  NGSpice_Wrapper = self.create_spicelib_wrapper()
         logger.debug(f"created the spicelib_wrapper.")
 
 
@@ -72,7 +72,7 @@ class Circuit_Optimizer_Orchestrator_Base(ABC):
             ) from e
         return PROJECT_SETUP
     
-    def create_spicelib_wrapper(self) -> Spicelib_Wrapper:
+    def create_spicelib_wrapper(self) -> NGSpice_Wrapper:
         PROJECT_SETUP = self.project_setup
         # (2) Create the Spice Simulator Wrapper
         netlist_filename = Path(PROJECT_SETUP.ws_root) / Path(PROJECT_SETUP.netlist)
@@ -84,7 +84,7 @@ class Circuit_Optimizer_Orchestrator_Base(ABC):
         logger.debug(f"\t- netlist_filename {netlist_filename}")
         logger.debug(f"\t- path_to_simulator {PROJECT_SETUP.simulator}")
 
-        wrapper = Spicelib_Wrapper(
+        wrapper = NGSpice_Wrapper(
             project_name=PROJECT_SETUP.name,
             netlist_filename=netlist_filename,
             output_folder=output_folder,
@@ -98,7 +98,7 @@ class Circuit_Optimizer_Orchestrator_Base(ABC):
     def get_project_setup(self) -> Project_Setup:
         return self.project_setup
     
-    def get_spicelib_wrapepr(self) -> Spicelib_Wrapper:
+    def get_spicelib_wrapepr(self) -> NGSpice_Wrapper:
         return self.spicelib_wrapper
 
     @abstractmethod

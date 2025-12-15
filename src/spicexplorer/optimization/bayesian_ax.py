@@ -10,7 +10,7 @@ from ax.api.configs import RangeParameterConfig
 from ax.api.types   import TParameterization
 from ax.api.protocols.metric import IMetric
 # Symxplorer Specific Imports
-from   spicexplorer.spice_engine.spicelib     import Spicelib_Wrapper
+from   spicexplorer.spice_engine.spicelib     import NGSpice_Wrapper
 from   spicexplorer.designer_tools.domains    import Project_Setup
 from   spicexplorer.optimization.base         import Spice_Constraint_Satisfaction, Spice_Single_Objective, Spice_Bode_Optimizer, Base_Optimizer
 
@@ -119,7 +119,7 @@ class Nevergrad_Spice_Bode_Optimizer(Ax_Client_Mixin, Spice_Bode_Optimizer):
 class Ax_Spice_Constraint_Satisfaction(Ax_Client_Mixin, Spice_Constraint_Satisfaction):
     def __init__(self,
                  setup_obj: Project_Setup,
-                 spicelib_wrapper : Spicelib_Wrapper):
+                 spicelib_wrapper : NGSpice_Wrapper):
         super().__init__(setup_obj = setup_obj, spicelib_wrapper = spicelib_wrapper)
         logger.info(f"started the {__class__} optimizer class")
 # ------------------------------------------------
@@ -128,6 +128,6 @@ class Ax_Spice_Constraint_Satisfaction(Ax_Client_Mixin, Spice_Constraint_Satisfa
 class Ax_Spice_Single_Objective(Ax_Client_Mixin, Spice_Single_Objective):
     def __init__(self,
                  setup_obj: Project_Setup,
-                 spicelib_wrapper : Spicelib_Wrapper):
+                 spicelib_wrapper : NGSpice_Wrapper):
         super().__init__(setup_obj = setup_obj, spicelib_wrapper = spicelib_wrapper)
         logger.info(f"started the {__class__} optimizer class")

@@ -165,7 +165,7 @@ class LTspice_Wrapper:
         
         return torch.from_numpy(wave)
 
-class Spicelib_Wrapper:
+class NGSpice_Wrapper:
     def __init__(self,  
                  netlist_filename:      Path, 
                  traces_of_interest:    List[str] = [], 

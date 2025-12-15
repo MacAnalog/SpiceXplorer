@@ -17,7 +17,7 @@ from    sympy       import Expr
 
 
 # Symxplorer Specific Imports
-from   spicexplorer.spice_engine.spicelib     import Spicelib_Wrapper
+from   spicexplorer.spice_engine.spicelib     import NGSpice_Wrapper
 from   spicexplorer.designer_tools.domains    import Project_Setup, ListTargetSpec, TargetSpec, Error_Types
 from   spicexplorer.designer_tools.domains    import OptimizationGoalType, OptimizationPoint, OptimizationLogEntry, OptimizationLog
 from   spicexplorer.designer_tools.utils      import compute_error, compute_reward, convert_linear_to_log, log_denormalize, linear_denormalize
@@ -413,7 +413,7 @@ class Spice_Base_Optimizer(Base_Optimizer):
     """ Base class for optimizers that use SPICE simulations."""
     def __init__(self,  
                 setup_obj: Project_Setup,
-                spicelib_wrapper : Spicelib_Wrapper):
+                spicelib_wrapper : NGSpice_Wrapper):
         super().__init__(setup_obj = setup_obj)
         self.spicelib_wrapper = spicelib_wrapper
     
@@ -531,7 +531,7 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
     """ Nevergrad optimizer that fits a SPICE-simulated transfer function to a target transfer function. """
     def __init__(self,
                  setup_obj: Project_Setup,
-                 spicelib_wrapper : Spicelib_Wrapper,
+                 spicelib_wrapper : NGSpice_Wrapper,
                  target_tf: Expr,
                  output_node: str = "Vout", # FIXME this needs to go into the spicelib_wrapper
                  frequency_weight: Frequency_Weight | None = None
@@ -686,7 +686,7 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
     """ Nevergrad Optimizer that uses the perfomance metrics computed in SPICE simulations to size a circuit. """
     def __init__(self,
                  setup_obj: Project_Setup,
-                 spicelib_wrapper : Spicelib_Wrapper):
+                 spicelib_wrapper : NGSpice_Wrapper):
         super().__init__(setup_obj = setup_obj, spicelib_wrapper = spicelib_wrapper)
         self.target_specs: ListTargetSpec = setup_obj.optimizer_config.target_specs
         logger.info(f"Initialized the Nevergrad_Spice_Multi_Spec_Optimizer with {len(self.target_specs.targets)} target specs")
@@ -860,7 +860,7 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
 class Spice_Single_Objective(Spice_Constraint_Satisfaction):
     def __init__(self,
                 setup_obj: Project_Setup,
-                spicelib_wrapper : Spicelib_Wrapper):
+                spicelib_wrapper : NGSpice_Wrapper):
         super().__init__(setup_obj = setup_obj, spicelib_wrapper = spicelib_wrapper)
     
     def compute_fitness_for_spec(self, curr_val: np.float64 | float, target_spec: TargetSpec) -> np.float64:
