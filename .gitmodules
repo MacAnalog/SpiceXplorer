@@ -1,0 +1,3 @@
+[submodule "submodules/AnalogGym"]
+	path = submodules/AnalogGym
+	url = https://github.com/CODA-Team/AnalogGym
