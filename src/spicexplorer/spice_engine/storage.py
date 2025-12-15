@@ -12,7 +12,7 @@ from typing import List, Dict, Tuple, Any, Mapping, Optional
 
 # For logging
 from spicexplorer.logging import setup_loggers
-logger = logging.getLogger("SpiceXplorer.spicelib.storage")
+logger = logging.getLogger("spicexplorer.spice_engine.storage")
 
 # ---------------------------------
 # Enums Definition

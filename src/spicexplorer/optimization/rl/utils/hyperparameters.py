@@ -2,6 +2,8 @@ import yaml
 from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Type, TypeVar, Tuple
 
+from  .enums import NoiseType
+
 T = TypeVar("T")
 
 def _from_dict(cls: Type[T], data: dict) -> T:
@@ -23,25 +25,13 @@ class BaseHyperparameters:
         with open(file_path, 'r') as f:
             data = yaml.safe_load(f)
         return _from_dict(cls, data)
-
+    
 # --------------------------------------------
-# Hyperparameters by Agent Components
+# Hyperparameters - General
 # --------------------------------------------
-@dataclass
-class ActorHyperparameters(BaseHyperparameters):
-    lr: float = 0.001
-    hidden_units: Tuple[int, ...] = (256, 128)
-
-@dataclass
-class CriticHyperparameters(BaseHyperparameters):
-    lr: float = 0.001
-    weight_decay: float = 0.0
-    grad_clip: float = 1.0
-    hidden_units: Tuple[int, ...] = (256, 128)
-
 @dataclass
 class NoiseHyperparameters(BaseHyperparameters):
-    type: str = "gaussian"
+    type: str = NoiseType.GAUSSIAN.value
     sigma_initial: float = 0.2
     sigma_min: float = 0.01
     sigma_decay: float = 0.995
@@ -58,15 +48,32 @@ class TrainingHyperparameters(BaseHyperparameters):
     update_every: int = 1
     initial_random_steps: int = 1000
 
+
 # --------------------------------------------
-# Hyperparameters by Agent Type
+# Hyperparameters - Models
+# --------------------------------------------
+@dataclass
+class ActorMLPHyperparameters(BaseHyperparameters):
+    lr: float = 0.001
+    hidden_units: Tuple[int, ...] = (256, 128)
+
+@dataclass
+class CriticMLPHyperparameters(BaseHyperparameters):
+    lr: float = 0.001
+    weight_decay: float = 0.0
+    grad_clip: float = 1.0
+    hidden_units: Tuple[int, ...] = (256, 128)
+
+
+# --------------------------------------------
+# Hyperparameters - Agent Type
 # --------------------------------------------
 
-# DDPG Hyperparameters
+# [DDPG] Hyperparameters
 @dataclass
 class DDPGHyperparameters(BaseHyperparameters):
-    actor: ActorHyperparameters = field(default_factory=ActorHyperparameters)
-    critic: CriticHyperparameters = field(default_factory=CriticHyperparameters)
+    actor: ActorMLPHyperparameters = field(default_factory=ActorMLPHyperparameters)
+    critic: CriticMLPHyperparameters = field(default_factory=CriticMLPHyperparameters)
     noise: NoiseHyperparameters = field(default_factory=NoiseHyperparameters)
     memory: MemoryHyperparameters = field(default_factory=MemoryHyperparameters)
     training: TrainingHyperparameters = field(default_factory=TrainingHyperparameters)

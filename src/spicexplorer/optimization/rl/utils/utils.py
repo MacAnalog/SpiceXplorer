@@ -1,7 +1,7 @@
 import logging
 import numpy as np
 
-logger = logging.getLogger("SpiceXplorer")
+logger = logging.getLogger("spicexplorer.optimization.rl.utils.utils")
 
 def trunc_normal(mean: np.ndarray, std: float, low: float = -1.0, high: float = 1.0) -> np.ndarray:
     """Generates samples from a truncated normal distribution."""

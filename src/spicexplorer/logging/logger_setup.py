@@ -16,7 +16,7 @@ def setup_loggers(out_logname="SpiceXplorer", parent_folder:Path=Path(".")) -> l
     os.makedirs(out_logname.parent, exist_ok=True)
 
     # --- The wrapper logger ---
-    logger = logging.getLogger("SpiceXplorer")
+    logger = logging.getLogger("spicexplorer")
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
 
@@ -75,7 +75,7 @@ def setup_spicelib_logging(file_handler: logging.FileHandler) -> logging.Logger:
 
     # Ensure all children inherit this setup
     for name, temp_logger in logging.Logger.manager.loggerDict.items():
-        if name.startswith("spicelib."):
+        if name.startswith("spicelib"):
             logging.getLogger(name).setLevel(logging.INFO)
             if isinstance(temp_logger, logging.Logger):
                 temp_logger.addHandler(console_handler)

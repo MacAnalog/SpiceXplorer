@@ -14,7 +14,7 @@ from dacite.exceptions import DaciteError, MissingValueError, WrongTypeError, Un
 
 # ------------------ Module Logger ------------------
 
-logger = logging.getLogger("SpiceXplorer.domains")
+logger = logging.getLogger("spicexplorer.designer_tools.domains")
 
 # ------------------ Enums ------------------
 

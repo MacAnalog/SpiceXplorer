@@ -6,13 +6,19 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
-from .base import BaseActor, BaseCritic, BaseRLAgent
-from .hyperparameters import DDPGHyperparameters
-from .replay_buffer import ReplayBuffer
-from .utils import trunc_normal
+from .base import BaseRLAgent
+from ..models.actor import MLPActor
+from ..models.critic import MLPCritic
 
-logger = logging.getLogger("SpiceXplorer")
+from ..utils.hyperparameters import DDPGHyperparameters
+from ..utils.replay_buffer import ReplayBuffer
+from ..utils.utils import trunc_normal
 
+# ------------------ Module Logger ------------------
+
+logger = logging.getLogger("spicexplorer.optimization.rl.agents.ddpg")
+
+# ------------------ Classes ------------------
 
 class DDPGAgent(BaseRLAgent):
     """Interacts with and learns from the environment using DDPG."""
@@ -21,8 +27,8 @@ class DDPGAgent(BaseRLAgent):
         self,
         state_dim: int,
         action_dim: int,
-        actor_model_class: BaseActor,
-        critic_model_class: BaseCritic,
+        actor_model_class: MLPActor,
+        critic_model_class: MLPCritic,
         hyperparams: DDPGHyperparameters,
         device: torch.device,
         seed: int = 0,

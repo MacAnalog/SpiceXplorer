@@ -25,7 +25,7 @@ from spicelib.editor.base_editor import ParameterNotFoundError, ComponentNotFoun
 
 from spicexplorer.logging import setup_loggers
 
-logger = logging.getLogger("SpiceXplorer.spicelib")
+logger = logging.getLogger("spicexplorer.spice_engine.spicelib")
 
 # ---------------------------------
 # Enums Definition

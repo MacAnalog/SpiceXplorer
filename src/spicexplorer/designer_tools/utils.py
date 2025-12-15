@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 from   plotly.subplots import make_subplots
 
 import logging
-logger = logging.getLogger("SpiceXplorer.designer_tools.utils")
+logger = logging.getLogger("spicexplorer.designer_tools.utils")
 
 UNIT_DICT: Dict[str, float] ={
     'p' : 1e-12,

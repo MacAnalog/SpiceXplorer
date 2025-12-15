@@ -1,4 +1,4 @@
-from spicexplorer.optimization.rl_agents.hyperparameters import DDPGHyperparameters
+from spicexplorer.optimization.rl.utils.hyperparameters import DDPGHyperparameters
 
 # Load hyperparameters from the YAML file
 try:
