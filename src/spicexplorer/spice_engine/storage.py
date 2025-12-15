@@ -11,8 +11,8 @@ from typing import List, Dict, Tuple, Any, Mapping, Optional
 
 
 # For logging
-from symxplorer.logging import setup_loggers
-logger = logging.getLogger("SymXplorer.spicelib.storage")
+from spicexplorer.logging import setup_loggers
+logger = logging.getLogger("SpiceXplorer.spicelib.storage")
 
 # ---------------------------------
 # Enums Definition

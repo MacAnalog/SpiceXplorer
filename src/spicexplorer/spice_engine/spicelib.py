@@ -23,9 +23,9 @@ from spicelib.sim.simulator  import Simulator as SpicelibSimulatorClass
 from spicelib.sim.run_task   import RunTask   as SpicelibRunTaskClass
 from spicelib.editor.base_editor import ParameterNotFoundError, ComponentNotFoundError
 
-from symxplorer.logging import setup_loggers
+from spicexplorer.logging import setup_loggers
 
-logger = logging.getLogger("SymXplorer.spicelib")
+logger = logging.getLogger("SpiceXplorer.spicelib")
 
 # ---------------------------------
 # Enums Definition

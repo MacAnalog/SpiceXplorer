@@ -14,10 +14,10 @@ from    tqdm        import tqdm
 
 
 # Symxplorer Specific Imports
-from   symxplorer.designer_tools.symbolic_sizing                     import Symbolic_Sizing_Assist
-from   symxplorer.designer_tools.utils                               import plot_complex_response, get_bode_fitness_loss, Transfer_Func_Helper, Frequency_Weight, UNIT_DICT
+from   spicexplorer.designer_tools.symbolic_sizing                     import Symbolic_Sizing_Assist
+from   spicexplorer.designer_tools.utils                               import plot_complex_response, get_bode_fitness_loss, Transfer_Func_Helper, Frequency_Weight, UNIT_DICT
 
-logger = logging.getLogger("SymXplorer.optimizer")
+logger = logging.getLogger("SpiceXplorer.optimizer")
 
 s = sp.symbols("s")
 

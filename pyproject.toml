@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "SpiceXplorer"
 version = "0.1.0"
-description = "A symbolic circuit explorer and design tool with SPICE simulators binding"
+description = "A Pythonic compilation of circuit optimization algorithms with OOP emphasis for accelerated EDA research"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
@@ -13,20 +13,18 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    'pytest >= 8.2.2',
     'sympy  >=1.13.3',
     'tqdm   >= 4.67.1',
     'pandas >= 2.2.3 ',
     'ax-platform >= 0.4.3',
     'matplotlib >= 3.9.3',
-    'lcapy >= 1.24' # Optional: to automate extracting the nodal equations
 ]
 
-[project.scripts]
-run-symbolix = "symxplorer.symbolic_solver.main:main"
+# [project.scripts]
+# run-symbolix = "spicexplorer.symbolic_solver.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/symxplorer"]
+packages = ["src/spicexplorer"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [

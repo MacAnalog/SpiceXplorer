@@ -8,7 +8,7 @@ import logging
 import os
 from datetime import datetime
 
-def setup_loggers(out_logname="SymXplorer", parent_folder:Path=Path(".")) -> logging.Logger:
+def setup_loggers(out_logname="SpiceXplorer", parent_folder:Path=Path(".")) -> logging.Logger:
 
     # --- Create timestamped log filename ---
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -16,7 +16,7 @@ def setup_loggers(out_logname="SymXplorer", parent_folder:Path=Path(".")) -> log
     os.makedirs(out_logname.parent, exist_ok=True)
 
     # --- The wrapper logger ---
-    logger = logging.getLogger("SymXplorer")
+    logger = logging.getLogger("SpiceXplorer")
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
 

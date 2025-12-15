@@ -17,13 +17,13 @@ from    sympy       import Expr
 
 
 # Symxplorer Specific Imports
-from   symxplorer.spice_engine.spicelib     import Spicelib_Wrapper
-from   symxplorer.designer_tools.domains    import Project_Setup, ListTargetSpec, TargetSpec, Error_Types
-from   symxplorer.designer_tools.domains    import OptimizationGoalType, OptimizationPoint, OptimizationLogEntry, OptimizationLog
-from   symxplorer.designer_tools.utils      import compute_error, compute_reward, convert_linear_to_log, log_denormalize, linear_denormalize
-from   symxplorer.designer_tools.utils      import plot_complex_response, get_bode_fitness_loss, Transfer_Func_Helper, Frequency_Weight, UNIT_DICT
+from   spicexplorer.spice_engine.spicelib     import Spicelib_Wrapper
+from   spicexplorer.designer_tools.domains    import Project_Setup, ListTargetSpec, TargetSpec, Error_Types
+from   spicexplorer.designer_tools.domains    import OptimizationGoalType, OptimizationPoint, OptimizationLogEntry, OptimizationLog
+from   spicexplorer.designer_tools.utils      import compute_error, compute_reward, convert_linear_to_log, log_denormalize, linear_denormalize
+from   spicexplorer.designer_tools.utils      import plot_complex_response, get_bode_fitness_loss, Transfer_Func_Helper, Frequency_Weight, UNIT_DICT
 
-logger = logging.getLogger("SymXplorer.base_optimizer")
+logger = logging.getLogger("SpiceXplorer.base_optimizer")
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 dtype  = torch.double
@@ -178,7 +178,7 @@ class Base_Optimizer(ABC):
     
     def plot_score(self, save_path: Path | None = None, show: bool = False):
         """Plot the score as a function of optimization steps with Plotly."""
-        logger = logging.getLogger("SymXplorer.plotter")
+        logger = logging.getLogger("SpiceXplorer.plotter")
 
         if len(self.optimization_log) < 1:
             logger.warning("No optimization trace to plot")
@@ -233,7 +233,7 @@ class Base_Optimizer(ABC):
 
     def plot_design_space_exploration(self, param_x: str, param_y: str, save_path: Path | None = None, show: bool = False, denorm: bool = False) -> Tuple[torch.Tensor, torch.Tensor] | None:
         """Plot the exploration of the design space in terms of two parameters with Plotly."""
-        logger = logging.getLogger("SymXplorer.plotter")
+        logger = logging.getLogger("SpiceXplorer.plotter")
 
         if len(self.optimization_log) < 1:
             logger.warning("No optimization trace to plot")
@@ -298,7 +298,7 @@ class Base_Optimizer(ABC):
         return x_values, y_values
     
     def plot_optimization_trace(self, metric_x: str, metric_y: str, save_path: Path | None = None, show: bool = False) -> Tuple[torch.Tensor, torch.Tensor] | None:
-        logger = logging.getLogger("SymXplorer.plotter")
+        logger = logging.getLogger("SpiceXplorer.plotter")
         if len(self.optimization_log) < 1:
             logger.warning("No optimization log to plot")
             return None
@@ -435,7 +435,7 @@ class Spice_Base_Optimizer(Base_Optimizer):
         Plot the score value for a specific target spec over the optimization trials.
         Includes target spec value, tolerance band, and error type information.
         """
-        logger = logging.getLogger("SymXplorer.plotter")
+        logger = logging.getLogger("SpiceXplorer.plotter")
         if len(self.optimization_log) < 1:
             logger.warning("No optimization log to plot")
             return

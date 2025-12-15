@@ -14,10 +14,10 @@ from ax.service.ax_client       import AxClient, ObjectiveProperties
 from ax.utils.notebook.plotting import init_notebook_plotting, render
 
 # Symxplorer Specific Imports
-from   symxplorer.spice_engine.spicelib   import LTspice_Wrapper
+from   spicexplorer.spice_engine.spicelib   import LTspice_Wrapper
 
-from   symxplorer.designer_tools.symbolic_sizing import Symbolic_Sizing_Assist
-from   symxplorer.designer_tools.utils           import plot_complex_response, get_bode_fitness_loss, Transfer_Func_Helper, Frequency_Weight, UNIT_DICT
+from   spicexplorer.designer_tools.symbolic_sizing import Symbolic_Sizing_Assist
+from   spicexplorer.designer_tools.utils           import plot_complex_response, get_bode_fitness_loss, Transfer_Func_Helper, Frequency_Weight, UNIT_DICT
 
 
 s = sp.symbols("s")

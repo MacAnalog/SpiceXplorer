@@ -9,8 +9,8 @@ from    pathlib     import Path
 from    abc         import ABC, abstractmethod
 
 # Symxplorer Specific Imports
-from    symxplorer.spice_engine              import Spicelib_Wrapper, Sim_Execution_Type
-from    symxplorer.designer_tools.domains    import Project_Setup
+from    spicexplorer.spice_engine              import Spicelib_Wrapper, Sim_Execution_Type
+from    spicexplorer.designer_tools.domains    import Project_Setup
 
 from    .base           import Spice_Base_Optimizer, Base_Optimizer
 from    .nevergrad      import Nevergrad_Spice_Bode_Optimizer, Nevergrad_Spice_Constraint_Satisfaction,  Nevergrad_Spice_Single_Objective
@@ -18,7 +18,7 @@ from    .bayesian_ax    import Ax_Spice_Constraint_Satisfaction, Ax_Spice_Single
 
 # ------------------ Module Logger ------------------
 
-logger = logging.getLogger("SymXplorer.orchestrator")
+logger = logging.getLogger("SpiceXplorer.orchestrator")
 
 
 # ------------------ Enums ------------------

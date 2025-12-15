@@ -7,12 +7,12 @@ import nevergrad    as ng
 from    typing      import Dict, Tuple, Any, Mapping
 
 # Symxplorer Specific Imports
-from   symxplorer.spice_engine.spicelib     import Spicelib_Wrapper
-from   symxplorer.designer_tools.domains    import Project_Setup
+from   spicexplorer.spice_engine.spicelib     import Spicelib_Wrapper
+from   spicexplorer.designer_tools.domains    import Project_Setup
 
-from   symxplorer.optimization.base         import Spice_Constraint_Satisfaction, Spice_Single_Objective, Spice_Bode_Optimizer, Base_Optimizer
+from   spicexplorer.optimization.base         import Spice_Constraint_Satisfaction, Spice_Single_Objective, Spice_Bode_Optimizer, Base_Optimizer
 
-logger = logging.getLogger("SymXplorer.Nevergrad")
+logger = logging.getLogger("SpiceXplorer.Nevergrad")
 logger.debug(f'imported {__name__}')
 
 

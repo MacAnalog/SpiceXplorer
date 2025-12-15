@@ -10,12 +10,12 @@ from ax.api.configs import RangeParameterConfig
 from ax.api.types   import TParameterization
 from ax.api.protocols.metric import IMetric
 # Symxplorer Specific Imports
-from   symxplorer.spice_engine.spicelib     import Spicelib_Wrapper
-from   symxplorer.designer_tools.domains    import Project_Setup
-from   symxplorer.optimization.base         import Spice_Constraint_Satisfaction, Spice_Single_Objective, Spice_Bode_Optimizer, Base_Optimizer
+from   spicexplorer.spice_engine.spicelib     import Spicelib_Wrapper
+from   spicexplorer.designer_tools.domains    import Project_Setup
+from   spicexplorer.optimization.base         import Spice_Constraint_Satisfaction, Spice_Single_Objective, Spice_Bode_Optimizer, Base_Optimizer
 
 
-logger = logging.getLogger("SymXplorer.Ax")
+logger = logging.getLogger("SpiceXplorer.Ax")
 logger.debug(f'imported {__name__}')
 
 
@@ -52,7 +52,7 @@ class Ax_Client_Mixin(Base_Optimizer):
         # (1) Ax - create the client
         client = Client(random_seed=self.optimizer_config.random_seed, storage_config=None)
         # (2) Ax - add the parameterization
-        client.configure_experiment(parameters=self.parametrization, name="SymXplorer-Experiment")
+        client.configure_experiment(parameters=self.parametrization, name="SpiceXplorer-Experiment")
         # (3) Ax - Configure the objective
         client.configure_optimization(objective=SCORE_METRIC_NAME) # maxmimize the "score"
         # (4) Ax - Add tracking metrics
