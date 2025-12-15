@@ -1,6 +1,8 @@
 import logging
 import os
 import pickle
+import random
+
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -15,7 +17,6 @@ logger = logging.getLogger("SpiceXplorer")
 class BaseActor(torch.nn.Module, ABC):
     """Abstract base class for actor networks."""
 
-    @abstractmethod
     def __init__(
         self,
         state_dim: int,
@@ -31,6 +32,11 @@ class BaseActor(torch.nn.Module, ABC):
             hyperparams: Dictionary of hyperparameters.
         """
         super().__init__()
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.seed = seed
+        self.hyperparams = hyperparams
+        torch.manual_seed(seed)
 
     @abstractmethod
     def forward(self, state: torch.Tensor) -> torch.Tensor:
@@ -46,7 +52,6 @@ class BaseActor(torch.nn.Module, ABC):
 class BaseCritic(torch.nn.Module, ABC):
     """Abstract base class for critic networks."""
 
-    @abstractmethod
     def __init__(
         self,
         state_dim: int,
@@ -62,6 +67,11 @@ class BaseCritic(torch.nn.Module, ABC):
             hyperparams: Dictionary of hyperparameters.
         """
         super().__init__()
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.seed = seed
+        self.hyperparams = hyperparams
+        torch.manual_seed(seed)
 
     @abstractmethod
     def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
@@ -119,6 +129,7 @@ class BaseRLAgent(ABC):
         reward: float,
         next_state: np.ndarray,
         done: bool,
+        info: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Process a single step of the environment."""
         raise NotImplementedError

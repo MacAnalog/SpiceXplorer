@@ -1,5 +1,4 @@
 import logging
-import random
 from typing import Optional
 
 import numpy as np
@@ -105,9 +104,10 @@ class DDPGAgent(BaseRLAgent):
         reward: float,
         next_state: np.ndarray,
         done: bool,
+        info: Optional[dict] = None,
     ):
         """Save experience in replay memory, and use random sample from buffer to learn."""
-        self.memory.add(state, action, reward, next_state, done)
+        self.memory.add(state, action, reward, next_state, done, info)
         self.total_env_steps += 1
 
         self.t_step = (self.t_step + 1) % self.hyperparams.training.update_every
@@ -167,7 +167,7 @@ class DDPGAgent(BaseRLAgent):
         states, actions, rewards, next_states, dones = experiences
 
         # Update critic
-        actions_next = self.actor_target(.next_states)
+        actions_next = self.actor_target(next_states)
         Q_targets_next = self.critic_target(next_states, actions_next)
         Q_targets = rewards + (gamma * Q_targets_next * (1 - dones))
         Q_expected = self.critic_local(states, actions)

@@ -1,16 +1,24 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Any
 
 from .base import BaseActor, BaseCritic
+from .hyperparameters import DDPGHyperparameters
 
-class Actor(BaseActor):
-    def __init__(self, state_dim: int, action_dim: int, seed: int, hyperparams: Dict[str, Any]):
-        super().__init__(state_dim, action_dim, seed)
-        self.seed = torch.manual_seed(seed)
-        hidden_units = hyperparams.get("hidden_units_actor", (256, 128))
-        
+# ------------------------
+# Actor (Policy) Model
+# ------------------------
+class MLPActor(BaseActor):
+    def __init__(
+        self,
+        state_dim: int,
+        action_dim: int,
+        seed: int,
+        hyperparams: DDPGHyperparameters,
+    ):
+        super().__init__(state_dim, action_dim, seed, hyperparams)
+        hidden_units = hyperparams.actor.hidden_units
+
         layers = []
         input_dim = state_dim
         for hidden_dim in hidden_units:
@@ -18,7 +26,7 @@ class Actor(BaseActor):
             layers.append(nn.ReLU())
             input_dim = hidden_dim
         layers.append(nn.Linear(input_dim, action_dim))
-        
+
         self.network = nn.Sequential(*layers)
         self.network.apply(self._init_weights)
 
@@ -30,11 +38,21 @@ class Actor(BaseActor):
     def forward(self, state):
         return F.tanh(self.network(state))
 
-class Critic(BaseCritic):
-    def __init__(self, state_dim: int, action_dim: int, seed: int, hyperparams: Dict[str, Any]):
-        super().__init__(state_dim, action_dim, seed)
-        self.seed = torch.manual_seed(seed)
-        hidden_units = hyperparams.get("hidden_units_critic", (256, 128))
+
+
+# ------------------------
+# Critic (Value) Model
+# ------------------------
+class MLPCritic(BaseCritic):
+    def __init__(
+        self,
+        state_dim: int,
+        action_dim: int,
+        seed: int,
+        hyperparams: DDPGHyperparameters,
+    ):
+        super().__init__(state_dim, action_dim, seed, hyperparams)
+        hidden_units = hyperparams.critic.hidden_units
 
         # Q1 architecture
         layers1 = []
@@ -55,3 +73,4 @@ class Critic(BaseCritic):
 
     def forward(self, state, action):
         return self.net1(torch.cat([state, action], dim=1))
+    

@@ -1,4 +1,6 @@
 import random
+from typing import Any, Dict, Optional
+
 import torch
 import numpy as np
 from collections import deque, namedtuple
@@ -20,7 +22,7 @@ class ReplayBuffer:
         """
         self.memory = deque(maxlen=buffer_size)
         self.batch_size = batch_size
-        self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
+        self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done", "info"])
         self.device = device
         if seed is not None:
             random.seed(seed)
@@ -28,9 +30,9 @@ class ReplayBuffer:
         logger.info(f"Replay buffer initialized with size {buffer_size} and batch size {batch_size}")
 
 
-    def add(self, state: np.ndarray, action: np.ndarray, reward: float, next_state: np.ndarray, done: bool):
+    def add(self, state: np.ndarray, action: np.ndarray, reward: float, next_state: np.ndarray, done: bool, info: Optional[Dict[str, Any]] = None):
         """Add a new experience to memory."""
-        e = self.experience(state, action, reward, next_state, done)
+        e = self.experience(state, action, reward, next_state, done, info)
         self.memory.append(e)
 
     def sample(self):
