@@ -18,10 +18,10 @@ from    sympy       import Expr
 
 # Symxplorer Specific Imports
 from   spicexplorer.spice_engine.spicelib     import NGSpice_Wrapper
-from   spicexplorer.designer_tools.domains    import Project_Setup, ListTargetSpec, TargetSpec, Error_Types
-from   spicexplorer.designer_tools.domains    import OptimizationGoalType, OptimizationPoint, OptimizationLogEntry, OptimizationLog
-from   spicexplorer.designer_tools.utils      import compute_error, compute_reward, convert_linear_to_log, log_denormalize, linear_denormalize
-from   spicexplorer.designer_tools.utils      import plot_complex_response, get_bode_fitness_loss, Transfer_Func_Helper, Frequency_Weight, UNIT_DICT
+from   spicexplorer.core.domains    import Project_Setup, ListTargetSpec, TargetSpec, Error_Types
+from   spicexplorer.core.domains    import OptimizationGoalType, OptimizationPoint, OptimizationLogEntry, OptimizationLog
+from   spicexplorer.core.utils      import compute_error, compute_reward, convert_linear_to_log, log_denormalize, linear_denormalize
+from   spicexplorer.core.utils      import plot_complex_response, get_bode_fitness_loss, Transfer_Func_Helper, Frequency_Weight, UNIT_DICT
 
 logger = logging.getLogger("SpiceXplorer.base_optimizer")
 

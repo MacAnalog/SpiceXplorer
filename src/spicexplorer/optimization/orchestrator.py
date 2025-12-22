@@ -10,7 +10,7 @@ from    abc         import ABC, abstractmethod
 
 # Symxplorer Specific Imports
 from    spicexplorer.spice_engine              import NGSpice_Wrapper, Sim_Execution_Type
-from    spicexplorer.designer_tools.domains    import Project_Setup
+from    spicexplorer.core.domains    import Project_Setup
 
 from    .base           import Spice_Base_Optimizer, Base_Optimizer
 from    .stochastic.nevergrad      import Nevergrad_Spice_Bode_Optimizer, Nevergrad_Spice_Constraint_Satisfaction,  Nevergrad_Spice_Single_Objective

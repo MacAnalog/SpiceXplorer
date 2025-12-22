@@ -24,6 +24,11 @@ class SimType(str, Enum):
     TRAN = "tran"
     NOISE = "noise"
 
+class SpiceSimulatorType(Enum):
+    SPECTRE = "spectre"
+    HSPICE  = "hspice"
+    NGSPICE = "ngspice"
+
 class OptimizationGoalType(str, Enum):
     EXACT    = "exact"
     EXCEED   = "exceed"
@@ -62,13 +67,20 @@ class Reward_Types(str, Enum):
     def is_relative(self) -> bool:
         return "relative" in self.value
 
-class Reward_Types(str, Enum):
-    ABSOLUTE = "absolute"
-    RELATIVE_ABSOLUTE = "relative-absolute"
-    RELATIVE_SIGMOID = "relative-sigmoid"
+class NoiseType(str, Enum):
+    GAUSSIAN = "gaussian"
+    OU = "ou"  # Ornstein-Uhlenbeck
 
-    def is_relative(self) -> bool:
-        return "relative" in self.value
+class AgentType(str, Enum):
+    "RL Agent Types Supported by SpiceExplorer"
+    # Standard SB3 Agents
+    PPO = "ppo"
+    SAC = "sac"
+    DDPG = "ddpg"
+    TD3 = "td3"
+    # Placeholder for user-defined
+    CUSTOM_DDPG = "custom-ddpg"
+    CUSTOM_SAC = "custom-sac"
 
 # ------------------ Constants ------------------
 

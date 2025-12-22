@@ -3,7 +3,7 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Type, TypeVar, Tuple
 
 from  .enums import NoiseType
-from  .enums import SpiceSimulatorType, SpiceAnalysisType
+from  spicexplorer.core.domains import SpiceSimulatorType
 
 T = TypeVar("T")
 
@@ -72,34 +72,12 @@ class CriticMLPHyperparameters(BaseHyperparameters):
 
 # [DDPG] Hyperparameters
 @dataclass
-class DDPGHyperparameters(BaseHyperparameters):
+class DDPGConfig(BaseHyperparameters):
     actor: ActorMLPHyperparameters = field(default_factory=ActorMLPHyperparameters)
     critic: CriticMLPHyperparameters = field(default_factory=CriticMLPHyperparameters)
     noise: NoiseHyperparameters = field(default_factory=NoiseHyperparameters)
     memory: MemoryHyperparameters = field(default_factory=MemoryHyperparameters)
     training: TrainingHyperparameters = field(default_factory=TrainingHyperparameters)
-
-    # [Optional]
-    def to_dict(self) -> dict:
-        """Converts the hyperparameters to a dictionary for compatibility."""
-        return {
-            "lr_actor": self.actor.lr,
-            "hidden_units_actor": self.actor.hidden_units,
-            "lr_critic": self.critic.lr,
-            "weight_decay_critic": self.critic.weight_decay,
-            "grad_clip_critic": self.critic.grad_clip,
-            "hidden_units_critic": self.critic.hidden_units,
-            "noise_type": self.noise.type,
-            "noise_sigma_initial": self.noise.sigma_initial,
-            "noise_sigma_min": self.noise.sigma_min,
-            "noise_sigma_decay": self.noise.sigma_decay,
-            "buffer_size": self.memory.buffer_size,
-            "batch_size": self.memory.batch_size,
-            "gamma": self.training.gamma,
-            "tau": self.training.tau,
-            "update_every": self.training.update_every,
-            "initial_random_steps": self.training.initial_random_steps,
-        }
 
 # [SAC] Hyperparameters
 @dataclass
@@ -110,33 +88,12 @@ class AlphaHyperparameters(BaseHyperparameters):
     lr_alpha: float = 0.0003
 
 @dataclass
-class SACHyperparameters(BaseHyperparameters):
+class SACConfig(BaseHyperparameters):
     actor: ActorMLPHyperparameters = field(default_factory=ActorMLPHyperparameters)
     critic: CriticMLPHyperparameters = field(default_factory=CriticMLPHyperparameters)
     alpha: AlphaHyperparameters = field(default_factory=AlphaHyperparameters)
     memory: MemoryHyperparameters = field(default_factory=MemoryHyperparameters)
     training: TrainingHyperparameters = field(default_factory=TrainingHyperparameters)
-
-    def to_dict(self) -> dict:
-        """Converts the hyperparameters to a dictionary for compatibility."""
-        return {
-            "lr_actor": self.actor.lr,
-            "hidden_units_actor": self.actor.hidden_units,
-            "lr_critic": self.critic.lr,
-            "weight_decay_critic": self.critic.weight_decay,
-            "grad_clip_critic": self.critic.grad_clip,
-            "hidden_units_critic": self.critic.hidden_units,
-            "learn_alpha": self.alpha.learn_alpha,
-            "alpha_init": self.alpha.alpha_init,
-            "lr_alpha": self.alpha.lr_alpha,
-            "buffer_size": self.memory.buffer_size,
-            "batch_size": self.memory.batch_size,
-            "gamma": self.training.gamma,
-            "tau": self.training.tau,
-            "update_every": self.training.update_every,
-            "initial_random_steps": self.training.initial_random_steps,
-            "policy_update_freq": self.training.policy_update_freq,
-        }
 
 
 # Environment Hyperparameters

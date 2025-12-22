@@ -11,7 +11,7 @@ from ax.api.types   import TParameterization
 from ax.api.protocols.metric import IMetric
 # Symxplorer Specific Imports
 from   spicexplorer.spice_engine.spicelib     import NGSpice_Wrapper
-from   spicexplorer.designer_tools.domains    import Project_Setup
+from   spicexplorer.core.domains    import Project_Setup
 from   spicexplorer.optimization.base         import Spice_Constraint_Satisfaction, Spice_Single_Objective, Spice_Bode_Optimizer, Base_Optimizer
 
 

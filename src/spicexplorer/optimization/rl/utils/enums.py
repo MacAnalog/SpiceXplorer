@@ -8,14 +8,8 @@ class NoiseType(Enum):
     UNIFORM = "uniform"
 
 # --------------------------------------------
-# RL Specific
+# Custom RL Specific
 # --------------------------------------------
-class AgentType(Enum):
-    DDPG = "ddpg"
-    PPO = "ppo"
-    SAC = "sac"
-    TD3 = "td3"
-    A2C = "a2c"
 
 class ActorCriticType(Enum):
     MLP = "mlp"
@@ -32,18 +26,4 @@ class ExplorationStrategy(Enum):
     EPSILON_GREEDY = "epsilon_greedy"
     NOISE_ADDITION = "noise_addition"
     PARAMETER_NOISE = "parameter_noise"
-
-# --------------------------------------------
-# Simulation Specific
-# --------------------------------------------
-class SpiceSimulatorType(Enum):
-    SPECTRE = "spectre"
-    HSPICE  = "hspice"
-    NGSPICE = "ngspice"
-
-class SpiceAnalysisType(Enum):
-    DC      = "dc"
-    AC      = "ac"
-    TRANSIENT = "transient"
-    NOISE  = "noise"
 

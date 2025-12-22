@@ -4,7 +4,7 @@ import control as ctrl
 import sympy  as sp
 from   typing import Dict, Tuple, Callable
 
-from spicexplorer.designer_tools.domains import OptimizationGoalType, Error_Types, Reward_Types
+from spicexplorer.core.domains import OptimizationGoalType, Error_Types, Reward_Types
 
 # Plotting Tools
 import plotly.graph_objects as go

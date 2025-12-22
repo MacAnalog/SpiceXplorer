@@ -11,7 +11,7 @@ from ..models.base import BaseActor, BaseCritic
 from ..models.actor import MLPActor
 from ..models.critic import MLPCritic
 
-from ..utils.hyperparameters import DDPGHyperparameters
+from ..utils.hyperparameters import DDPGConfig
 from ..utils.replay_buffer import ReplayBuffer
 from ..utils.utils import trunc_normal
 from ..utils.typing import ExperienceBatch
@@ -31,7 +31,7 @@ class DDPGAgent(BaseActorCriticRLAgent):
         action_dim: int,
         actor_model_class: MLPActor,
         critic_model_class: MLPCritic,
-        hyperparams: DDPGHyperparameters,
+        hyperparams: DDPGConfig,
         device: torch.device,
         seed: int = 0,
         model_load_path: Optional[str] = None,

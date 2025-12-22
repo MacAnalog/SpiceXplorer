@@ -1,7 +1,7 @@
-from .agents.ddpg import DDPGAgent
-from .utils.hyperparameters import DDPGHyperparameters
+from .custom_agents.ddpg import DDPGAgent
+from .utils.hyperparameters import DDPGConfig
 
 __all__ = [
     "DDPGAgent",
-    "DDPGHyperparameters",
+    "DDPGConfig",
 ]

@@ -9,7 +9,7 @@ from typing import Tuple
 from spicexplorer.optimization.rl.models.base import BaseActor, BaseCritic
 
 from .base import BaseActorCriticRLAgent
-from ..utils.hyperparameters import SACHyperparameters
+from ..utils.hyperparameters import SACConfig
 from ..utils.replay_buffer import ReplayBuffer
 from ..utils.typing import ExperienceBatch
 
@@ -28,7 +28,7 @@ class SACAgent(BaseActorCriticRLAgent):
                  action_dim: int,
                  actor_model_class,
                  critic_model_class,
-                 hyperparams: SACHyperparameters,
+                 hyperparams: SACConfig,
                  device: torch.device,
                  seed: int = 0,
                  model_load_path: str = None

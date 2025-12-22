@@ -1,8 +1,8 @@
-from spicexplorer.optimization.rl.utils.hyperparameters import DDPGHyperparameters
+from spicexplorer.optimization.rl.utils.hyperparameters import DDPGConfig
 
 # Load hyperparameters from the YAML file
 try:
-    hyperparams = DDPGHyperparameters.from_yaml("tests/ddpg_hyperparameters.yaml")
+    hyperparams = DDPGConfig.from_yaml("tests/ddpg_hyperparameters.yaml")
 
     # Print the loaded hyperparameters
     print("Loaded DDPG Hyperparameters:")

@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .base import BaseActor
-from ..utils.hyperparameters import DDPGHyperparameters
+from ..utils.hyperparameters import DDPGConfig
 
 # ------------------------
 # Multi-Layer Perceptron Actor Model
@@ -14,7 +14,7 @@ class MLPActor(BaseActor):
         state_dim: int,
         action_dim: int,
         seed: int,
-        hyperparams: DDPGHyperparameters,
+        hyperparams: DDPGConfig,
     ):
         super().__init__(state_dim, action_dim, seed, hyperparams)
         hidden_units = hyperparams.actor.hidden_units
