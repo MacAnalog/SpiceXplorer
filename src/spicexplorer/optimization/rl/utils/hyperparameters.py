@@ -3,6 +3,7 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Type, TypeVar, Tuple
 
 from  .enums import NoiseType
+from  .enums import SpiceSimulatorType, SpiceAnalysisType
 
 T = TypeVar("T")
 
@@ -136,3 +137,23 @@ class SACHyperparameters(BaseHyperparameters):
             "initial_random_steps": self.training.initial_random_steps,
             "policy_update_freq": self.training.policy_update_freq,
         }
+
+
+# Environment Hyperparameters
+@dataclass 
+class SpiceSimulatorHyperparameters(BaseHyperparameters):
+    simulator_type: str = SpiceSimulatorType.NGSPICE.value
+    simulator_bin_path: str = "/usr/bin/ngspice"  # Path to the SPICE simulator executable
+
+@dataclass
+class EnvHyperparameters(BaseHyperparameters):
+    circuit_netlist_path: str = "path/to/circuit.net"
+    param_space_path: str     = "path/to/param_space.yaml"
+    target_specs_path: str    = "path/to/target_specs.yaml"
+
+    max_episode_steps: int          = 1000
+    normalize_observations: bool    = True
+    normalize_actions: bool         = True
+    seed: int                       = 23
+    
+    simulator_config: SpiceSimulatorHyperparameters = field(default_factory=SpiceSimulatorHyperparameters)

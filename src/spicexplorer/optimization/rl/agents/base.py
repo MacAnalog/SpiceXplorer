@@ -55,6 +55,8 @@ class BaseRLAgent(ABC):
             torch.manual_seed(self.seed)
             np.random.seed(self.seed)
             random.seed(self.seed)
+
+        self._configure_model_save()
     
     # ----------------------------------------
     # Abstract Methods
@@ -82,6 +84,12 @@ class BaseRLAgent(ABC):
         """Update the agent's networks."""
         raise NotImplementedError
 
+    # Private Abstract Methods
+    @abstractmethod
+    def _configure_model_save(self):
+        """Configures self.models, self.optimizers, and self.agent_var_keys to be saved/loaded."""
+        raise NotImplementedError
+    
     # ----------------------------------------
     # Implemented Methods
     # ----------------------------------------
@@ -179,10 +187,5 @@ class BaseActorCriticRLAgent(BaseRLAgent):
 
     @abstractmethod
     def _create_critic(self, critic_model_class: BaseCritic):
-        """Instantiates the agent's Actor"""
-        raise NotImplementedError
-    
-    @abstractmethod
-    def _configure_model_save(self):
-        """Configures self.models, self.optimizers, and self.agent_var_keys to be saved/loaded."""
+        """Instantiates the agent's Critic"""
         raise NotImplementedError

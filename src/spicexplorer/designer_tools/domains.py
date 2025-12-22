@@ -31,7 +31,9 @@ class OptimizationGoalType(str, Enum):
 
 class OptimizerType(str, Enum):
     NEVERGRAD = "nevergrad"
-
+    BAYESIAN_AX = "bayesian_ax"
+    RL = "reinforcement_learning"
+    
 class SpicePlotType(str, Enum):
     OP = "Operating Point"
     TRANSIENT = "tran"

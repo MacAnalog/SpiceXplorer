@@ -76,11 +76,11 @@ class DDPGAgent(BaseActorCriticRLAgent):
     
     # Abstract method overwrite [Private]
     def _create_actor(self, actor_model_class: BaseActor):
-        self.actor_local = actor_model_class(
+        self.actor_local : BaseActor = actor_model_class(
             self.state_dim, self.action_dim, seed=self.seed, hyperparams=self.hyperparams.actor
         ).to(self.device)
-        
-        self.actor_target = actor_model_class(
+
+        self.actor_target : BaseActor = actor_model_class(
             self.state_dim, self.action_dim, seed=self.seed, hyperparams=self.hyperparams.actor
         ).to(self.device)
 
@@ -92,11 +92,11 @@ class DDPGAgent(BaseActorCriticRLAgent):
 
     def _create_critic(self, critic_model_class: BaseCritic):
 
-        self.critic_local = critic_model_class(
+        self.critic_local : BaseCritic = critic_model_class(
             self.state_dim, self.action_dim, seed=self.seed, hyperparams=self.hyperparams.critic
         ).to(self.device)
 
-        self.critic_target = critic_model_class(
+        self.critic_target : BaseCritic = critic_model_class(
             self.state_dim, self.action_dim, seed=self.seed, hyperparams=self.hyperparams.critic
         ).to(self.device)
 

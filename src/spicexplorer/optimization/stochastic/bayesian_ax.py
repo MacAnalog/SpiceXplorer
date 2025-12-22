@@ -15,7 +15,7 @@ from   spicexplorer.designer_tools.domains    import Project_Setup
 from   spicexplorer.optimization.base         import Spice_Constraint_Satisfaction, Spice_Single_Objective, Spice_Bode_Optimizer, Base_Optimizer
 
 
-logger = logging.getLogger("SpiceXplorer.Ax")
+logger = logging.getLogger("SpiceXplorer.optimization.stochastic.bayesian_ax")
 logger.debug(f'imported {__name__}')
 
 

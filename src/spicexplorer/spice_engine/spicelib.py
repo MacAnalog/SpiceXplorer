@@ -35,7 +35,6 @@ class Sim_Engines_Type(Enum):
     NGSPICE = "ngspice"
     XYCE    = "xyce"
 
-
 class Sim_Execution_Type(Enum):
     RUN_AND_WAIT        = "RUN_AND_WAIT"
     RUN_NOW             = "RUN_NOW"
@@ -44,6 +43,8 @@ class Sim_Execution_Type(Enum):
 class Ngspice_Plot_Type(Enum):
     AC = "AC Analysis"
     OP = "OP"
+    DC = "DC"
+
 # ---------------------------------
 # Class Definitions
 # ---------------------------------

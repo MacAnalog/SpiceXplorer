@@ -32,3 +32,18 @@ class ExplorationStrategy(Enum):
     EPSILON_GREEDY = "epsilon_greedy"
     NOISE_ADDITION = "noise_addition"
     PARAMETER_NOISE = "parameter_noise"
+
+# --------------------------------------------
+# Simulation Specific
+# --------------------------------------------
+class SpiceSimulatorType(Enum):
+    SPECTRE = "spectre"
+    HSPICE  = "hspice"
+    NGSPICE = "ngspice"
+
+class SpiceAnalysisType(Enum):
+    DC      = "dc"
+    AC      = "ac"
+    TRANSIENT = "transient"
+    NOISE  = "noise"
+
