@@ -370,6 +370,70 @@ class VariableBoundConfig:
     def get_min_max(self) -> Tuple[float, float]:
         return (self.min, self.max)
 
+# ------------------ RL Configuration Objects ------------------
+
+@dataclass
+class NoiseConfig:
+    type: str = NoiseType.GAUSSIAN.value
+    sigma_initial: float = 0.2
+    sigma_min: float = 0.01
+    sigma_decay: float = 0.995
+
+@dataclass
+class ReplayBufferConfig:
+    buffer_size: int = 100000
+    batch_size: int = 64
+
+@dataclass
+class RLTrainingConfig:
+    """Contains training loop settings and environment wrapper settings."""
+    gamma: float = 0.99
+    tau: float = 0.005
+    update_every: int = 1
+    initial_random_steps: int = 1000
+    policy_update_freq: int = 2
+    # Moved from EnvHyperparameters
+    max_episode_steps: int = 1000
+    normalize_observations: bool = True
+    normalize_actions: bool = True
+
+@dataclass
+class NetworkConfig:
+    """Generic config for Actor or Critic networks."""
+    lr: float = 0.001
+    hidden_units: Tuple[int, ...] = (256, 128)
+    weight_decay: float = 0.0
+    grad_clip: float = 1.0
+
+# --- Specific Agent Configs ---
+
+@dataclass
+class SACAlphaConfig:
+    learn_alpha: bool = True
+    alpha_init: float = 0.2
+    lr_alpha: float = 0.0003
+
+@dataclass
+class AgentConfig:
+    """Base interface for agent settings."""
+    pass
+
+@dataclass
+class DDPGConfig(AgentConfig):
+    actor: NetworkConfig = field(default_factory=NetworkConfig)
+    critic: NetworkConfig = field(default_factory=NetworkConfig)
+    noise: NoiseConfig = field(default_factory=NoiseConfig)
+    memory: ReplayBufferConfig = field(default_factory=ReplayBufferConfig)
+    training: RLTrainingConfig = field(default_factory=RLTrainingConfig)
+
+@dataclass
+class SACConfig(AgentConfig):
+    actor: NetworkConfig = field(default_factory=NetworkConfig)
+    critic: NetworkConfig = field(default_factory=NetworkConfig)
+    alpha: SACAlphaConfig = field(default_factory=SACAlphaConfig)
+    memory: ReplayBufferConfig = field(default_factory=ReplayBufferConfig)
+    training: RLTrainingConfig = field(default_factory=RLTrainingConfig)
+
 @dataclass
 class OptimizerConfig:
     name: str # Optimization algorithm name

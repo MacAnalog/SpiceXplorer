@@ -683,10 +683,18 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
 # A.2 [ABSTRACT] Constraint Satisfaction
 # ------------------------------------------------
 class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
-    """ Nevergrad Optimizer that uses the perfomance metrics computed in SPICE simulations to size a circuit. """
     def __init__(self,
                  setup_obj: Project_Setup,
                  spicelib_wrapper : NGSpice_Wrapper):
+        """ 
+        A Concrete implementation of Spice_Base_Optimizer that evaluates a circuit 
+        against a list of TargetSpecs.
+        
+        This class implements the 'evaluate' and 'compute_fitness' methods to:
+        1. Run the simulation.
+        2. Extract scalar metrics defined in TargetSpecs.
+        3. Calculate a scalar fitness score (Penalty only).
+        """
         super().__init__(setup_obj = setup_obj, spicelib_wrapper = spicelib_wrapper)
         self.target_specs: ListTargetSpec = setup_obj.optimizer_config.target_specs
         logger.info(f"Initialized the Nevergrad_Spice_Multi_Spec_Optimizer with {len(self.target_specs.targets)} target specs")
