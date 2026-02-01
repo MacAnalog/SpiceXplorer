@@ -2,7 +2,7 @@
 *----------------------------------------------------------*
 * Parameter Definitions
 *----------------------------------------------------------*
-.param x_dut_ x_dut_W_1 = 72u
+.param  x_dut_W_1 = 72u
 .param  x_dut_L_1 = 2u
 .param  x_dut_NG_1 = 8
 .param  x_dut_W_2 = 106.5u
@@ -40,109 +40,145 @@
 * Control Block
 *----------------------------------------------------------*
 .control
+  echo ==================================
+  echo start of Control
+  echo ==================================
+
   set filetype=ascii
   set wr_singlescale
-  option numdgt = 6
-  reset
+  option numdgt = 3
+  * reset
 
-  save @V1[i]  * Save DC current of V1
-  save @n.x1.XM0.nsg13_lv_pmos[gm]
-  save @n.x1.XM1.nsg13_lv_pmos[gm]
-  save @n.x1.XM2.nsg13_lv_pmos[gm]
-  save @n.x1.XM3.nsg13_lv_nmos[gm]
-  save @n.x1.XM4.nsg13_lv_nmos[gm]
-  save @n.x1.XM5.nsg13_lv_nmos[gm]
-  save @n.x1.XM6.nsg13_lv_nmos[gm]
-  save @n.x1.XM7.nsg13_lv_pmos[gm]
-  save @n.x1.XM8.nsg13_lv_pmos[gm]
-  save @n.x1.XM9.nsg13_lv_pmos[gm]
-  save @n.x1.XM10.nsg13_lv_pmos[gm]
-  save @n.x1.XM11.nsg13_lv_pmos[gm]
-  save @n.x1.XM12.nsg13_lv_pmos[gm]
-  save @n.x1.XM13.nsg13_lv_nmos[gm]  
-  save @n.x1.XM0.nsg13_lv_pmos[gds]
-  save @n.x1.XM1.nsg13_lv_pmos[gds]
-  save @n.x1.XM2.nsg13_lv_pmos[gds]
-  save @n.x1.XM3.nsg13_lv_nmos[gds]
-  save @n.x1.XM4.nsg13_lv_nmos[gds]
-  save @n.x1.XM5.nsg13_lv_nmos[gds]
-  save @n.x1.XM6.nsg13_lv_nmos[gds]
-  save @n.x1.XM7.nsg13_lv_pmos[gds]
-  save @n.x1.XM8.nsg13_lv_pmos[gds]
-  save @n.x1.XM9.nsg13_lv_pmos[gds]
-  save @n.x1.XM10.nsg13_lv_pmos[gds]
-  save @n.x1.XM11.nsg13_lv_pmos[gds]
-  save @n.x1.XM12.nsg13_lv_pmos[gds]
-  save @n.x1.XM13.nsg13_lv_nmos[gds]  
-  save @n.x1.XM0.nsg13_lv_pmos[ids]
-  save @n.x1.XM1.nsg13_lv_pmos[ids]
-  save @n.x1.XM2.nsg13_lv_pmos[ids]
-  save @n.x1.XM3.nsg13_lv_nmos[ids]
-  save @n.x1.XM4.nsg13_lv_nmos[ids]
-  save @n.x1.XM5.nsg13_lv_nmos[ids]
-  save @n.x1.XM6.nsg13_lv_nmos[ids]
-  save @n.x1.XM7.nsg13_lv_pmos[ids]
-  save @n.x1.XM8.nsg13_lv_pmos[ids]
-  save @n.x1.XM9.nsg13_lv_pmos[ids]
-  save @n.x1.XM10.nsg13_lv_pmos[ids]
-  save @n.x1.XM11.nsg13_lv_pmos[ids]
-  save @n.x1.XM12.nsg13_lv_pmos[ids]
-  save @n.x1.XM13.nsg13_lv_nmos[ids]  
-  save @n.x1.XM0.nsg13_lv_pmos[vds]
-  save @n.x1.XM1.nsg13_lv_pmos[vds]
-  save @n.x1.XM2.nsg13_lv_pmos[vds]
-  save @n.x1.XM3.nsg13_lv_nmos[vds]
-  save @n.x1.XM4.nsg13_lv_nmos[vds]
-  save @n.x1.XM5.nsg13_lv_nmos[vds]
-  save @n.x1.XM6.nsg13_lv_nmos[vds]
-  save @n.x1.XM7.nsg13_lv_pmos[vds]
-  save @n.x1.XM8.nsg13_lv_pmos[vds]
-  save @n.x1.XM9.nsg13_lv_pmos[vds]
-  save @n.x1.XM10.nsg13_lv_pmos[vds]
-  save @n.x1.XM11.nsg13_lv_pmos[vds]
-  save @n.x1.XM12.nsg13_lv_pmos[vds]
-  save @n.x1.XM13.nsg13_lv_nmos[vds]  
-  save @n.x1.XM0.nsg13_lv_pmos[vgs]
-  save @n.x1.XM1.nsg13_lv_pmos[vgs]
-  save @n.x1.XM2.nsg13_lv_pmos[vgs]
-  save @n.x1.XM3.nsg13_lv_nmos[vgs]
-  save @n.x1.XM4.nsg13_lv_nmos[vgs]
-  save @n.x1.XM5.nsg13_lv_nmos[vgs]
-  save @n.x1.XM6.nsg13_lv_nmos[vgs]
-  save @n.x1.XM7.nsg13_lv_pmos[vgs]
-  save @n.x1.XM8.nsg13_lv_pmos[vgs]
-  save @n.x1.XM9.nsg13_lv_pmos[vgs]
-  save @n.x1.XM10.nsg13_lv_pmos[vgs]
-  save @n.x1.XM11.nsg13_lv_pmos[vgs]
-  save @n.x1.XM12.nsg13_lv_pmos[vgs]
-  save @n.x1.XM13.nsg13_lv_nmos[vgs] 
-  save @n.x1.XM0.nsg13_lv_pmos[vth]
-  save @n.x1.XM1.nsg13_lv_pmos[vth]
-  save @n.x1.XM2.nsg13_lv_pmos[vth]
-  save @n.x1.XM3.nsg13_lv_nmos[vth]
-  save @n.x1.XM4.nsg13_lv_nmos[vth]
-  save @n.x1.XM5.nsg13_lv_nmos[vth]
-  save @n.x1.XM6.nsg13_lv_nmos[vth]
-  save @n.x1.XM7.nsg13_lv_pmos[vth]
-  save @n.x1.XM8.nsg13_lv_pmos[vth]
-  save @n.x1.XM9.nsg13_lv_pmos[vth]
-  save @n.x1.XM10.nsg13_lv_pmos[vth]
-  save @n.x1.XM11.nsg13_lv_pmos[vth]
-  save @n.x1.XM12.nsg13_lv_pmos[vth]
-  save @n.x1.XM13.nsg13_lv_nmos[vth]  
+  * save @V1[i]  * Save DC current of V1
+  * save @n.x1.XM0.nsg13_lv_pmos[gm]
+  * save @n.x1.XM1.nsg13_lv_pmos[gm]
+  * save @n.x1.XM2.nsg13_lv_pmos[gm]
+  * save @n.x1.XM3.nsg13_lv_nmos[gm]
+  * save @n.x1.XM4.nsg13_lv_nmos[gm]
+  * save @n.x1.XM5.nsg13_lv_nmos[gm]
+  * save @n.x1.XM6.nsg13_lv_nmos[gm]
+  * save @n.x1.XM7.nsg13_lv_pmos[gm]
+  * save @n.x1.XM8.nsg13_lv_pmos[gm]
+  * save @n.x1.XM9.nsg13_lv_pmos[gm]
+  * save @n.x1.XM10.nsg13_lv_pmos[gm]
+  * save @n.x1.XM11.nsg13_lv_pmos[gm]
+  * save @n.x1.XM12.nsg13_lv_pmos[gm]
+  * save @n.x1.XM13.nsg13_lv_nmos[gm]  
+  * save @n.x1.XM0.nsg13_lv_pmos[gds]
+  * save @n.x1.XM1.nsg13_lv_pmos[gds]
+  * save @n.x1.XM2.nsg13_lv_pmos[gds]
+  * save @n.x1.XM3.nsg13_lv_nmos[gds]
+  * save @n.x1.XM4.nsg13_lv_nmos[gds]
+  * save @n.x1.XM5.nsg13_lv_nmos[gds]
+  * save @n.x1.XM6.nsg13_lv_nmos[gds]
+  * save @n.x1.XM7.nsg13_lv_pmos[gds]
+  * save @n.x1.XM8.nsg13_lv_pmos[gds]
+  * save @n.x1.XM9.nsg13_lv_pmos[gds]
+  * save @n.x1.XM10.nsg13_lv_pmos[gds]
+  * save @n.x1.XM11.nsg13_lv_pmos[gds]
+  * save @n.x1.XM12.nsg13_lv_pmos[gds]
+  * save @n.x1.XM13.nsg13_lv_nmos[gds]  
+  * save @n.x1.XM0.nsg13_lv_pmos[ids]
+  * save @n.x1.XM1.nsg13_lv_pmos[ids]
+  * save @n.x1.XM2.nsg13_lv_pmos[ids]
+  * save @n.x1.XM3.nsg13_lv_nmos[ids]
+  * save @n.x1.XM4.nsg13_lv_nmos[ids]
+  * save @n.x1.XM5.nsg13_lv_nmos[ids]
+  * save @n.x1.XM6.nsg13_lv_nmos[ids]
+  * save @n.x1.XM7.nsg13_lv_pmos[ids]
+  * save @n.x1.XM8.nsg13_lv_pmos[ids]
+  * save @n.x1.XM9.nsg13_lv_pmos[ids]
+  * save @n.x1.XM10.nsg13_lv_pmos[ids]
+  * save @n.x1.XM11.nsg13_lv_pmos[ids]
+  * save @n.x1.XM12.nsg13_lv_pmos[ids]
+  * save @n.x1.XM13.nsg13_lv_nmos[ids]  
+  * save @n.x1.XM0.nsg13_lv_pmos[vds]
+  * save @n.x1.XM1.nsg13_lv_pmos[vds]
+  * save @n.x1.XM2.nsg13_lv_pmos[vds]
+  * save @n.x1.XM3.nsg13_lv_nmos[vds]
+  * save @n.x1.XM4.nsg13_lv_nmos[vds]
+  * save @n.x1.XM5.nsg13_lv_nmos[vds]
+  * save @n.x1.XM6.nsg13_lv_nmos[vds]
+  * save @n.x1.XM7.nsg13_lv_pmos[vds]
+  * save @n.x1.XM8.nsg13_lv_pmos[vds]
+  * save @n.x1.XM9.nsg13_lv_pmos[vds]
+  * save @n.x1.XM10.nsg13_lv_pmos[vds]
+  * save @n.x1.XM11.nsg13_lv_pmos[vds]
+  * save @n.x1.XM12.nsg13_lv_pmos[vds]
+  * save @n.x1.XM13.nsg13_lv_nmos[vds]  
+  * save @n.x1.XM0.nsg13_lv_pmos[vgs]
+  * save @n.x1.XM1.nsg13_lv_pmos[vgs]
+  * save @n.x1.XM2.nsg13_lv_pmos[vgs]
+  * save @n.x1.XM3.nsg13_lv_nmos[vgs]
+  * save @n.x1.XM4.nsg13_lv_nmos[vgs]
+  * save @n.x1.XM5.nsg13_lv_nmos[vgs]
+  * save @n.x1.XM6.nsg13_lv_nmos[vgs]
+  * save @n.x1.XM7.nsg13_lv_pmos[vgs]
+  * save @n.x1.XM8.nsg13_lv_pmos[vgs]
+  * save @n.x1.XM9.nsg13_lv_pmos[vgs]
+  * save @n.x1.XM10.nsg13_lv_pmos[vgs]
+  * save @n.x1.XM11.nsg13_lv_pmos[vgs]
+  * save @n.x1.XM12.nsg13_lv_pmos[vgs]
+  * save @n.x1.XM13.nsg13_lv_nmos[vgs] 
+  * save @n.x1.XM0.nsg13_lv_pmos[vth]
+  * save @n.x1.XM1.nsg13_lv_pmos[vth]
+  * save @n.x1.XM2.nsg13_lv_pmos[vth]
+  * save @n.x1.XM3.nsg13_lv_nmos[vth]
+  * save @n.x1.XM4.nsg13_lv_nmos[vth]
+  * save @n.x1.XM5.nsg13_lv_nmos[vth]
+  * save @n.x1.XM6.nsg13_lv_nmos[vth]
+  * save @n.x1.XM7.nsg13_lv_pmos[vth]
+  * save @n.x1.XM8.nsg13_lv_pmos[vth]
+  * save @n.x1.XM9.nsg13_lv_pmos[vth]
+  * save @n.x1.XM10.nsg13_lv_pmos[vth]
+  * save @n.x1.XM11.nsg13_lv_pmos[vth]
+  * save @n.x1.XM12.nsg13_lv_pmos[vth]
+  * save @n.x1.XM13.nsg13_lv_nmos[vth]  
+
+  echo
+  echo (A) start of OP
+  echo ----------------------------------
 
   * --- Initial Operating Point ---
   op
   write
   set appendwrite
 
+  echo
+  echo (B) start of AC Sim
+  echo ----------------------------------
   * --- AC Analysis ---
-  save v(vout) 
+  echo (1) Running the AC simulation
   ac dec 10 1 1e12
   * print v(out) 
+
+  echo (2) measuring performance metrics
+  let out_mag = db(out)
+  let out_phase = cphase(out) * 180/pi
+
+  meas ac GMAX max out_mag
+  meas ac DCGAIN MAX out_mag FROM=10 TO=10k
+
+  let f3db = DCGAIN-3
+  meas ac FBW WHEN out_mag=f3db FALL=1
+
+  meas ac unity_gain_phase find out_phase when out_mag=0
+  meas ac UGF when out_mag=0 fall=1
+
+  let PM = (180-unity_gain_phase) % 180
+
+
+  echo ----------------------------------
+  echo END of AC sim
+  echo  ----------------------------------
+
+  echo SAVING SIMULATION RESULTS IN THE RAW FILE  
   remzerovec
   write
 
+  echo ==================================
+  echo END of Control
+  echo ==================================
   quit 
   * ^ This is needed for spicelib (uncommented)
 .endc
@@ -154,8 +190,8 @@
 .subckt opamp vin- vin+ vout vdd ib vss
 
 XM4 net6 net2 vss vss sg13_lv_nmos w= x_dut_W_2 l= x_dut_L_2 ng= x_dut_NG_2 m=1
-XM1 net1 vin+ net7 vdd sg13_lv_pmos w= x_dut_ x_dut_W_1 l= x_dut_L_1 ng= x_dut_NG_1 m=1
-XM2 net1 vin- net6 vdd sg13_lv_pmos w= x_dut_ x_dut_W_1 l= x_dut_L_1 ng= x_dut_NG_1 m=1
+XM1 net1 vin+ net7 vdd sg13_lv_pmos w= x_dut_W_1 l= x_dut_L_1 ng= x_dut_NG_1 m=1
+XM2 net1 vin- net6 vdd sg13_lv_pmos w= x_dut_W_1 l= x_dut_L_1 ng= x_dut_NG_1 m=1
 XM3 net7 net2 vss vss sg13_lv_nmos w= x_dut_W_2 l= x_dut_L_2 ng= x_dut_NG_2 m=1
 XM11 vdd ib ib vdd sg13_lv_pmos w= x_dut_W_6 l= x_dut_L_6 ng= x_dut_NG_6 m=1
 XM0 vdd ib net1 vdd sg13_lv_pmos w= x_dut_W_6 l= x_dut_L_6 ng= x_dut_NG_6 m=1
