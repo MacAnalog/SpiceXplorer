@@ -43,10 +43,11 @@ class Sim_Execution_Type(Enum):
 
 class Ngspice_Plot_Type(Enum):
     AC = "AC Analysis"
-    OP = "OP"
+    OP = "Operating Point"
+    NOISE_1 = "Integrated Noise"
+    NOISE_2 = "Noise Spectral Density Curves"
+    # Below simulation types need to be tested:
     DC = "DC"
-    NOISE_1 = "noise1"
-    NOISE_2 = "noise2"
     TRAN = "TRAN"
 
 # ---------------------------------
@@ -316,7 +317,7 @@ class NGSpice_Wrapper:
         logger.debug(f"✅  All parameters updated successfully")
         return True
     
-    def run_sanity_check(self, use_editor: bool = True, sim_execution_t: Sim_Execution_Type = Sim_Execution_Type.RUN_NOW) -> bool:
+    def run_sanity_check(self, use_editor: bool = True, sim_execution_t: Sim_Execution_Type = Sim_Execution_Type.RUN_NOW, clean_up_after: bool = True) -> bool:
         logger = self.logger
 
         # (1) Pre-body
@@ -382,6 +383,9 @@ class NGSpice_Wrapper:
         if isinstance(self.runner.output_folder, Path):
             logger.debug("📦 Restoring output folder to parent directory")
             self.runner.output_folder = self.runner.output_folder.parent
+
+        # (5) Clean up if needed
+        if clean_up_after: self.clean_up(delete_directories=True)
         
         return True
     
@@ -524,7 +528,7 @@ class NGSpice_Wrapper:
         
         # 3. Extract the data from that specific plot
         try:
-            wave = self.curr_raw.get_wave(wave_name)
+            wave = target_plot.get_wave(wave_name)
         except IndexError as e:
             self.logger.error(f"❌ Waveform '{wave_name}' not found in plot '{plot_type.value}'.")
             raise e
@@ -621,18 +625,69 @@ class NGSpice_Wrapper:
         tb_params  = [(param, editor.get_parameter(param)) for param in params if not "X_DUT" in param]
         return tb_params
     
-    def clean_up(self) -> None:
-        """Cleans up all the files generated during the simulation runs"""
+    def clean_up(self, delete_directories: bool = False, keep_netlist: bool = False, keep_logs: bool = False, keep_raw: bool = False) -> None:
+        """
+        Cleans up the files generated during the simulation runs.
+        
+        Args:
+            delete_directories (bool): If True, removes the entire 'run_X' subdirectories.
+            keep_spice_netlist (bool): If True (and delete_directories is False), preserves .spice files.
+            keep_logs (bool): If True (and delete_directories is False), preserves .log files.
+            keep_raw (bool): If True (and delete_directories is False), preserves .raw files.
+        """
+
+        if delete_directories and (keep_netlist or keep_logs):
+            self.logger.warning("⚠️ 'delete_directories' is True; 'keep_spice_netlist' and 'keep_logs' will be ignored.")
+            keep_netlist = False
+            keep_logs = False
+
+        NETLIST_EXTENSIONS = {'.spice', '.net', '.cir'}
+        LOG_EXTENSIONS = {'.log'}
+        RAW_EXTENSIONS = {'.raw'}
+
         if self.runner is None:
             raise RuntimeError("Runner not initialized")
-        
-        self.runner.cleanup_files()
-        
-        run_folder = self.output_folder / f"run_{self._counter}"
-        if run_folder.exists() and run_folder.is_dir():
-            shutil.rmtree(run_folder)
+                
+        if not self.output_folder.exists():
+            self.logger.warning(f"⚠️ Output folder {self.output_folder} does not exist. Nothing to clean.")
+            return
 
-        self.logger.debug(f"🧹 All simulation files cleaned up successfully {run_folder}")
+        self.logger.info(f"🧹 Starting cleanup in: {self.output_folder}")
+        
+        for item in self.output_folder.iterdir():
+            if item.is_dir():
+                
+                # --- Mode A: Delete entire directory ---
+                if delete_directories:
+                    try:
+                        shutil.rmtree(item)
+                        self.logger.debug(f"\t🗑️  Deleted directory: {item.name}")
+                    except OSError as e:
+                        self.logger.error(f"\t❌ Failed to delete {item.name}: {e}")
+                    continue
+
+                # --- Mode B: Selective File Deletion ---
+                files_deleted = 0
+                for file in item.iterdir():
+                    if not file.is_file():
+                        continue
+
+                    should_delete = True
+                    if keep_netlist   and file.suffix.lower() in NETLIST_EXTENSIONS:    should_delete = False
+                    if keep_logs      and file.suffix.lower() in LOG_EXTENSIONS:        should_delete = False
+                    if keep_raw       and file.suffix.lower() in RAW_EXTENSIONS:        should_delete = False
+
+                    if should_delete:
+                        try:
+                            file.unlink()
+                            files_deleted += 1
+                        except OSError as e:
+                            self.logger.warning(f"\t⚠️ Could not delete {file.name}: {e}")
+                
+                if files_deleted > 0:
+                    self.logger.debug(f"\t✨ Cleaned {files_deleted} files in {item.name}")
+
+        self.logger.info("✅ Cleanup sequence finished")
 
     def get_logger(self) -> logging.Logger:
         if self.logger is None:
