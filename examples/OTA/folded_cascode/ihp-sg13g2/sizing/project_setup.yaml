@@ -29,6 +29,9 @@ project:
       max_pfet_l : 100u
       min_pfet_l : 0.18u
 
+      # supply voltage
+      max_vdd : 1.8
+
   # ------------------------
   # PVT Corners: Define the PVT corners for simulations
   # ------------------------
@@ -39,7 +42,7 @@ project:
       supply: 1.2
 
   # ------------------------
-  # DUT Parameters: Configure the parameters to be sized/optimized
+  # DUT Parameters: Configure the parameters to be sized/optimized ([optional] freeze : true/false)
   # ------------------------
   dut_params :
     # ------------------------
@@ -131,21 +134,42 @@ project:
       # init : 3u
       min_val: min_pfet_l
       max_val: max_pfet_l
+
+    # ------------------------
+    # Biasing Voltages
+    # ------------------------
+    - name : x_dut_Vb1
+      # init : 0.5
+      min_val: 0
+      max_val: max_vdd
+
+    - name : x_dut_Vb1
+      # init : 0.5
+      min_val: 0
+      max_val: max_vdd
+
+    # ------------------------
+    # Biasing Current
+    # ------------------------
+    - name : x_dut_IB
+      # init : 34u
+      min_val: 1u
+      max_val: 100u
+      
   
   # ------------------------
   # Testbench: Configure the testbenches to be used for simulations
   # ------------------------
   testbenches :
-
       # ------------------------
       # Testbench 1 - AC Simulation
       # ------------------------
       - name: tb_ac
         params:
-          - name : icm
-            description : input common mode current
-            val : 0.5e-6
-        netlist : spice/cora_testbench.spice
+          - name : CL
+            description : load capacitance
+            val : 5p
+        netlist : spice/cora_testbench_ac.spice
         enable: True # Optional: Enable or disable this testbench
         description : AC analysis for UGF, Gain, PM
 
@@ -154,25 +178,36 @@ project:
       # ------------------------
       - name: tb_noise
         params:
-          - name : icm
-            description : input common mode current
-            val : 0.5e-6
-        netlist : spice/cora_testbench.spice
-        enable: True # Optional: Enable or disable this testbench
+          - name : CL
+            description : load capacitance
+            val : 5p
+        netlist : spice/cora_testbench_noise.spice
+        enable: False # Optional: Enable or disable this testbench
         description : Noise analysis for input referred noise
-
 
       # ------------------------
       # Testbench 3 - Transient Simulation
       # ------------------------
       - name: tb_tran
         params:
-          - name : icm
-            description : input common mode current
-            val : 0.5e-6
-        netlist : spice/cora_testbench.spice
-        enable: True # Optional: Enable or disable this testbench
+          - name : CL
+            description : load capacitance
+            val : 5p
+        netlist : spice/cora_testbench_tran.spice
+        enable: False # Optional: Enable or disable this testbench
         description : Transient analysis for slew rate and settling time
+
+      # ------------------------
+      # Testbench 4 - Operating Point Simulation
+      # ------------------------
+      - name: tb_op
+        params:
+          - name : CL
+            description : load capacitance
+            val : 5p
+        netlist : spice/cora_testbench_op.spice
+        enable: False # Optional: Enable or disable this testbench
+        description : Operating point analysis
 
   # ------------------------
   # Optimizer Configuration: Configure the optimizer and target specifications
