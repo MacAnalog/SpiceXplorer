@@ -201,19 +201,24 @@ class DutParams:
 class TestbenchParams:
     name: str
     params: List[Param]
+    netlist: str
+    enable: bool = True
+    description: Optional[str] = None
 
 @dataclass
 class TargetSpec:
-    name: str
-    target: float | np.float64
-    goal: Union[OptimizationGoalType, str]
-    sim_type: Union[SimType, str]
-    log_scale: bool = False
-    enable: bool = True
-    range: Union[np.float64, float, str | None] = None
+    name:       str
+    testbench:  str
+    target:     float | np.float64
+    goal:       Union[OptimizationGoalType, str]
+    sim_type:   Union[SimType, str]
+    # Optional fields with defaults
+    log_scale:  bool = False
+    enable:     bool = True
+    range:      Union[np.float64, float, str | None] = None
     error_type: Union[Error_Types, str] = Error_Types.RELATIVE_ABSOLUTE
-    weight: Optional[float | np.float64] = 1.0
-    tolerance: Optional[float | np.float64] = None  # if not given use 5% of target
+    weight:     Optional[float | np.float64] = 1.0
+    tolerance:  Optional[float | np.float64] = None  # if not given use 5% of target
     description: Optional[str] = None
 
     def __post_init__(self):
@@ -466,14 +471,14 @@ class OptimizerConfig:
             logger.warning("No lin_variable_bounds provided; using default [0.0, 1.0].")
             self.lin_variable_bounds = VariableBoundConfig(min=0.0, max=1.0)
         else: 
-            logger.info(
+            logger.debug(
                 f"\tLinear bounds: min={self.lin_variable_bounds.min}, max={self.lin_variable_bounds.max}"
             )
         if self.log_variable_bounds is None:
             logger.warning("No log_variable_bounds provided; using default [0.0, 1.0].")
             self.log_variable_bounds = VariableBoundConfig(min=1, max=100.0)
         else:
-            logger.info(
+            logger.debug(
                 f"\tLog bounds: min={self.log_variable_bounds.min}, max={self.log_variable_bounds.max}"
             )
 
@@ -483,7 +488,7 @@ class OptimizerConfig:
         if self.loss_function_config is None:
             logger.warning("No loss_function_config provided; using default values.")
         else: 
-            logger.info(
+            logger.debug(
                 f"\tLoss function: max_loss={self.loss_function_config.max_loss}, "
                 f"norm_method={self.loss_function_config.loss_norm_method}, "
                 f"type={self.loss_function_config.loss_type}, rescale_mag={self.loss_function_config.rescale_mag}, "
@@ -494,9 +499,9 @@ class OptimizerConfig:
         # -------------------------
         # Target Specs
         # -------------------------
-        logger.info(f"\tNumber of target specs: {len(self.target_specs.targets)}")
+        logger.debug(f"\tNumber of target specs: {len(self.target_specs.targets)}")
         for t in self.target_specs.targets:
-            logger.info(f"\t\t- {t}")
+            logger.debug(f"\t\t- {t}")
     
     def get_lin_variable_range(self) -> np.float64:
         if self.lin_variable_bounds is None:
@@ -532,9 +537,9 @@ class Project_Setup:
     
     # Custom Data types
     tech_spec: TechSpec
-    pvt: PVT
+    pvt_corners: List[PVT]
     dut_params: List[Param]
-    testbench_params: TestbenchParams
+    testbenches: List[TestbenchParams]
     optimizer_config: OptimizerConfig
     
     save_sim:  bool = False
@@ -590,7 +595,7 @@ class Project_Setup:
         """Resolve all parameter min/max/default values based on tech_spec constraints."""
         for param in self.dut_params:
             if param.needs_resolution():
-                logger.info(f"Resolving ranges for param '{param.name}'")
+                logger.debug(f"Resolving ranges for param '{param.name}'")
                 param.resolve_min_max(self.tech_spec.constraints)
                 logger.debug(f"Resolved param '{param.name}': min={param.min_val}, max={param.max_val}, default={param.val}")
             
@@ -631,13 +636,21 @@ class Project_Setup:
         logger.info(f"📂 Project: {self.name}")
         logger.info(f"📝 Description: {self.description}")
         logger.info(f"🧠 Simulator: {self.simulator}")
-        logger.info(f"📜 Netlist: {self.netlist}")
-        logger.info(f"⚙️  PVT: temp={self.pvt.temp}, corner={self.pvt.corner}, supply={self.pvt.supply}")
+        logger.info(f"📜 DUT Netlist: {self.netlist}")
+        logger.info(f"🧪 Testbenches: {len(self.testbenches)} count")
+        for i,tb in enumerate(self.testbenches):
+            logger.info(f"\t({i+1}) {tb.name} @ {tb.netlist}")
+            if tb.description:
+                logger.info(f"\t- Description: {tb.description}")
+        logger.info(f"⚙️  PVT corners: {len(self.pvt_corners)} corners")
+        for i, pvt in enumerate(self.pvt_corners):
+            logger.info(f"\t({i+1}) Temp: {pvt.temp}°C, Corner: {pvt.corner}, Supply: {pvt.supply}V")
         logger.info(f"🔧 Tech Spec: {len(self.tech_spec.constraints)} constraints")
         for k, v in self.tech_spec.constraints.items():
-            logger.info(f"   • {k}: {v:.2e}")
+            logger.info(f"\t• {k}: {v:.2e}")
         logger.info(f"🎛 DUT Params: {len(self.dut_params)} params -> {[p.name for p in self.dut_params]}")
-        logger.info(f"🔍 target specs: {[p.name for p in self.optimizer_config.target_specs.targets]}")
+
+        logger.info(f"🔍 target specs ({len(self.optimizer_config.target_specs.targets)}): {[(p.name, p.target, p.goal.value) for p in self.optimizer_config.target_specs.targets]}")
         logger.info("===========================================")
 
 # ------------------ Dacite Config ------------------

@@ -9,7 +9,7 @@ from    pathlib     import Path
 from    abc         import ABC, abstractmethod
 
 # Symxplorer Specific Imports
-from    spicexplorer.spice_engine              import NGSpice_Wrapper, Sim_Execution_Type
+from    spicexplorer.spice_engine    import NGSpice_Wrapper, Sim_Execution_Type
 from    spicexplorer.core.domains    import Project_Setup
 
 from    .base           import Spice_Base_Optimizer, Base_Optimizer
@@ -85,7 +85,7 @@ class Circuit_Optimizer_Orchestrator_Base(ABC):
         logger.debug(f"\t- path_to_simulator {PROJECT_SETUP.simulator}")
 
         wrapper = NGSpice_Wrapper(
-            project_name=PROJECT_SETUP.name,
+            testbench_name=PROJECT_SETUP.name,
             netlist_filename=netlist_filename,
             output_folder=output_folder,
             sim_execution_t=Sim_Execution_Type.RUN_AND_WAIT,  # only RUN_AND_WAIT is supported as of now...,

@@ -37,6 +37,7 @@ class Sim_Engines_Type(Enum):
 
 class Sim_Execution_Type(Enum):
     RUN_AND_WAIT        = "RUN_AND_WAIT"
+    RUN_AND_PASS        = "RUN_AND_PASS"
     RUN_NOW             = "RUN_NOW"
     RUN_WITH_CALLBACK   = "RUN_WITH_CALLBACK"
 
@@ -44,6 +45,9 @@ class Ngspice_Plot_Type(Enum):
     AC = "AC Analysis"
     OP = "OP"
     DC = "DC"
+    NOISE_1 = "noise1"
+    NOISE_2 = "noise2"
+    TRAN = "TRAN"
 
 # ---------------------------------
 # Class Definitions
@@ -170,7 +174,7 @@ class NGSpice_Wrapper:
     def __init__(self,  
                  netlist_filename:      Path, 
                  traces_of_interest:    List[str] = [], 
-                 project_name:          str = "default_project", 
+                 testbench_name:        str = "DEFAULT", 
                  output_folder:         Path = Path("./spicelib_runs"),
                  sim_execution_t:       Sim_Execution_Type = Sim_Execution_Type.RUN_AND_WAIT,
                  path_to_simulator:     None | Path = None,
@@ -182,7 +186,7 @@ class NGSpice_Wrapper:
 
         self.netlist_filename   = netlist_filename
         self.traces_of_interest = traces_of_interest
-        self.project_name       = project_name
+        self.testbench_name     = testbench_name
         self.output_folder      = output_folder
         self.path_to_simulator  = path_to_simulator
         self.sim_execution_t    = sim_execution_t
@@ -197,10 +201,12 @@ class NGSpice_Wrapper:
         self.curr_raw: RawRead | None       = None
         self.curr_log: str | None           = None
 
-        self.counter: int = 1
+        self._counter: int = 1
 
         self.__post_init__()
-        
+    # ----------------------------------------------------
+    # [Private] Initialization and Validation   
+    # ----------------------------------------------------   
     def __post_init__(self):
         # (1) Validate the settings
         if not self._validate():
@@ -235,12 +241,13 @@ class NGSpice_Wrapper:
         # Check for netlist existence
         if not self.netlist_filename.exists():
             self.logger.critical(f"❌ Initial netlist not found: {self.netlist_filename}")
+            self.logger.critical(f"Check the PWD: {Path.cwd()}")
             raise FileNotFoundError(f"Initial netlist not found: {self.netlist_filename}")
 
         # Log project info
         self.logger.info("--------------------------------------------------")
         self.logger.info("🚀 Spicelib_Wrapper initialized successfully!")
-        self.logger.info(f"\t📝 Project: {self.project_name}")
+        self.logger.info(f"\t📝 Testbench: {self.testbench_name}")
         self.logger.info(f"\t📜 Schematic: {self.netlist_filename.stem}")
         self.logger.info(f"\t📂 Output Folder: {self.output_folder}")
         self.logger.info("--------------------------------------------------")
@@ -256,43 +263,60 @@ class NGSpice_Wrapper:
         self.logger.info(f"Using ngspice from {simulator.spice_exe}")
         return simulator
 
-    def print_circuit_info(self) -> None:
-        if self.logger is None or self.editor is None:
-            raise RuntimeError("Logger or Editor not initialized")
+    def _move_to_run_folder(self, label: str | None = "") -> Path:
+        if self.runner is None or self.editor is None:
+            raise RuntimeError("Runner or Editor not initialized")
+        
+        if isinstance(self.runner.output_folder, Path):
+            self.runner.output_folder = self.runner.output_folder / f"run_{self._counter}_{label}"
+            self.runner.output_folder.mkdir(parents=True, exist_ok=True)
+            self._counter += 1
+        else: raise RuntimeError("Runner output folder is not a Path instance")
 
+        return self.runner.output_folder
+    
+    def _restore_parent_folder(self) -> None:
+        if self.runner is None:
+            raise RuntimeError("Runner not initialized")
+        
+        if isinstance(self.runner.output_folder, Path):
+            self.runner.output_folder = self.runner.output_folder.parent
+        else:
+            raise RuntimeError("Runner output folder is not a Path instance")
+    
+    def _clear_loaded_sim_data(self) -> None:
+        self.curr_raw = None
+        self.curr_log = None
+    
+    # ----------------------------------------------------
+    # [Public] Simulation Running Methods
+    # ---------------------------------------------------- 
+    def update_params(self, parameterization: Dict[str, float]) -> bool:
         logger = self.logger
-        editor = self.editor
+        logger.debug(f"Updating parameters...")
+        RES_UNIT = 'k' # kilo
+        CAP_UNIT = 'p' # pico
+        if self.editor is None:
+            raise RuntimeError("Editor not initialized")
 
-        logger.info("📊 --- Circuit Information ---")
+        for key, value in parameterization.items():
+            try: # Validate parameter already exists
+                self.editor.get_parameter(key)
+            except ParameterNotFoundError:
+                logger.error(f"❌ Parameter {key} not found in the netlist... exiting")
+                return False
 
-        # Nodes
-        nodes = editor.get_all_nodes()
-        if nodes:
-            logger.info(f"🔗 Nodes in the netlist: {nodes}")
-        else:
-            logger.warning("⚠️ No nodes found in the netlist!")
-
-        # Parameters
-        tb_params = self.get_tb_params()
-        dut_params = self.get_dut_params()
-
-        if tb_params:
-            logger.info(f"Testbench parameters: {tb_params}")
-        else:
-            logger.warning("⚠️ No testbench parameters found!")
-
-        if dut_params:
-            logger.info(f"DUT parameters: {dut_params}")
-        else:
-            logger.warning("⚠️ No DUT parameters found!")
-
-        logger.info("✅ --- Circuit info printed successfully --- 🎉 ")
-
-    def run_sanity_check(
-        self,
-        use_editor: bool = True,
-        sim_execution_t: Sim_Execution_Type = Sim_Execution_Type.RUN_NOW
-    ) -> bool:
+            if key.startswith("C"):
+                self.editor.set_parameter(key, f"{value}{CAP_UNIT}")
+            elif key.startswith("R"):
+                self.editor.set_parameter(key, f"{value}{RES_UNIT}")
+            else:
+                self.editor.set_parameter(key, f"{value}")
+                logger.debug(f"... Parameter {key} set to {value:.3e}")
+        logger.debug(f"✅  All parameters updated successfully")
+        return True
+    
+    def run_sanity_check(self, use_editor: bool = True, sim_execution_t: Sim_Execution_Type = Sim_Execution_Type.RUN_NOW) -> bool:
         logger = self.logger
 
         # (1) Pre-body
@@ -305,7 +329,7 @@ class NGSpice_Wrapper:
             logger.info("📂 Creating dedicated sanity check folder...")
             self.runner.output_folder = self.runner.output_folder / "sanity_check"
             self.runner.output_folder.mkdir(parents=True, exist_ok=True)
-            self.counter += 1
+            self._counter += 1
         else:
             logger.critical("❌ Runner output folder is not a Path instance!")
             raise RuntimeError("Runner output folder is not a Path instance")
@@ -314,7 +338,7 @@ class NGSpice_Wrapper:
         logger.info("🧪 Running sanity check simulation...")
         
         netlist_used = self.editor if use_editor else self.netlist_filename
-        run_filename = f"{self.project_name}_sanity.spice"
+        run_filename = f"{self.testbench_name}_sanity.spice"
         raw, log = None, None
 
         # Allow running sanity check with different execution types
@@ -360,76 +384,6 @@ class NGSpice_Wrapper:
             self.runner.output_folder = self.runner.output_folder.parent
         
         return True
-
-    def update_params(self, parameterization: Dict[str, float]) -> bool:
-        logger = self.logger
-        logger.debug(f"Updating parameters...")
-        RES_UNIT = 'k' # kilo
-        CAP_UNIT = 'p' # pico
-        if self.editor is None:
-            raise RuntimeError("Editor not initialized")
-
-        for key, value in parameterization.items():
-            try: # Validate parameter already exists
-                self.editor.get_parameter(key)
-            except ParameterNotFoundError:
-                logger.error(f"❌ Parameter {key} not found in the netlist... exiting")
-                return False
-
-            if key.startswith("C"):
-                self.editor.set_parameter(key, f"{value}{CAP_UNIT}")
-            elif key.startswith("R"):
-                self.editor.set_parameter(key, f"{value}{RES_UNIT}")
-            else:
-                self.editor.set_parameter(key, f"{value}")
-                logger.debug(f"... Parameter {key} set to {value:.3e}")
-        logger.debug(f"✅  All parameters updated successfully")
-        return True
-    
-    def get_dut_params(self) -> List[Tuple[str, Any]]:
-        self.logger.debug("Getting DUT parameters")
-        if self.editor is None:
-            raise RuntimeError("Editor not initialized")
-        editor = self.editor
-        params = editor.get_all_parameter_names()
-        dut_params = [(param, editor.get_parameter(param)) for param in params if "X_DUT" in param]
-        return dut_params
-
-    def get_tb_params(self) -> List[Tuple[str, Any]]:
-        self.logger.debug("Getting TB parameters")
-        if self.editor is None:
-            raise RuntimeError("Editor not initialized")
-        editor = self.editor
-        params = editor.get_all_parameter_names()
-        tb_params  = [(param, editor.get_parameter(param)) for param in params if not "X_DUT" in param]
-        return tb_params
-
-    def extract_wave(self, wave_name: str, is_real: bool = False) -> torch.Tensor:
-        """The endpiont to extract a waveform from the last simulation run"""
-        if self.curr_raw is None:
-            raise RuntimeError("Need to run the simulation at least once")
-        
-        wave = self.curr_raw.get_wave(wave_name)
-        dtype = torch.float64 if is_real else torch.complex128
-
-        if is_real:
-            return torch.from_numpy(wave).real.to(dtype=torch.float64)
-        return torch.from_numpy(wave)
-    
-    def extract_scalar_variable_from_raw(self, var_name: str | List[str], is_real: bool = True) -> Dict[str, np.float64]:
-        
-        if not isinstance(var_name, list):
-            var_name = [var_name]
-        
-        wave_form : Dict[str, np.float64] = {}
-        for var in var_name:
-            try:
-                temp = self.extract_wave(var, is_real=is_real)
-                wave_form[var] = np.float64(temp[0])
-            except IndexError:
-                self.logger.error(f"❌ Variable {var} not found in the raw file")
-                wave_form[var] = np.float64(np.nan)
-        return wave_form
     
     def run_and_wait(self, exe_log: bool = True) -> Tuple[RawRead | None, str | None, str]:
         """Runs the simulation and waits for it to complete, returning the RawRead instance (or None), the log filename (or None), and task name"""
@@ -439,10 +393,7 @@ class NGSpice_Wrapper:
             raise RuntimeError("Runner or Editor not initialized")
 
         # (1.1) Create a dedicated folder for this run
-        if isinstance(self.runner.output_folder, Path):
-            self.runner.output_folder = self.runner.output_folder / f"run_{self.counter}"
-            self.runner.output_folder.mkdir(parents=True, exist_ok=True)
-            self.counter += 1
+        self._move_to_run_folder(label=self.testbench_name)
 
         # (2) Run the simulation with the parameters already in the editor instance
         task = self.runner.run(
@@ -458,22 +409,70 @@ class NGSpice_Wrapper:
             pass # wait so its done
 
         # (4) Get the results
+        self.read_and_save_task_outputs(task)
+
+        # Move out of the run folder
+        self._restore_parent_folder()
+
+        return self.curr_raw, self.curr_log, task.name
+    
+    def run_and_pass(self, exe_log: bool = True) -> SpicelibRunTaskClass:
+        # (1) Pre-body
+        logger = self.logger
+        if self.runner is None or self.editor is None:
+            raise RuntimeError("Runner or Editor not initialized")
+
+        # (1.1) Create a dedicated folder for this run
+        self._move_to_run_folder(label=self.testbench_name)
+
+        # (2) Run the simulation with the parameters already in the editor instance
+        task = self.runner.run(
+            netlist=self.editor, 
+            exe_log=exe_log)
+        
+        if task is None:
+            raise RuntimeError("Failed to create a RunTask --- cannot proceed")
+        
+        self._restore_parent_folder()
+        
+        return task
+    
+    @classmethod
+    def callback(cls, raw_file: str, log_file: str, traces_to_read: str):
+        raw_read = RawRead(raw_filename=raw_file, traces_to_read=traces_to_read)
+        return raw_read
+   
+    # ----------------------------------------------------
+    # [Public] Simulation Results Extraction Methods
+    # ----------------------------------------------------
+    def read_and_save_task_outputs(self, task: SpicelibRunTaskClass) -> None:
+        """Reads and saves the outputs of a previously run task."""
+        if task.is_alive():
+            logger.warning(f"⚠️ Task {task.name} is still running; cannot read outputs yet")
+            self._clear_loaded_sim_data()
+            return
+        
         out = task.get_results()
         self.tasks_outputs[task.name] = out
+
+        self.load_task_outputs(task.name)
+    
+    def load_task_outputs(self, task_name: str) -> None:
+        """Loads the outputs of a previously run task by its name."""
+        if task_name not in self.tasks_outputs:
+            logger.warning(f"⚠️ Task outputs for {task_name} not found")
+            self._clear_loaded_sim_data()
+            return
+        
+        out = self.tasks_outputs[task_name]
 
         if isinstance(out, tuple) and len(out) == 2:
             raw_file, log_file = out
             self.curr_raw = RawRead(raw_filename=raw_file)
             self.curr_log = log_file
-        else: 
-            self.curr_raw = None
-            self.curr_log = None
-
-        # Move out of the run folder
-        if isinstance(self.runner.output_folder, Path):
-            self.runner.output_folder = self.runner.output_folder.parent
-
-        return self.curr_raw, self.curr_log, task.name
+        else:
+            logger.warning(f"⚠️ Not able to read the RAW or the LOG from task {task_name}")
+            self._clear_loaded_sim_data()
     
     def load_raw(self, raw_file: Path | RawRead) -> None:
         """Loads a RawRead instance from the given raw_file path"""
@@ -487,6 +486,141 @@ class NGSpice_Wrapper:
         
         self.curr_raw = RawRead(raw_filename=raw_file)
     
+    def get_available_plots(self) -> List[str]:
+        """Helper to see what plots are actually inside the current raw file."""
+        if self.curr_raw is None:
+            logger.warning("⚠️ No RAW file loaded; cannot get available plots")
+            return []
+        return self.curr_raw.get_plot_names()
+    
+    def extract_wave(self, wave_name: str,  plot_type: Ngspice_Plot_Type, is_real: bool = False) -> torch.Tensor:
+        """
+        The endpiont to extract a waveform from the last simulation run
+        Extracts a waveform from the simulation results based on the specific plot type.
+        
+        Args:
+            wave_name: The name of the trace (e.g., 'v(n001)').
+            plot_type: The enum indicating if this is AC, DC, TRAN, etc.
+            is_real: If True, returns only the real part (or converts complex to real). 
+                     If False, returns complex data (if applicable).
+        """
+        if self.curr_raw is None:
+            self.logger.error("❌ Attempted to extract wave but no simulation data is loaded.")
+            raise RuntimeError("Need to run the simulation at least once")
+        
+        # 1. Search for the specific plot object
+        target_plot = None
+        for p in self.curr_raw.plots:
+            if p.get_plot_name() == plot_type.value:
+                target_plot = p
+                break
+        
+        # 2. Handle case where plot type isn't found
+        if target_plot is None:
+            available = self.get_available_plots()
+            self.logger.error(f"❌ Plot type '{plot_type.value}' not found in raw file.")
+            self.logger.error(f"ℹ️ Available plots: {available}")
+            raise ValueError(f"Plot type '{plot_type.value}' not found.")
+        
+        # 3. Extract the data from that specific plot
+        try:
+            wave = self.curr_raw.get_wave(wave_name)
+        except IndexError as e:
+            self.logger.error(f"❌ Waveform '{wave_name}' not found in plot '{plot_type.value}'.")
+            raise e
+        except Exception as e:
+            self.logger.critical(f"❌ Unexpected error while extracting waveform '{wave_name}': {e.__class__.__name__}: {e}")
+            raise e
+
+        # 4. Convert to Tensor
+        dtype = torch.float64 if is_real else torch.complex128
+        if is_real:
+            return torch.from_numpy(wave).real.to(dtype=torch.float64)
+        return torch.from_numpy(wave)
+    
+    def extract_scalar_variable_from_raw(self, var_name: str | List[str], plot_type: Ngspice_Plot_Type,is_real: bool = True) -> Dict[str, np.float64]:
+        """
+        Extracts the first point of a trace, useful for OP analysis or single-point measurements.
+        """
+        if not isinstance(var_name, list):
+            var_name = [var_name]
+        
+        outputs: Dict[str, np.float64] = {}
+        
+        for var in var_name:
+            try:
+                # pass plot_type down to extract_wave
+                tensor_data = self.extract_wave(var, plot_type=plot_type, is_real=is_real)
+                
+                # We expect a scalar or an array where we want index 0
+                # Move to CPU/numpy for the dictionary return
+                val = tensor_data.detach().cpu().numpy()
+                
+                if val.size > 0:
+                    outputs[var] = np.float64(val.item(0) if val.ndim > 0 else val.item())
+                else:
+                    outputs[var] = np.float64(np.nan)
+                    
+            except (ValueError, IndexError, RuntimeError):
+                self.logger.error(f"❌ Scalar Variable {var} not found in the raw file for plot {plot_type.value}")
+                outputs[var] = np.float64(np.nan)
+                
+        return outputs
+    
+    # ----------------------------------------------------
+    # [Public] Helper Methods
+    # ----------------------------------------------------
+
+    def print_circuit_info(self) -> None:
+        if self.logger is None or self.editor is None:
+            raise RuntimeError("Logger or Editor not initialized")
+
+        logger = self.logger
+        editor = self.editor
+
+        logger.info("📊 --- Circuit Information ---")
+
+        # Nodes
+        nodes = editor.get_all_nodes()
+        if nodes:
+            logger.info(f"🔗 Nodes in the netlist: {nodes}")
+        else:
+            logger.warning("⚠️ No nodes found in the netlist!")
+
+        # Parameters
+        tb_params = self.get_tb_params()
+        dut_params = self.get_dut_params()
+
+        if tb_params:
+            logger.info(f"Testbench parameters: {tb_params}")
+        else:
+            logger.warning("⚠️ No testbench parameters found!")
+
+        if dut_params:
+            logger.info(f"DUT parameters: {dut_params}")
+        else:
+            logger.warning("⚠️ No DUT parameters found!")
+
+        logger.info("✅ --- Circuit info printed successfully --- 🎉 ")
+
+    def get_dut_params(self) -> List[Tuple[str, Any]]:
+        self.logger.debug("Getting DUT parameters")
+        if self.editor is None:
+            raise RuntimeError("Editor not initialized")
+        editor = self.editor
+        params = editor.get_all_parameter_names()
+        dut_params = [(param, editor.get_parameter(param)) for param in params if "X_DUT" in param]
+        return dut_params
+    
+    def get_tb_params(self) -> List[Tuple[str, Any]]:
+        self.logger.debug("Getting TB parameters")
+        if self.editor is None:
+            raise RuntimeError("Editor not initialized")
+        editor = self.editor
+        params = editor.get_all_parameter_names()
+        tb_params  = [(param, editor.get_parameter(param)) for param in params if not "X_DUT" in param]
+        return tb_params
+    
     def clean_up(self) -> None:
         """Cleans up all the files generated during the simulation runs"""
         if self.runner is None:
@@ -494,16 +628,11 @@ class NGSpice_Wrapper:
         
         self.runner.cleanup_files()
         
-        run_folder = self.output_folder / f"run_{self.counter}"
+        run_folder = self.output_folder / f"run_{self._counter}"
         if run_folder.exists() and run_folder.is_dir():
             shutil.rmtree(run_folder)
 
         self.logger.debug(f"🧹 All simulation files cleaned up successfully {run_folder}")
-
-    @classmethod
-    def callback(cls, raw_file: str, log_file: str, traces_to_read: str):
-        raw_read = RawRead(raw_filename=raw_file, traces_to_read=traces_to_read)
-        return raw_read
 
     def get_logger(self) -> logging.Logger:
         if self.logger is None:
