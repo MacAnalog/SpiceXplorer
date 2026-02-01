@@ -12,6 +12,8 @@ from enum import Enum
 from dacite import from_dict, Config
 from dacite.exceptions import DaciteError, MissingValueError, WrongTypeError, UnexpectedDataError
 
+from spicexplorer.spice_engine import Ngspice_Plot_Type
+
 # ------------------ Module Logger ------------------
 
 logger = logging.getLogger("spicexplorer.designer_tools.domains")
@@ -23,6 +25,7 @@ class SimType(str, Enum):
     AC = "ac"
     TRAN = "tran"
     NOISE = "noise"
+    NOISE_SPECTRUM = "noise_spectrum"
 
 class SpiceSimulatorType(Enum):
     SPECTRE = "spectre"
@@ -38,14 +41,6 @@ class OptimizerType(str, Enum):
     NEVERGRAD = "nevergrad"
     BAYESIAN_AX = "bayesian_ax"
     RL = "reinforcement_learning"
-    
-class SpicePlotType(str, Enum):
-    OP = "Operating Point"
-    TRANSIENT = "tran"
-    AC_MAG = "ac_mag"
-    AC_PHASE = "ac_phase"
-    DC = "dc"
-    NOISE = "noise"
 
 class Error_Types(str, Enum):
     ABSOLUTE = "absolute"
@@ -94,6 +89,15 @@ MULTIPLIERS = {
         "M": 1e6,
         "G": 1e9,
     }
+
+SIMTYPE_TO_NGSPICE_PLOTTYPE : Dict[SimType, Ngspice_Plot_Type] = {
+    SimType.AC: Ngspice_Plot_Type.AC,
+    SimType.DC: Ngspice_Plot_Type.DC,
+    SimType.TRAN: Ngspice_Plot_Type.TRAN,
+    SimType.NOISE: Ngspice_Plot_Type.NOISE_1,
+    SimType.NOISE_SPECTRUM: Ngspice_Plot_Type.NOISE_2,
+}
+
 # ------------------ Helpers ------------------
 
 def parse_value(val: Union[str, float, int]) -> np.float64:
@@ -161,20 +165,21 @@ class Param:
     name: str
     min_val: Optional[Union[float, np.float64, str]]
     max_val: Optional[Union[float, np.float64, str]]
-    val: Optional[Union[float, np.float64, str]]
+    init: Optional[Union[float, np.float64, str]]
     description: Optional[str]
     log_scale: bool = False
+    freeze: bool = True
 
     def needs_resolution(self) -> bool:
-        return isinstance(self.min_val, str) or isinstance(self.max_val, str) or (self.val is not None and isinstance(self.val, str))
+        return isinstance(self.min_val, str) or isinstance(self.max_val, str) or (self.init is not None and isinstance(self.init, str))
 
     def resolve_min_max(self, constraints: Dict[str, np.float64]) -> None:
         if self.min_val is None or self.max_val is None:
             raise ValueError(f"Param {self.name} missing min or max value for resolution")
         self.min_val = resolve_reference(self.min_val, constraints)
         self.max_val = resolve_reference(self.max_val, constraints)
-        if self.val is not None:
-            self.val = resolve_reference(self.val, constraints)
+        if self.init is not None:
+            self.init = resolve_reference(self.init, constraints)
         if self.min_val >= self.max_val:
             raise ValueError(f"Param {self.name} has min_val >= max_val ({self.min_val} >= {self.max_val})")
 
@@ -197,6 +202,19 @@ class Param:
 class DutParams:
     params: List[Param]
 
+    def get_frozen_params(self) -> Dict[str, float]:
+        return {p.name: float(p.init) for p in self.params if p.freeze}
+    
+    def list_frozen_params(self) -> List[Param]:
+        return [p for p in self.params if p.freeze]
+    
+    def list_all_params(self) -> List[Param]:
+        return self.params
+    
+    def list_variable_params(self) -> List[Param]:
+        return [p for p in self.params if not p.freeze]
+
+
 @dataclass
 class TestbenchParams:
     name: str
@@ -211,12 +229,13 @@ class TargetSpec:
     testbench:  str
     target:     float | np.float64
     goal:       Union[OptimizationGoalType, str]
-    sim_type:   Union[SimType, str]
+    sim_type:   Union[str, SimType, Ngspice_Plot_Type]
     # Optional fields with defaults
     log_scale:  bool = False
     enable:     bool = True
     range:      Union[np.float64, float, str | None] = None
     error_type: Union[Error_Types, str] = Error_Types.RELATIVE_ABSOLUTE
+    reward_type: Union[Reward_Types, str] = Reward_Types.RELATIVE_ABSOLUTE
     weight:     Optional[float | np.float64] = 1.0
     tolerance:  Optional[float | np.float64] = None  # if not given use 5% of target
     description: Optional[str] = None
@@ -246,14 +265,21 @@ class TargetSpec:
         # --- Validate / convert sim_type ---
         if isinstance(self.sim_type, str):
             try:
-                self.sim_type = SimType(self.sim_type.lower())
+                self.sim_type = SIMTYPE_TO_NGSPICE_PLOTTYPE[SimType(self.sim_type.lower())] # FIXME: hacked for NGspice simulators
             except ValueError:
                 logger.critical(
                     f"Invalid sim_type '{self.sim_type}' for target '{self.name}'. "
                     f"Must be one of {valid_sim_types}."
+                    f"Mapping: {SIMTYPE_TO_NGSPICE_PLOTTYPE}"
                 )
                 raise ValueError(f"Invalid sim_type '{self.sim_type}'. Must be one of {valid_sim_types}.")
-        elif not isinstance(self.sim_type, SimType):
+        elif isinstance(self.sim_type, SimType):
+            self.sim_type = SIMTYPE_TO_NGSPICE_PLOTTYPE[self.sim_type] # FIXME: hacked for NGspice simulators
+            logger.critical(
+                f"Must be in the mapping: {SIMTYPE_TO_NGSPICE_PLOTTYPE}"
+            )
+            raise ValueError(f"Invalid sim_type '{self.sim_type}'. Must be one of {valid_sim_types}.")
+        elif not isinstance(self.sim_type, Ngspice_Plot_Type):
             logger.critical(
                 f"Invalid sim_type type '{type(self.sim_type)}' for target '{self.name}'. "
                 f"Must be one of {valid_sim_types}."
@@ -328,6 +354,21 @@ class TargetSpec:
         penalty = self.get_simple_penalty(value)
         return not (penalty > np.float64(0.0))
     
+    def get_equivalent_ngspice_plot_type(self) -> Ngspice_Plot_Type:
+        if isinstance(self.sim_type, Ngspice_Plot_Type):
+            return self.sim_type
+        elif isinstance(self.sim_type, SimType) and self.sim_type in SIMTYPE_TO_NGSPICE_PLOTTYPE:
+            return SIMTYPE_TO_NGSPICE_PLOTTYPE[self.sim_type]
+        elif isinstance(self.sim_type, str):
+            try:
+                return SIMTYPE_TO_NGSPICE_PLOTTYPE[SimType(self.sim_type.lower())]
+            except ValueError:
+                logger.critical(f"Cannot map sim_type '{self.sim_type}' to Ngspice_Plot_Type for target '{self.name}'") 
+                raise ValueError(f"Cannot map sim_type '{self.sim_type}' to Ngspice_Plot_Type")
+        else:
+            logger.critical(f"Cannot map sim_type '{self.sim_type}' to Ngspice_Plot_Type for target '{self.name}'")
+            raise ValueError(f"Cannot map sim_type '{self.sim_type}' to Ngspice_Plot_Type")
+
     def __str__(self) -> str:
         return (
             f"TargetSpec(name={self.name}, target={self.target}, range={self.range:.2e} "
@@ -597,7 +638,7 @@ class Project_Setup:
             if param.needs_resolution():
                 logger.debug(f"Resolving ranges for param '{param.name}'")
                 param.resolve_min_max(self.tech_spec.constraints)
-                logger.debug(f"Resolved param '{param.name}': min={param.min_val}, max={param.max_val}, default={param.val}")
+                logger.debug(f"Resolved param '{param.name}': min={param.min_val}, max={param.max_val}, default={param.init}")
             
     def get_constraint_by_name(self, name: str) -> Optional[np.float64]:
         value = self.tech_spec.constraints.get(name)
@@ -627,7 +668,7 @@ class Project_Setup:
         return log_params
 
     def filter_params_by_range(self, min_value: float, max_value: float) -> List[Param]:
-        filtered = [p for p in self.dut_params if p.val is not None and min_value <= p.val <= max_value]
+        filtered = [p for p in self.dut_params if p.init is not None and min_value <= p.init <= max_value]
         logger.debug(f"Params in range {min_value}-{max_value}: {[p.name for p in filtered]}")
         return filtered
 
@@ -673,7 +714,7 @@ class OptimizationLogEntry:
     """Represents a single entry in the optimization log."""
     point: 'OptimizationPoint'           
     fit_summary: Optional[Dict[str, Any]] = field(default_factory=dict)   # Depends on your optimizer output (could refine type)
-    log_file: Optional[str | Path] = None                                  # Any log/debug info
+    log_file: Optional[Dict[str, str | Path]] = None                                  # Any log/debug info
 
     def get_score(self) -> float | np.floating:
         return self.point.score

@@ -7,7 +7,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 
 # Internal Imports
 from spicexplorer.core.domains import (
-    Project_Setup, 
+    Project_Setup, TestbenchParams,
     AgentType, DDPGConfig, SACConfig, AgentConfig
 )
 from spicexplorer.spice_engine.spicelib import NGSpice_Wrapper
@@ -25,8 +25,8 @@ class RL_Spice_Optimizer(Spice_Constraint_Satisfaction):
     Inherits simulation and scoring logic from Spice_Constraint_Satisfaction.
     Uses RLAgentFactory to support DDPG, SAC, TD3, etc.
     """
-    def __init__(self, setup_obj: Project_Setup, spicelib_wrapper: NGSpice_Wrapper):
-        super().__init__(setup_obj=setup_obj, spicelib_wrapper=spicelib_wrapper)
+    def __init__(self, setup_obj: Project_Setup, spicelib_wrapper: Dict[TestbenchParams, NGSpice_Wrapper]):
+        super().__init__(setup_obj=setup_obj, spicelib_wrappers=spicelib_wrapper)
         self.vec_env = None
         self.model = None
 

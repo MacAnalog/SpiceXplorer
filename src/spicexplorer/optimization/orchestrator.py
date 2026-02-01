@@ -10,7 +10,7 @@ from    abc         import ABC, abstractmethod
 
 # Symxplorer Specific Imports
 from    spicexplorer.spice_engine    import NGSpice_Wrapper, Sim_Execution_Type
-from    spicexplorer.core.domains    import Project_Setup
+from    spicexplorer.core.domains    import Project_Setup, TestbenchParams
 
 from    .base           import Spice_Base_Optimizer, Base_Optimizer
 from    .stochastic.nevergrad      import Nevergrad_Spice_Bode_Optimizer, Nevergrad_Spice_Constraint_Satisfaction,  Nevergrad_Spice_Single_Objective
@@ -54,7 +54,7 @@ class Circuit_Optimizer_Orchestrator_Base(ABC):
         self.project_setup:     Project_Setup   = self.read_project_setup()
         logger.debug(f"created the project setup for {self.project_setup.name}")
 
-        self.spicelib_wrapper:  NGSpice_Wrapper = self.create_spicelib_wrapper()
+        self.spicelib_wrappers:  Dict[str, NGSpice_Wrapper] = self.create_spicelib_wrappers()
         logger.debug(f"created the spicelib_wrapper.")
 
 
@@ -72,34 +72,57 @@ class Circuit_Optimizer_Orchestrator_Base(ABC):
             ) from e
         return PROJECT_SETUP
     
-    def create_spicelib_wrapper(self) -> NGSpice_Wrapper:
+    def create_spicelib_wrappers(self) -> Dict[str, NGSpice_Wrapper]:
         PROJECT_SETUP = self.project_setup
-        # (2) Create the Spice Simulator Wrapper
+
         netlist_filename = Path(PROJECT_SETUP.ws_root) / Path(PROJECT_SETUP.netlist)
         output_folder    = Path(PROJECT_SETUP.ws_root) / Path(PROJECT_SETUP.outdir)
+        sim_execution_t  = Sim_Execution_Type.RUN_AND_WAIT  # only RUN_AND_WAIT is supported as of now...
+        path_to_simulator=Path(PROJECT_SETUP.simulator)
+        
+        logger.info("=============================================================================")
+        logger.info(f"project: {PROJECT_SETUP.name} has ({len(PROJECT_SETUP.testbenches)}) testbenches.")
+        logger.debug(f"\tpath_to_simulator {PROJECT_SETUP.simulator}")
+        logger.debug(f"\tDUT netlist {netlist_filename}")
+        logger.debug(f"\toutput_folder {output_folder}")
 
-        logger.debug(f"spicelib_wrappper will use the following configs:")
-        logger.debug(f"\t- project_name {PROJECT_SETUP.name}")
-        logger.debug(f"\t- output_folder {output_folder}")
-        logger.debug(f"\t- netlist_filename {netlist_filename}")
-        logger.debug(f"\t- path_to_simulator {PROJECT_SETUP.simulator}")
 
-        wrapper = NGSpice_Wrapper(
-            testbench_name=PROJECT_SETUP.name,
-            netlist_filename=netlist_filename,
-            output_folder=output_folder,
-            sim_execution_t=Sim_Execution_Type.RUN_AND_WAIT,  # only RUN_AND_WAIT is supported as of now...,
-            path_to_simulator=Path(PROJECT_SETUP.simulator),
-            verbose=self.verbose
-            )
+        # Create the Spice Simulator Wrapper for each testbench
+        logger.debug(f"Creating spicelib_wrappers for each testbench...")
+        logger.debug("-----------------------------------------------------------------------------")
+        spicelib_wrappers : Dict[str, NGSpice_Wrapper] = {}
 
-        return wrapper
+        for i, tb in enumerate(PROJECT_SETUP.testbenches):
+            if not tb.enable:
+                logger.info(f"({i+1}) Skipping disabled testbench: {tb.name} - {tb.description}")
+                continue
+
+            logger.debug(f"({i+1}) Creating spicelib_wrapper for testbench: {tb.name} - {tb.description}")
+            logger.debug(f"\tspicelib_wrapper will use the following configs:")
+            logger.debug(f"\t- testbench_name {tb.name}")
+            logger.debug(f"\t- netlist_filename {tb.netlist}")
+
+            wrapper = NGSpice_Wrapper(
+                testbench_name=tb.name,
+                netlist_filename=Path(PROJECT_SETUP.ws_root) / Path(tb.netlist),
+                output_folder=output_folder,
+                sim_execution_t=sim_execution_t,
+                path_to_simulator=path_to_simulator,
+                verbose=self.verbose
+                )
+
+            spicelib_wrappers[tb.name] = wrapper
+            logger.debug(f"Created spicelib_wrapper for testbench: {tb.name}")
+        logger.debug("-----------------------------------------------------------------------------")
+        logger.info(f"Created ({len(spicelib_wrappers)}) spicelib_wrappers for project: {PROJECT_SETUP.name}")
+        logger.info("=============================================================================")
+        return spicelib_wrappers
     
     def get_project_setup(self) -> Project_Setup:
         return self.project_setup
     
-    def get_spicelib_wrapepr(self) -> NGSpice_Wrapper:
-        return self.spicelib_wrapper
+    def get_spicelib_wrapper(self) -> Dict[str, NGSpice_Wrapper]:
+        return self.spicelib_wrappers
 
     @abstractmethod
     def get_optimizer(self) -> Base_Optimizer:
@@ -110,11 +133,16 @@ class Circuit_Optimizer_Orchestrator_with_SPICE(Circuit_Optimizer_Orchestrator_B
     def get_optimizer(self) -> Spice_Base_Optimizer:
         logger.info(f"creating the circuit_optimizer of type {self.optimizer_type.value}")
         circuit_optimizer = SPICE_OPTIMIZER_CLASSES[self.optimizer_type](
-            spicelib_wrapper=self.spicelib_wrapper,
+            spicelib_wrappers=self.spicelib_wrappers,
             setup_obj=self.project_setup
         )
         logger.info(f"created the circuit_optimizer; type {type(circuit_optimizer)}")
         return circuit_optimizer
     
     def run_sanity_on_spicelib_wrapper(self, use_editor: bool = True)-> bool:
-        return self.spicelib_wrapper.run_sanity_check(use_editor=use_editor, sim_execution_t=Sim_Execution_Type.RUN_NOW)
+        for tb_name, spicelib_wrapper in self.spicelib_wrappers.items():
+            logger.info(f"running sanity check on spicelib_wrapper for testbench: {tb_name}")
+            if not spicelib_wrapper.run_sanity_check(use_editor=use_editor, sim_execution_t=Sim_Execution_Type.RUN_NOW):
+                logger.warning(f"sanity check failed for spicelib_wrapper for testbench: {tb_name}")
+                return False
+        return True

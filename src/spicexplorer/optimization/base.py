@@ -17,8 +17,8 @@ from    sympy       import Expr
 
 
 # Symxplorer Specific Imports
-from   spicexplorer.spice_engine.spicelib     import NGSpice_Wrapper
-from   spicexplorer.core.domains    import Project_Setup, ListTargetSpec, TargetSpec, Error_Types
+from   spicexplorer.spice_engine.spicelib     import NGSpice_Wrapper, Ngspice_Plot_Type
+from   spicexplorer.core.domains    import Project_Setup, ListTargetSpec, TargetSpec, Error_Types, TestbenchParams
 from   spicexplorer.core.domains    import OptimizationGoalType, OptimizationPoint, OptimizationLogEntry, OptimizationLog
 from   spicexplorer.core.utils      import compute_error, compute_reward, convert_linear_to_log, log_denormalize, linear_denormalize
 from   spicexplorer.core.utils      import plot_complex_response, get_bode_fitness_loss, Transfer_Func_Helper, Frequency_Weight, UNIT_DICT
@@ -413,22 +413,32 @@ class Spice_Base_Optimizer(Base_Optimizer):
     """ Base class for optimizers that use SPICE simulations."""
     def __init__(self,  
                 setup_obj: Project_Setup,
-                spicelib_wrapper : NGSpice_Wrapper):
+                spicelib_wrappers : Dict[str, NGSpice_Wrapper]):
         super().__init__(setup_obj = setup_obj)
-        self.spicelib_wrapper = spicelib_wrapper
+        self.spicelib_wrappers = spicelib_wrappers
     
     # --- Helper Methods (only in child class) ---
-    def simulate_circuit(self, parameterization: Dict[str, float], save_sim_override: bool = False) -> RawRead:
+    def simulate_circuit(self, parameterization: Dict[str, float], save_sim_override: bool = False) -> Dict[str, RawRead]:
         logger.debug("Simulating the circuit with the given parameterization")
-        self.spicelib_wrapper.update_params(parameterization=parameterization)
-        curr_raw, curr_log, task_name = self.spicelib_wrapper.run_and_wait(exe_log=True)
-        if curr_raw is None:
-            logger.critical("Something went wrong during simulation as no RAW file was generated")
-            raise RuntimeError("Something went wrong during simulation as no RAW file was generated")
+        results = {}
+        tb_idx = 0
+
+        for tb, wrapper in self.spicelib_wrappers.items():
+            tb_idx += 1
+            logger.debug(f"\t({tb_idx} / {len(self.setup_obj.testbenches)}) Testbench: {tb}")
+            
+            wrapper.update_params(parameterization=parameterization)
+            curr_raw, curr_log, task_name = wrapper.run_and_wait(exe_log=True)
+            results[tb] = curr_raw
+       
+            if curr_raw is None:
+                logger.critical("Something went wrong during simulation as no RAW file was generated")
+                raise RuntimeError("Something went wrong during simulation as no RAW file was generated")
         
-        if not self.setup_obj.save_sim and not save_sim_override:
-            self.spicelib_wrapper.clean_up()
-        return curr_raw
+            if not self.setup_obj.save_sim and not save_sim_override:
+                    wrapper.clean_up(keep_netlist=True, keep_logs=True)
+            
+        return results
     
     def plot_score_value_by_spec(self, spec_name: str, save_path: Path | None = None, show: bool = False):
         """
@@ -524,6 +534,15 @@ class Spice_Base_Optimizer(Base_Optimizer):
             logger.info("Opening interactive plot in browser...")
             fig.show()
 
+    def clean_up(self):
+        """Clean up all SPICE simulations if needed."""
+        logger.info("Cleaning up all SPICE simulations...")
+        for tb, wrapper in self.spicelib_wrappers.items():
+            logger.debug(f"Cleaning up SPICE wrapper for testbench: {tb}")
+            wrapper.clean_up(delete_directories=True)
+        logger.info("✅ Clean up completed for all SPICE wrappers.")
+        logger.info("")
+
 # ------------------------------------------------
 # A.1 [ABSTRACT] Bode Fitter
 # ------------------------------------------------
@@ -531,13 +550,13 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
     """ Nevergrad optimizer that fits a SPICE-simulated transfer function to a target transfer function. """
     def __init__(self,
                  setup_obj: Project_Setup,
-                 spicelib_wrapper : NGSpice_Wrapper,
+                 spicelib_wrappers : Dict[str, NGSpice_Wrapper],
                  target_tf: Expr,
                  output_node: str = "Vout", # FIXME this needs to go into the spicelib_wrapper
                  frequency_weight: Frequency_Weight | None = None
                  ):
         
-        super().__init__(setup_obj = setup_obj, spicelib_wrapper = spicelib_wrapper)
+        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers)
 
         self.target_tf = target_tf
         self.output_node = output_node
@@ -601,7 +620,7 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
     # --- Helper Methods (only in child class) ---
     def extract_circuit_response_from_latest_run(self) -> torch.Tensor:
         logger.debug("Extracting the circuit response from the latest RAW file")
-        current_complex_response = self.spicelib_wrapper.extract_wave(self.output_node)
+        current_complex_response = self.spicelib_wrappers.extract_wave(self.output_node)
         return current_complex_response
 
     def examine_target(self, f_array: torch.Tensor):
@@ -648,7 +667,7 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
     def prepare_frequency_array(self):
         if self.frequency_array is None:
             try:
-                self.frequency_array = self.spicelib_wrapper.extract_wave("frequency", is_real=True)
+                self.frequency_array = self.spicelib_wrappers.extract_wave("frequency", is_real=True)
             except IndexError:
                 logger.critical("Attempted to look up the 'frequency' trace but it doesnt exist in the RAW file")
                 raise RuntimeError("Attempted to look up the 'frequency' trace but it doesnt exist in the RAW file")
@@ -685,7 +704,7 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
 class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
     def __init__(self,
                  setup_obj: Project_Setup,
-                 spicelib_wrapper : NGSpice_Wrapper):
+                 spicelib_wrappers : Dict[str, NGSpice_Wrapper]):
         """ 
         A Concrete implementation of Spice_Base_Optimizer that evaluates a circuit 
         against a list of TargetSpecs.
@@ -695,40 +714,43 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
         2. Extract scalar metrics defined in TargetSpecs.
         3. Calculate a scalar fitness score (Penalty only).
         """
-        super().__init__(setup_obj = setup_obj, spicelib_wrapper = spicelib_wrapper)
+        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers)
         self.target_specs: ListTargetSpec = setup_obj.optimizer_config.target_specs
         logger.info(f"Initialized the Nevergrad_Spice_Multi_Spec_Optimizer with {len(self.target_specs.targets)} target specs")
     
     # --- Overwriting the Abstract Methods ---
-    def evaluate(self, parameterization: Dict[str, float]) -> Tuple[np.float64, Dict[str, Any]]:
+    def evaluate(self, parameterization: Dict[str, float], append_to_log: bool = True) ->  Tuple[np.floating, Dict[str, Any]]:
         """
         Evaluate the given parameterization by running a SPICE simulation,
         computing the fitness score, and returning it as np.float64 plus a metadata dictionary.
         """
         # 1 - Run a SPICE simulation
         # ---------------------------------------------------------------
-        raw = self.simulate_circuit(parameterization=parameterization)
+        _ = self.simulate_circuit(parameterization=parameterization)
 
         # 2 - Extract performance metrics
         # ---------------------------------------------------------------
-        self.spicelib_wrapper.load_raw(raw) # [Redundant but safe]
         # have to make sure to use the correct plot type
-        performance_array = self.spicelib_wrapper.extract_scalar_variable_from_raw(self.target_specs.list_target_names())
+        performance_array = {}
+        for target in self.target_specs.enabled_targets():
+            performance_array.update(
+                self.spicelib_wrappers[target.testbench].extract_scalar_variable_from_raw(target.name, plot_type=target.get_equivalent_ngspice_plot_type())
+            )
 
         # 3 - Compute the fitness of the performance metrics
         # ---------------------------------------------------------------
         fitness_score, fit_summary = self.compute_fitness(performance_array=performance_array)
 
         # --- Log results ---
-        
-        self.optimization_log.append(OptimizationLogEntry(
-            OptimizationPoint(
-                params=parameterization, 
-                score=fitness_score, 
-            ),
-            fit_summary=fit_summary, 
-            log_file=self.spicelib_wrapper.curr_log
-            ))
+        if append_to_log:
+            self.optimization_log.append(OptimizationLogEntry(
+                OptimizationPoint(
+                    params=parameterization, 
+                    score=fitness_score, 
+                ),
+                fit_summary=fit_summary, 
+                log_file={wrapper.testbench_name: wrapper.curr_log for wrapper in self.spicelib_wrappers.values() if wrapper.curr_log is not None}
+                ))
 
         logger.debug(f"finished the trial evaluation.... summary")
         logger.debug(f"\tmetric_value = {fitness_score}")
@@ -736,27 +758,37 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
         return fitness_score, fit_summary
     
     def plot_solution(self, parameterization: Dict[str, float], **kwargs):
-
-        raw = self.simulate_circuit(parameterization, save_sim_override=True)
-        self.spicelib_wrapper.load_raw(raw) # [Redundant but safe]
         
-        performance_array = self.spicelib_wrapper.extract_scalar_variable_from_raw(self.target_specs.list_target_names())
-        score, fit_summary = self.compute_fitness(performance_array=performance_array)
+        score, fit_summary = self.evaluate(parameterization, append_to_log=False)
 
         logger.info(f"total score: {score}")
         for spec_name, spec_info in fit_summary.items():
             logger.info(f"\tSpec '{spec_name}': curr_val={spec_info['curr_val']}, score={spec_info['score']}")
 
         if kwargs.get("show_plot", False):
-            trace_name = kwargs.get("trace_name", None)
-            if trace_name is None:
+
+            try:
+                trace_name = kwargs["trace_name"]
+            except KeyError:
                 logger.error("To plot the solution, trace_name must be provided in kwargs")
                 raise RuntimeError("To plot the solution, trace_name must be provided in kwargs")
             
-            trace = self.spicelib_wrapper.extract_wave(trace_name, is_real=False)
+            try:
+                plot_type : Ngspice_Plot_Type = kwargs["plot_type"]
+            except KeyError:
+                logger.error("To plot the solution, plot_type must be provided in kwargs")
+                raise RuntimeError("To plot the solution, plot_type must be provided in kwargs")
+            
+            try:
+                tb_name : str = kwargs["testbench_name"]
+            except KeyError:
+                logger.error("To plot the solution, testbench_name must be provided in kwargs")
+                raise RuntimeError("To plot the solution, testbench_name must be provided in kwargs")   
+            
+            trace = self.spicelib_wrappers[tb_name].extract_wave(trace_name, plot_type=plot_type, is_real=False)
             
             plot_complex_response(
-                frequencies=self.spicelib_wrapper.extract_wave("frequency", is_real=True),
+                frequencies=self.spicelib_wrappers[tb_name].extract_wave("frequency", plot_type=plot_type, is_real=True),
                 complex_response_list=[trace],
                 labels = kwargs.get("labels", [trace_name]), 
                 title  = kwargs.get("title", f"Response: {trace_name}")
@@ -868,8 +900,8 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
 class Spice_Single_Objective(Spice_Constraint_Satisfaction):
     def __init__(self,
                 setup_obj: Project_Setup,
-                spicelib_wrapper : NGSpice_Wrapper):
-        super().__init__(setup_obj = setup_obj, spicelib_wrapper = spicelib_wrapper)
+                spicelib_wrappers : Dict[str, NGSpice_Wrapper]):
+        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers)
     
     def compute_fitness_for_spec(self, curr_val: np.float64 | float, target_spec: TargetSpec) -> np.float64:
         """Computes the fitness score for current achieved metric given the target spec. Negative values """
@@ -901,7 +933,7 @@ class Spice_Single_Objective(Spice_Constraint_Satisfaction):
         # --------------------------
         if target_spec.goal == OptimizationGoalType.EXCEED:
             if spec_curr_val < target_val - tolerance:
-                spec_reward = compute_reward(curr_val=spec_curr_val, target_val=adjusted_target, error_type=target_spec.error_type, normalizing_coeff=normalizing_coeff)
+                spec_reward = compute_reward(curr_val=spec_curr_val, target_val=adjusted_target, reward_type=target_spec.error_type, normalizing_coeff=normalizing_coeff)
             elif spec_curr_val > target_val + tolerance:
                 spec_reward = np.float64(0.0)
         # --------------------------
@@ -909,7 +941,7 @@ class Spice_Single_Objective(Spice_Constraint_Satisfaction):
         # --------------------------
         elif target_spec.goal == OptimizationGoalType.MINIMIZE:
             if spec_curr_val > target_val + tolerance:
-                spec_reward = compute_reward(curr_val=spec_curr_val, target_val=adjusted_target, error_type=target_spec.error_type, normalizing_coeff=normalizing_coeff)
+                spec_reward = compute_reward(curr_val=spec_curr_val, target_val=adjusted_target, reward_type=target_spec.error_type, normalizing_coeff=normalizing_coeff)
             else:
                 spec_reward = np.float64(0.0) 
 
