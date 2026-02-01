@@ -181,12 +181,12 @@
 
   noise v(out) V3 lin 1000 1MEG 1000MEG 1
   echo SAVING SIMULATION RESULTS IN THE RAW FILE  
-  echo NOISE 1 -> saving the Integrated Noise
+  echo NOISE 1 saving the Integrated Noise
   setplot noise1
   remzerovec
   write
 
-  echo NOISE 2 -> saving the Noise Spectral Density Curves
+  echo NOISE 2 saving the Noise Spectral Density Curves
   setplot noise2 
   remzerovec
   write
