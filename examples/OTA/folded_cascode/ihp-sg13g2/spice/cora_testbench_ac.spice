@@ -49,100 +49,6 @@
   option numdgt = 3
   * reset
 
-  * save @V1[i]  * Save DC current of V1
-  * save @n.x1.XM0.nsg13_lv_pmos[gm]
-  * save @n.x1.XM1.nsg13_lv_pmos[gm]
-  * save @n.x1.XM2.nsg13_lv_pmos[gm]
-  * save @n.x1.XM3.nsg13_lv_nmos[gm]
-  * save @n.x1.XM4.nsg13_lv_nmos[gm]
-  * save @n.x1.XM5.nsg13_lv_nmos[gm]
-  * save @n.x1.XM6.nsg13_lv_nmos[gm]
-  * save @n.x1.XM7.nsg13_lv_pmos[gm]
-  * save @n.x1.XM8.nsg13_lv_pmos[gm]
-  * save @n.x1.XM9.nsg13_lv_pmos[gm]
-  * save @n.x1.XM10.nsg13_lv_pmos[gm]
-  * save @n.x1.XM11.nsg13_lv_pmos[gm]
-  * save @n.x1.XM12.nsg13_lv_pmos[gm]
-  * save @n.x1.XM13.nsg13_lv_nmos[gm]  
-  * save @n.x1.XM0.nsg13_lv_pmos[gds]
-  * save @n.x1.XM1.nsg13_lv_pmos[gds]
-  * save @n.x1.XM2.nsg13_lv_pmos[gds]
-  * save @n.x1.XM3.nsg13_lv_nmos[gds]
-  * save @n.x1.XM4.nsg13_lv_nmos[gds]
-  * save @n.x1.XM5.nsg13_lv_nmos[gds]
-  * save @n.x1.XM6.nsg13_lv_nmos[gds]
-  * save @n.x1.XM7.nsg13_lv_pmos[gds]
-  * save @n.x1.XM8.nsg13_lv_pmos[gds]
-  * save @n.x1.XM9.nsg13_lv_pmos[gds]
-  * save @n.x1.XM10.nsg13_lv_pmos[gds]
-  * save @n.x1.XM11.nsg13_lv_pmos[gds]
-  * save @n.x1.XM12.nsg13_lv_pmos[gds]
-  * save @n.x1.XM13.nsg13_lv_nmos[gds]  
-  * save @n.x1.XM0.nsg13_lv_pmos[ids]
-  * save @n.x1.XM1.nsg13_lv_pmos[ids]
-  * save @n.x1.XM2.nsg13_lv_pmos[ids]
-  * save @n.x1.XM3.nsg13_lv_nmos[ids]
-  * save @n.x1.XM4.nsg13_lv_nmos[ids]
-  * save @n.x1.XM5.nsg13_lv_nmos[ids]
-  * save @n.x1.XM6.nsg13_lv_nmos[ids]
-  * save @n.x1.XM7.nsg13_lv_pmos[ids]
-  * save @n.x1.XM8.nsg13_lv_pmos[ids]
-  * save @n.x1.XM9.nsg13_lv_pmos[ids]
-  * save @n.x1.XM10.nsg13_lv_pmos[ids]
-  * save @n.x1.XM11.nsg13_lv_pmos[ids]
-  * save @n.x1.XM12.nsg13_lv_pmos[ids]
-  * save @n.x1.XM13.nsg13_lv_nmos[ids]  
-  * save @n.x1.XM0.nsg13_lv_pmos[vds]
-  * save @n.x1.XM1.nsg13_lv_pmos[vds]
-  * save @n.x1.XM2.nsg13_lv_pmos[vds]
-  * save @n.x1.XM3.nsg13_lv_nmos[vds]
-  * save @n.x1.XM4.nsg13_lv_nmos[vds]
-  * save @n.x1.XM5.nsg13_lv_nmos[vds]
-  * save @n.x1.XM6.nsg13_lv_nmos[vds]
-  * save @n.x1.XM7.nsg13_lv_pmos[vds]
-  * save @n.x1.XM8.nsg13_lv_pmos[vds]
-  * save @n.x1.XM9.nsg13_lv_pmos[vds]
-  * save @n.x1.XM10.nsg13_lv_pmos[vds]
-  * save @n.x1.XM11.nsg13_lv_pmos[vds]
-  * save @n.x1.XM12.nsg13_lv_pmos[vds]
-  * save @n.x1.XM13.nsg13_lv_nmos[vds]  
-  * save @n.x1.XM0.nsg13_lv_pmos[vgs]
-  * save @n.x1.XM1.nsg13_lv_pmos[vgs]
-  * save @n.x1.XM2.nsg13_lv_pmos[vgs]
-  * save @n.x1.XM3.nsg13_lv_nmos[vgs]
-  * save @n.x1.XM4.nsg13_lv_nmos[vgs]
-  * save @n.x1.XM5.nsg13_lv_nmos[vgs]
-  * save @n.x1.XM6.nsg13_lv_nmos[vgs]
-  * save @n.x1.XM7.nsg13_lv_pmos[vgs]
-  * save @n.x1.XM8.nsg13_lv_pmos[vgs]
-  * save @n.x1.XM9.nsg13_lv_pmos[vgs]
-  * save @n.x1.XM10.nsg13_lv_pmos[vgs]
-  * save @n.x1.XM11.nsg13_lv_pmos[vgs]
-  * save @n.x1.XM12.nsg13_lv_pmos[vgs]
-  * save @n.x1.XM13.nsg13_lv_nmos[vgs] 
-  * save @n.x1.XM0.nsg13_lv_pmos[vth]
-  * save @n.x1.XM1.nsg13_lv_pmos[vth]
-  * save @n.x1.XM2.nsg13_lv_pmos[vth]
-  * save @n.x1.XM3.nsg13_lv_nmos[vth]
-  * save @n.x1.XM4.nsg13_lv_nmos[vth]
-  * save @n.x1.XM5.nsg13_lv_nmos[vth]
-  * save @n.x1.XM6.nsg13_lv_nmos[vth]
-  * save @n.x1.XM7.nsg13_lv_pmos[vth]
-  * save @n.x1.XM8.nsg13_lv_pmos[vth]
-  * save @n.x1.XM9.nsg13_lv_pmos[vth]
-  * save @n.x1.XM10.nsg13_lv_pmos[vth]
-  * save @n.x1.XM11.nsg13_lv_pmos[vth]
-  * save @n.x1.XM12.nsg13_lv_pmos[vth]
-  * save @n.x1.XM13.nsg13_lv_nmos[vth]  
-
-  echo
-  echo (A) start of OP
-  echo ----------------------------------
-  * --- Initial Operating Point ---
-  op
-  write
-  set appendwrite
-
   echo
   echo (B) start of AC Sim
   echo ----------------------------------
@@ -172,29 +78,7 @@
 
   echo ----------------------------------
   echo END of AC sim
-  echo  ----------------------------------
-
-
-  echo
-  echo (C) start of Noise sim
-  echo ----------------------------------
-
-  noise v(out) V3 lin 1000 1MEG 1000MEG 1
-  echo SAVING SIMULATION RESULTS IN THE RAW FILE  
-  echo NOISE 1 saving the Integrated Noise
-  setplot noise1
-  remzerovec
-  write
-
-  echo NOISE 2 saving the Noise Spectral Density Curves
-  setplot noise2 
-  remzerovec
-  write
-
-  echo ----------------------------------
-  echo END of Noise sim
-  echo  ----------------------------------
- 
+  echo  ---------------------------------- 
 
   echo ==================================
   echo END of Control
