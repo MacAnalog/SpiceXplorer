@@ -145,4 +145,5 @@ class Circuit_Optimizer_Orchestrator_with_SPICE(Circuit_Optimizer_Orchestrator_B
             if not spicelib_wrapper.run_sanity_check(use_editor=use_editor, sim_execution_t=Sim_Execution_Type.RUN_NOW):
                 logger.warning(f"sanity check failed for spicelib_wrapper for testbench: {tb_name}")
                 return False
+        logger.info(f"HOORAY! sanity check passed for all spicelib_wrappers.")
         return True

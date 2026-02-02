@@ -23,7 +23,9 @@ from   spicexplorer.core.domains    import OptimizationGoalType, OptimizationPoi
 from   spicexplorer.core.utils      import compute_error, compute_reward, convert_linear_to_log, log_denormalize, linear_denormalize
 from   spicexplorer.core.utils      import plot_complex_response, get_bode_fitness_loss, Transfer_Func_Helper, Frequency_Weight, UNIT_DICT
 
-logger = logging.getLogger("SpiceXplorer.base_optimizer")
+from spicexplorer.logging import setup_loggers
+
+logger = logging.getLogger("spicexplorer.optimization.base")
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 dtype  = torch.double
@@ -418,7 +420,7 @@ class Spice_Base_Optimizer(Base_Optimizer):
         self.spicelib_wrappers = spicelib_wrappers
     
     # --- Helper Methods (only in child class) ---
-    def simulate_circuit(self, parameterization: Dict[str, float], save_sim_override: bool = False) -> Dict[str, RawRead]:
+    def simulate_circuit(self, parameterization: Dict[str, float]) -> Dict[str, RawRead]:
         logger.debug("Simulating the circuit with the given parameterization")
         results = {}
         tb_idx = 0
@@ -434,9 +436,6 @@ class Spice_Base_Optimizer(Base_Optimizer):
             if curr_raw is None:
                 logger.critical("Something went wrong during simulation as no RAW file was generated")
                 raise RuntimeError("Something went wrong during simulation as no RAW file was generated")
-        
-            if not self.setup_obj.save_sim and not save_sim_override:
-                    wrapper.clean_up(keep_netlist=True, keep_logs=True)
             
         return results
     
@@ -534,14 +533,15 @@ class Spice_Base_Optimizer(Base_Optimizer):
             logger.info("Opening interactive plot in browser...")
             fig.show()
 
-    def clean_up(self):
+    def clean_up(self, delete_raw_only: bool = False) -> None:
         """Clean up all SPICE simulations if needed."""
-        logger.info("Cleaning up all SPICE simulations...")
+        logger.debug(f"Cleaning up all SPICE simulation (delete raws only? {delete_raw_only})...")
         for tb, wrapper in self.spicelib_wrappers.items():
             logger.debug(f"Cleaning up SPICE wrapper for testbench: {tb}")
-            wrapper.clean_up(delete_directories=True)
-        logger.info("✅ Clean up completed for all SPICE wrappers.")
-        logger.info("")
+            if delete_raw_only: wrapper.clean_up(keep_netlist=True, keep_logs=True, keep_raw=False)
+            else:               wrapper.clean_up(delete_directories=True)
+        logger.debug("✅ Clean up completed for all SPICE wrappers.")
+        logger.debug("")
 
 # ------------------------------------------------
 # A.1 [ABSTRACT] Bode Fitter
@@ -609,11 +609,12 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
                 )
             )
 
-
         logger.debug(f"finished the trial evaluation.... summary")
         logger.debug(f"\tmetric_value = {fitness_score}")
         logger.debug(f"\t\t- mag_loss : {mag_loss}")
         logger.debug(f"\t\t- phase_loss : {phase_loss}")
+
+        self.clean_up(delete_raw_only=True)
 
         return np.float64(fitness_score), fit_summary
 
@@ -755,6 +756,8 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
         logger.debug(f"finished the trial evaluation.... summary")
         logger.debug(f"\tmetric_value = {fitness_score}")
 
+        self.clean_up(delete_raw_only=True)
+
         return fitness_score, fit_summary
     
     def plot_solution(self, parameterization: Dict[str, float], **kwargs):
@@ -804,7 +807,7 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
 
         # Iterate over each target specification
         # ------------------------------------------------------------------------------
-        for spec in self.target_specs.targets:
+        for spec in self.target_specs.enabled_targets():
             spec_fitness: np.float64 = np.float64(0.0)
             # a - Compute the spec score
             if spec.name in performance_array and performance_array[spec.name] is not None and not np.isnan(performance_array[spec.name]):
@@ -814,16 +817,15 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
                 if self.verbose:
                     logger.debug(f"Target spec name '{spec.name}' not found in performance array keys: {list(performance_array.keys())}")
                     logger.debug(f"assigning large penalty to the {spec.name} spec")
-                spec_fitness = np.float64(spec.weight) if spec.error_type==Error_Types.RELATIVE_SIGMOID else  -1 * np.float64(MAX_PENALTY) # assign a large score if the spec is not found
+                spec_fitness = -1*np.float64(spec.weight) if spec.error_type==Error_Types.RELATIVE_SIGMOID else  -1 * np.float64(MAX_PENALTY) # assign a large score if the spec is not found
             # b - Log the spec score
             fit_summary[spec.name] = {
                 "curr_val": performance_array.get(spec.name, np.nan) ,
                 "score": spec_fitness
             }
-            # c - Update the overall fitness (if enabled)
-            if spec.enable:
-                if spec_fitness > 0:    reward  += spec_fitness
-                else:                   penalty += spec_fitness
+            # c - Update the overall fitness
+            if spec_fitness > 0:    reward  += spec_fitness
+            else:                   penalty += spec_fitness
         # ------------------------------------------------------------------------------
         
         total_score = reward if penalty > -1*EPSILON else penalty

@@ -17,7 +17,7 @@ from    tqdm        import tqdm
 from   spicexplorer.core.symbolic_sizing                     import Symbolic_Sizing_Assist
 from   spicexplorer.core.utils                               import plot_complex_response, get_bode_fitness_loss, Transfer_Func_Helper, Frequency_Weight, UNIT_DICT
 
-logger = logging.getLogger("SpiceXplorer.optimizer")
+logger = logging.getLogger("spicexplorer.optimization.stochastic.symbolic")
 
 s = sp.symbols("s")
 

@@ -12,7 +12,7 @@ from   spicexplorer.core.domains    import Project_Setup, TestbenchParams
 
 from   spicexplorer.optimization.base         import Spice_Constraint_Satisfaction, Spice_Single_Objective, Spice_Bode_Optimizer, Base_Optimizer
 
-logger = logging.getLogger("SpiceXplorer.Nevergrad")
+logger = logging.getLogger("spicexplorer.optimization.stochastic.nevergrad")
 logger.debug(f'imported {__name__}')
 
 

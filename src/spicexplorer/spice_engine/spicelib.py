@@ -46,9 +46,9 @@ class Ngspice_Plot_Type(Enum):
     OP = "Operating Point"
     NOISE_1 = "Integrated Noise"
     NOISE_2 = "Noise Spectral Density Curves"
+    TRAN = "Transient Analysis"
     # Below simulation types need to be tested:
-    DC = "DC"
-    TRAN = "TRAN"
+    DC = "DC Analysis"
 
 # ---------------------------------
 # Class Definitions
@@ -652,7 +652,7 @@ class NGSpice_Wrapper:
             self.logger.warning(f"⚠️ Output folder {self.output_folder} does not exist. Nothing to clean.")
             return
 
-        self.logger.info(f"🧹 Starting cleanup in: {self.output_folder}")
+        self.logger.debug(f"🧹 Starting cleanup in: {self.output_folder}")
         
         for item in self.output_folder.iterdir():
             if item.is_dir():
@@ -687,7 +687,7 @@ class NGSpice_Wrapper:
                 if files_deleted > 0:
                     self.logger.debug(f"\t✨ Cleaned {files_deleted} files in {item.name}")
 
-        self.logger.info("✅ Cleanup sequence finished")
+        self.logger.debug("✅ Cleanup sequence finished")
 
     def get_logger(self) -> logging.Logger:
         if self.logger is None:
