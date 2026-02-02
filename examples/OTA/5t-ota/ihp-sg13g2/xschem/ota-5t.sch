@@ -1,4 +1,5 @@
-v {xschem version=3.4.7 file_version=1.2}
+v {xschem version=3.4.5 file_version=1.2
+}
 G {}
 K {}
 V {}
@@ -198,9 +199,9 @@ model=sg13_lv_pmos
 spiceprefix=X
 }
 C {sg13g2_pr/sg13_lv_nmos.sym} 660 -280 0 1 {name=M6
-l=5u
-w=2.5u
-ng=5
+l=x_dut_nfet_mirror_ref_w
+w=x_dut_nfet_mirror_ref_l
+ng=1
 m=1
 model=sg13_lv_nmos
 spiceprefix=X
