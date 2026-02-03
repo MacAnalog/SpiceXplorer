@@ -8,7 +8,7 @@ project:
   ws_root : /home/noorizad/code/SpiceXplorer/examples/OTA/5t-ota/ihp-sg13g2/
   # The following paths are relative to the ws_root
   netlist : spice/ota-5t_tb-loopgain.spice
-  outdir  : spice/spice_out
+  outdir  : spice/temp_spice_out
   
   # ------------------------
   # Technology Specification: Define the technology and PDK rules
@@ -140,10 +140,14 @@ project:
   # Optimizer Configuration: Configure the optimizer and target specifications
   # ------------------------
   optimizer_config:
-    name: LHSSearch # CMA, RandomSearch/LHSSearch, OnePlusOne, TwoPointsDE, NGOpt, PSO, DE, BFGSCMAPlus
     type: nevergrad
-    budget: 2000
     random_seed: 48
+    budget: 5
+    name: SamplingSearch
+    optimizer_kwargs:
+      sampler: Hammersley  # The closest alternative to Sobol
+      scrambled: True      # Critical: randomization removes structural artifacts
+      rescaled: True       # Ensures you hit the boundaries    
 
     # The following overwrite [optional] the optimizer bounds.
     lin_variable_bounds:

@@ -444,7 +444,7 @@ class Spice_Base_Optimizer(Base_Optimizer):
         Plot the score value for a specific target spec over the optimization trials.
         Includes target spec value, tolerance band, and error type information.
         """
-        logger = logging.getLogger("SpiceXplorer.plotter")
+        logger = logging.getLogger("spicexplorer.plotter")
         if len(self.optimization_log) < 1:
             logger.warning("No optimization log to plot")
             return
@@ -797,7 +797,7 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
                 title  = kwargs.get("title", f"Response: {trace_name}")
                 )
 
-    def compute_fitness(self, performance_array: Dict[str, np.float64 | torch.Tensor]) -> Tuple[np.float64, Dict[str, Any]]:
+    def compute_fitness(self, performance_array: Dict[str, float | np.float64 | torch.Tensor]) -> Tuple[np.float64, Dict[str, Any]]:
         """ Compute the fitness based on the performance metrics extracted from SPICE simulations and the target specs. """
         # Initialize variables
         reward      : np.float64 = np.float64(0.0)

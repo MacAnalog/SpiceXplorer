@@ -1,10 +1,9 @@
 """This Module implements the nevergrad-based (evolutionary algorithms) optimizers """
 import logging
-import torch
 import numpy        as np
 import nevergrad    as ng
 
-from    typing      import Dict, Tuple, Any, Mapping
+from    typing      import Dict, Tuple, Any, Optional
 
 # Symxplorer Specific Imports
 from   spicexplorer.spice_engine    import NGSpice_Wrapper
@@ -22,6 +21,100 @@ logger.debug(f'imported {__name__}')
 
 
 # ----------------------------
+# --- Function Definitions ---
+# ---------------------------
+
+def create_optimizer(
+    optimizer_name: str,
+    parametrization: ng.p.Dict,
+    budget: int,
+    optimizer_kwargs: Optional[Dict[str, Any]] = None,
+    random_seed: Optional[int] = None
+) -> ng.optimizers.base.Optimizer:
+    """
+    Factory function to instantiate a Nevergrad optimizer from configuration.
+    
+    Handles two cases:
+    1. Families: Configurable classes (e.g. DifferentialEvolution, ParametrizedCMA).
+       These require a two-step init: Family(**kwargs) -> Optimizer(params, budget).
+    2. Registry: Pre-configured strings (e.g. 'NGOpt', 'TwoPointsDE').
+       These are instantiated directly: RegistryKey(params, budget, **kwargs).
+    """
+    if optimizer_kwargs is None:
+        optimizer_kwargs = {}
+    
+    # 1. Set Random Seed (Global for the parametrization)
+    if random_seed is not None:
+        parametrization.random_state = np.random.RandomState(random_seed)
+
+    # Make a copy of kwargs to avoid mutating the original config
+    kwargs = optimizer_kwargs.copy()
+    
+    # Extract 'num_workers' (common to all, defaults to 1)
+    num_workers = kwargs.pop('num_workers', 1)
+
+    # -------------------------------------------------------------------------
+    # CASE A: CONFIGURABLE FAMILIES
+    # Check if the name exists in ng.families (e.g., "DifferentialEvolution")
+    # -------------------------------------------------------------------------
+    if hasattr(ng.families, optimizer_name):
+        try:
+            # 1. Get the Family Class
+            family_class = getattr(ng.families, optimizer_name)
+            
+            # 2. Configure the Family (Pass algorithmic settings like 'popsize', 'crossover')
+            #    Any argument that the Family constructor doesn't accept will raise a TypeError here.
+            optimizer_factory = family_class(**kwargs)
+            
+            # 3. Instantiate the Optimizer (Pass execution settings)
+            optimizer = optimizer_factory(
+                parametrization=parametrization, 
+                budget=budget, 
+                # num_workers=num_workers # FIXME: Do not enforce num_workers for now. 
+            )
+            
+            logger.info(f"Initialized Family '{optimizer_name}' with config: {kwargs}")
+            return optimizer
+
+        except TypeError as e:
+            logger.error(f"Invalid argument provided for Family '{optimizer_name}': {e}")
+            raise
+
+    # -------------------------------------------------------------------------
+    # CASE B: REGISTRY PRESETS
+    # Check if the name exists in the registry (e.g., "NGOpt", "TwoPointsDE")
+    # -------------------------------------------------------------------------
+    registry = ng.optimizers.registry.get(optimizer_name)
+    if registry is not None:
+        # Registry optimizers are instantiated directly.
+        # Note: They typically do NOT accept algorithmic kwargs (like 'crossover').
+        # If kwargs contains something the registry opt doesn't support, it might crash or ignore it.
+        try:
+            optimizer = registry(
+                parametrization=parametrization, 
+                budget=budget, 
+                num_workers=num_workers,
+                **kwargs # Passing remaining kwargs (rarely used for registry items)
+            )
+            logger.info(f"Initialized Registry Optimizer '{optimizer_name}'")
+            return optimizer
+        except TypeError as e:
+             logger.warning(
+                 f"Optimizer '{optimizer_name}' rejected extra arguments {kwargs}. "
+                 "Registry presets usually do not accept algorithmic kwargs. "
+                 "Use the Family Name instead if you want to configure it."
+             )
+             raise e
+            
+    # -------------------------------------------------------------------------
+    # CASE C: FAILURE
+    # -------------------------------------------------------------------------
+    raise ValueError(
+        f"Optimizer '{optimizer_name}' not found in 'ng.families' or 'ng.optimizers.registry'.\n"
+        f"Available Families: {[x for x in dir(ng.families) if not x.startswith('_')]}\n"
+    )
+
+# ----------------------------
 # --- Class Definitions ---
 # ----------------------------
 
@@ -33,15 +126,21 @@ class NevergradMixin(Base_Optimizer):
     # --- Overwriting Some Abstract Methods ---
     def parameterize(self) -> ng.p.Dict:        
         parameters: Dict[str, ng.p.Scalar] = {}
+
         for param in self.setup_obj.dut_params:
             if param.log_scale:
-                parameters[param.name] = ng.p.Log(
+                 p_obj = ng.p.Log(
                     lower=self.optimizer_config.log_variable_bounds.min, 
                     upper=self.optimizer_config.log_variable_bounds.max)
             else:
-                parameters[param.name] = ng.p.Scalar(
+                p_obj = ng.p.Scalar(
                     lower=self.optimizer_config.lin_variable_bounds.min, 
                     upper=self.optimizer_config.lin_variable_bounds.max)
+            
+            if param.is_integer:
+                p_obj.set_integer_casting()
+
+            parameters[param.name] = p_obj
                 
         self.parametrization = ng.p.Dict(**parameters)
         return self.parametrization
@@ -50,16 +149,26 @@ class NevergradMixin(Base_Optimizer):
         if self.parametrization is None:
             logger.critical("NEED TO CALL self.parameterize")
             return False
-        
-        if self.optimizer_config.random_seed is not None:
-            self.parametrization.random_state = np.random.RandomState(self.optimizer_config.random_seed)
 
-        registry = ng.optimizers.registry.get(self.optimizer_config.name)
-        if registry is not None:
-            self.optimizer = registry(parametrization=self.parametrization, budget=self.optimizer_config.budget)
-            logger.info(f"Optimizer is set to {self.optimizer.name} with budget = {self.optimizer_config.budget}")
+        try:
+            self.optimizer = create_optimizer(
+                optimizer_name=self.optimizer_config.name,
+                parametrization=self.parametrization,
+                budget=self.optimizer_config.budget,
+                optimizer_kwargs=self.optimizer_config.optimizer_kwargs,
+                random_seed=self.optimizer_config.random_seed
+            )
+            
+            # FIXME: Handle Initial Points Manually
+            # if self.optimizer_config.initial_points:
+            #     for point in self.optimizer_config.initial_points:
+            #          self.optimizer.suggest(self.parametrization.spawn_child(new_value=point).value)
+            
             return True
-        return False
+            
+        except Exception as e:
+            logger.critical(f"Failed to create optimizer: {e}")
+            return False
 
     def optimization_step(self) -> Tuple[Dict[str, np.floating] , np.floating , Dict[str, Any]]:
         # Get a new candidate

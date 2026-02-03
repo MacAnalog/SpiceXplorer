@@ -168,6 +168,7 @@ class Param:
     init: Optional[Union[float, np.float64, str]]
     description: Optional[str]
     log_scale: bool = False
+    is_integer: bool = False
     freeze: bool = True
 
     def needs_resolution(self) -> bool:
@@ -485,6 +486,8 @@ class OptimizerConfig:
     name: str # Optimization algorithm name
     type: str # Optimizer family type
     budget: int
+    optimizer_kwargs: Optional[Dict[str, Any]]
+
     target_specs: ListTargetSpec
     lin_variable_bounds: Optional[VariableBoundConfig]
     log_variable_bounds: Optional[VariableBoundConfig]
@@ -504,6 +507,13 @@ class OptimizerConfig:
             f"Initialized OptimizerConfig: {self.name}, "
             f"type={self.type}, budget={self.budget}, random_seed={self.random_seed}"
         )
+
+        if self.optimizer_kwargs is None:
+            self.optimizer_kwargs = {}
+        else:
+            logger.debug(f"optimizer_kwargs provided:")
+            for k, v in self.optimizer_kwargs.items():
+                logger.debug(f"\t{k}: {v}")
 
         # -------------------------
         # Bounds
@@ -713,7 +723,7 @@ class OptimizationPoint:
 class OptimizationLogEntry:
     """Represents a single entry in the optimization log."""
     point: 'OptimizationPoint'           
-    fit_summary: Optional[Dict[str, Any]] = field(default_factory=dict)   # Depends on your optimizer output (could refine type)
+    fit_summary: Optional[Dict[str, Dict[str, float | np.floating]]] = field(default_factory=dict)   # Depends on your optimizer output (could refine type)
     log_file: Optional[Dict[str, str | Path]] = None                                  # Any log/debug info
 
     def get_score(self) -> float | np.floating:
@@ -736,6 +746,17 @@ class OptimizationLogEntry:
             logger.error(f"tried accessing the fit_summary but this was never created")
             raise ValueError(f"tried accessing the fit_summary but this was never created")
         return self.fit_summary
+    
+    def get_performance_params(self) -> Dict[str, float]:
+        if self.fit_summary is None: raise ValueError("fit_summary field is missing!")
+
+        output = {}
+        for key, val in self.fit_summary.items():
+            output[key] = float(val["curr_val"])
+
+        return output
+
+        
 
 
 class OptimizationLog:
@@ -780,6 +801,9 @@ class OptimizationLog:
 
     def get_params(self, index: int) -> Dict[str, float | np.floating]:
         return self.log[index].get_params()
+    
+    def get_all_loss(self) -> List[np.floating]:
+        return np.array([entry.get_score() for entry in self.log])
 
     def get_metadata(self, index: int) -> Dict[str, Any]:
         return self.log[index].get_metadata()
@@ -792,5 +816,36 @@ class OptimizationLog:
             logger.debug(f"param '{param_name}' not found in optimization trace")
             return False
         return True
+    
+    def is_empty(self):
+        if len(self.log) == 0:
+            logger.debug("no log file in the object")
+            return True
+        return False
+    
+    def list_available_params(self) -> List[str]:
+        if self.is_empty(): return []
+        return list(self.log[0].get_params().keys())
+    
+    def list_available_metrics(self) -> List[str]:
+        if self.is_empty(): return []
+        return list(self.log[0].get_fit_summary().keys())
+    
+
+    def update_entry(self, index: int, new_entry: OptimizationLogEntry) -> None:
+        """Update an existing log entry at the specified index."""
+        if index < 0 or index >= len(self.log):
+            logger.error(f"Index {index} out of range for OptimizationLog of size {len(self.log)}")
+            raise IndexError("Index out of range")
+        self.log[index] = new_entry
+
+    def update_entry_fit_summary(self, index: int, fit_summary: Dict[str, Dict[str, float | np.floating]]) -> None:
+        """Update the fit_summary of an existing log entry at the specified index."""
+        if index < 0 or index >= len(self.log):
+            logger.error(f"Index {index} out of range for OptimizationLog of size {len(self.log)}")
+            raise IndexError("Index out of range")
+        self.log[index].fit_summary = fit_summary
+    
+
         
         
