@@ -14,6 +14,10 @@ from    dacite      import from_dict, Config
 from    dataclasses import asdict
 from    datetime    import datetime
 from    sympy       import Expr
+from    time        import sleep
+
+
+from spicelib.sim.run_task   import RunTask   as SpicelibRunTaskClass
 
 
 # Symxplorer Specific Imports
@@ -422,7 +426,8 @@ class Spice_Base_Optimizer(Base_Optimizer):
     # --- Helper Methods (only in child class) ---
     def simulate_circuit(self, parameterization: Dict[str, float]) -> Dict[str, RawRead]:
         logger.debug("Simulating the circuit with the given parameterization")
-        results = {}
+        results :  Dict[str, RawRead] = {}
+        run_task_lst : Dict[str, SpicelibRunTaskClass] = {}
         tb_idx = 0
 
         for tb, wrapper in self.spicelib_wrappers.items():
@@ -430,13 +435,33 @@ class Spice_Base_Optimizer(Base_Optimizer):
             logger.debug(f"\t({tb_idx} / {len(self.setup_obj.testbenches)}) Testbench: {tb}")
             
             wrapper.update_params(parameterization=parameterization)
-            curr_raw, curr_log, task_name = wrapper.run_and_wait(exe_log=True)
-            results[tb] = curr_raw
-       
-            if curr_raw is None:
-                logger.critical("Something went wrong during simulation as no RAW file was generated")
-                raise RuntimeError("Something went wrong during simulation as no RAW file was generated")
-            
+
+            if not self.setup_obj.parallel_sim:
+                logger.debug(f"parallel_sim: FALSE -> Using run_and_wait method")
+                curr_raw, curr_log, task_name = wrapper.run_and_wait(exe_log=True)
+        
+                if curr_raw is None:
+                    logger.critical("Something went wrong during simulation as no RAW file was generated")
+                    raise RuntimeError("Something went wrong during simulation as no RAW file was generated")
+                
+                results[tb] = curr_raw
+
+            else:                
+                logger.debug(f"parallel_sim: TRUE -> Using run_and_pass method")
+                run_task = wrapper.run_and_pass(exe_log=True)
+                run_task_lst[tb] = run_task
+
+        if self.setup_obj.parallel_sim:
+            sims_done_flag : bool = False
+            logger.debug("Waiting for tasks to finish.")
+            while not sims_done_flag:
+                status = [not run_task.is_alive() for run_task in run_task_lst.values()]
+                sims_done_flag = all(status)
+                sleep(0.01)
+                pass # wait so its done
+            logger.debug("All tasks completed.")
+            for tb, wrapper in self.spicelib_wrappers.items():
+                wrapper.read_and_save_task_outputs(task=run_task_lst[tb])
         return results
     
     def plot_score_value_by_spec(self, spec_name: str, save_path: Path | None = None, show: bool = False):

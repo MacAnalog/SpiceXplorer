@@ -23,6 +23,7 @@ logger = logging.getLogger("spicexplorer.designer_tools.domains")
 class SimType(str, Enum):
     DC = "dc"
     AC = "ac"
+    OP = "op"
     TRAN = "tran"
     NOISE = "noise"
     NOISE_SPECTRUM = "noise_spectrum"
@@ -96,6 +97,7 @@ SIMTYPE_TO_NGSPICE_PLOTTYPE : Dict[SimType, Ngspice_Plot_Type] = {
     SimType.TRAN: Ngspice_Plot_Type.TRAN,
     SimType.NOISE: Ngspice_Plot_Type.NOISE_1,
     SimType.NOISE_SPECTRUM: Ngspice_Plot_Type.NOISE_2,
+    SimType.OP: Ngspice_Plot_Type.OP,
 }
 
 # ------------------ Helpers ------------------
@@ -594,6 +596,7 @@ class Project_Setup:
     optimizer_config: OptimizerConfig
     
     save_sim:  bool = False
+    parallel_sim: bool = True
 
     def __post_init__(self):
         # correct path types
