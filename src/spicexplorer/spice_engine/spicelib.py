@@ -522,15 +522,15 @@ class NGSpice_Wrapper:
         # 2. Handle case where plot type isn't found
         if target_plot is None:
             available = self.get_available_plots()
-            self.logger.error(f"❌ Plot type '{plot_type.value}' not found in raw file.")
-            self.logger.error(f"ℹ️ Available plots: {available}")
+            self.logger.critical(f"❌ Plot type '{plot_type.value}' not found in raw file.")
+            self.logger.critical(f"ℹ️ Available plots: {available}")
             raise ValueError(f"Plot type '{plot_type.value}' not found.")
         
         # 3. Extract the data from that specific plot
         try:
             wave = target_plot.get_wave(wave_name)
         except IndexError as e:
-            self.logger.error(f"❌ Waveform '{wave_name}' not found in plot '{plot_type.value}'.")
+            self.logger.debug(f"❌ Waveform '{wave_name}' not found in plot '{plot_type.value}'.")
             raise e
         except Exception as e:
             self.logger.critical(f"❌ Unexpected error while extracting waveform '{wave_name}': {e.__class__.__name__}: {e}")
@@ -566,7 +566,7 @@ class NGSpice_Wrapper:
                     outputs[var] = np.float64(np.nan)
                     
             except (ValueError, IndexError, RuntimeError):
-                self.logger.error(f"❌ Scalar Variable {var} not found in the raw file for plot {plot_type.value}")
+                self.logger.debug(f"❌ Scalar Variable {var} not found in the raw file for plot {plot_type.value}")
                 outputs[var] = np.float64(np.nan)
                 
         return outputs
