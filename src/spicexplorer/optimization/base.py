@@ -124,7 +124,10 @@ class Base_Optimizer(ABC):
             if param_obj is None:
                 raise KeyError(f"Could not find param name {param_name} in {self.setup_obj.list_params()}")
             
-            if param_obj.log_scale:
+            if param_obj.is_integer:
+                denorm_params[param_name] = val
+
+            elif param_obj.log_scale:
                 denorm_params[param_name] = log_denormalize(x=val/log_range, pmin=param_obj.min_val, pmax=param_obj.max_val)
             else:
                 denorm_params[param_name] = linear_denormalize(x=val/lin_range, pmin=param_obj.min_val, pmax=param_obj.max_val)

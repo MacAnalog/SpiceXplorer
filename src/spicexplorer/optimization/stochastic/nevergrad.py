@@ -128,7 +128,13 @@ class NevergradMixin(Base_Optimizer):
         parameters: Dict[str, ng.p.Scalar] = {}
 
         for param in self.setup_obj.dut_params:
-            if param.log_scale:
+            if param.is_integer:
+                p_obj = ng.p.Scalar(
+                    lower=param.min_val,
+                    upper=param.max_val)
+                p_obj.set_integer_casting()
+        
+            elif param.log_scale:
                  p_obj = ng.p.Log(
                     lower=self.optimizer_config.log_variable_bounds.min, 
                     upper=self.optimizer_config.log_variable_bounds.max)
@@ -136,9 +142,6 @@ class NevergradMixin(Base_Optimizer):
                 p_obj = ng.p.Scalar(
                     lower=self.optimizer_config.lin_variable_bounds.min, 
                     upper=self.optimizer_config.lin_variable_bounds.max)
-            
-            if param.is_integer:
-                p_obj.set_integer_casting()
 
             parameters[param.name] = p_obj
                 
