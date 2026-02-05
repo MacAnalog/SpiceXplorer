@@ -131,7 +131,7 @@ class Base_Optimizer(ABC):
 
         return denorm_params
     
-    def optimize(self, render_optimization_trace: bool = False) -> OptimizationLog | None:
+    def optimize(self, render_optimization_trace: bool = False, keep_history: bool = False) -> OptimizationLog | None:
         """Run the optimization process for a given budget and returns the optimization trace as 
         an OptimizationLog object."""
 
@@ -142,18 +142,29 @@ class Base_Optimizer(ABC):
             return None
         
         # Track the score for plotting
-        self.optimization_log = OptimizationLog()  # Store the optimization trace
+        self.optimization_log = OptimizationLog() if not keep_history else self.optimization_log
         
-        # Run the optimization process
-        for trial in tqdm(range(self.optimizer_config.budget), desc="Optimizing", unit="trial"):
-            logger.debug(f"STARTING trial {trial+1}/{self.optimizer_config.budget}...")
-            # (a) Perform the optimization logic for one step/trial
-            candidate, curr_score, metadata = self.optimization_step()
-            logger.debug(f"Trial {trial+1}/{self.optimizer_config.budget} COMPLETED with score: {curr_score:.4f}")
-            # (b) Update the index of the global best solution (lowest score)
-            if curr_score > self.optimization_log[self.global_best_index].point.score:
-                self.global_best_index = trial
-                logger.info(f"a New fit was found... trial {trial} score {curr_score:.2f}")
+        # MAIN OPTIMIZATION LOOP
+        try:
+            with tqdm(range(self.optimizer_config.budget), desc="Optimizing", unit="trial") as pbar:
+                for trial in pbar:
+                    logger.debug(f"STARTING trial {trial+1}/{self.optimizer_config.budget}...")
+                    
+                    # (a) Perform the optimization logic for one step/trial
+                    candidate, curr_score, metadata = self.optimization_step()
+                    logger.debug(f"Trial {trial+1}/{self.optimizer_config.budget} COMPLETED with score: {curr_score:.4f}")
+                    
+                    # (b) Update the index of the global best solution (lowest score)
+                    if curr_score > self.optimization_log[self.global_best_index].point.score:
+                        self.global_best_index = trial
+                        logger.info(f"New fit was found... trial {trial} score {curr_score:.2f}")
+
+                    # Update the progress bar with current and best scores
+                    current_best = self.optimization_log[self.global_best_index].point.score
+                    pbar.set_postfix(score=f"{curr_score:.4f}", best=f"{current_best:.4f}")
+
+        except KeyboardInterrupt:
+            logger.critical(f"User requested interrupt")
         
         # Plot the score as a function of optimization step
         if render_optimization_trace:
