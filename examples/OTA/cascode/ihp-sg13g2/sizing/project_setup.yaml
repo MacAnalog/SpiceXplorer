@@ -3,7 +3,8 @@ project:
   name: CASCODE-OTA
   description: Cascode (Telescopic) OTA example sizing in the ihp-sg13g2 technology
   simulator: ngspice
-  save_sim: False 
+  save_sim : False
+  parallel_sim : True # Default is True
 
   ws_root : /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/
   # The following paths are relative to the ws_root
@@ -18,13 +19,13 @@ project:
     # PDK RULES
     constraints:
       # n-fet
-      max_nfet_w : 10u
+      max_nfet_w : 20u
       min_nfet_w : 0.18u
       max_nfet_l : 10u
       min_nfet_l : 0.18u
 
       # p-fet
-      max_pfet_w : 10u
+      max_pfet_w : 20u
       min_pfet_w : 0.18u
       max_pfet_l : 10u
       min_pfet_l : 0.18u
@@ -115,6 +116,17 @@ project:
       min_val: min_nfet_l
       max_val: max_nfet_l
 
+    # ------------------------
+    # Bias Voltage
+    # ------------------------
+    - name : X_DUT_V_BIAS_1
+      min_val: 0
+      max_val: 1.2
+    
+    - name : X_DUT_V_BIAS_1
+      min_val: 0
+      max_val: 1.2
+
 
   # ------------------------
   # Testbench: Configure the testbenches to be used for simulations
@@ -171,12 +183,8 @@ project:
   optimizer_config:
     type: nevergrad
     random_seed: 48
-    budget: 5
-    name: SamplingSearch
-    optimizer_kwargs:
-      sampler: Hammersley  # The closest alternative to Sobol
-      scrambled: True      # Critical: randomization removes structural artifacts
-      rescaled: True       # Ensures you hit the boundaries    
+    budget: 6
+    name: LHSSearch   
 
     # The following overwrite [optional] the optimizer bounds.
     lin_variable_bounds:
@@ -232,6 +240,18 @@ project:
         goal:         minimize  # options: exact, exceed, minimize
         target:       1.2e-3    # Unit: V/sqrt(Hz)
         range:        1e-3      # The expected variation range. used in normalizing the metric values
+        tolerance:    1e-6      # [Optional] allowed deviation in the spec, otherwise 5% margin is assumed.
+        weight:       100.0     # [Optional] non-negative weight factor for this target, else it is 1.0
+        error_type:   relative-sigmoid # [Optional] options: absolute, target_spec_val, squared, relative-squared, relative-absolute, relative-exponential
+        enable:       True      # [Optional] Used to exclude from the loss function
+
+      - name: i(idd_total)
+        description:  Total current drawn from VDD  # optional documentation field
+        testbench:    tb_noise
+        sim_type:     op     # options: dc, ac, tran, noise, noise_spectrum
+        goal:         minimize  # options: exact, exceed, minimize
+        target:       15e-6    # Unit: Amps
+        range:        1000e-6      # The expected variation range. used in normalizing the metric values
         tolerance:    1e-6      # [Optional] allowed deviation in the spec, otherwise 5% margin is assumed.
         weight:       100.0     # [Optional] non-negative weight factor for this target, else it is 1.0
         error_type:   relative-sigmoid # [Optional] options: absolute, target_spec_val, squared, relative-squared, relative-absolute, relative-exponential

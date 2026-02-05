@@ -19,15 +19,35 @@ Venable v_ena v_ss dc 0 pwl(0 0 1u 0 1.1u VDD)
 .option method=gear
 
 .control
-    tran 0.005u 15u uic
-    plot v_ena v_out
+    echo ==================================
+    echo start of Control
+    echo ==================================
 
+    echo
+    echo (C) start of Transient Sim
+    echo ----------------------------------
+    tran 0.005u 15u uic
+    * plot v_ena v_out
+
+    echo
+    echo Calculating tsettle
     let vout_limit=0.8*0.99
     meas tran tcross WHEN v(v_out)=vout_limit
     let vena_limit=0.5*1.5
     meas tran tstart WHEN v(v_ena)=vena_limit
     let tsettle=tcross-tstart
     print tsettle
+
+    echo
+    echo SAVING SIMULATION RESULTS IN THE RAW FILE
+    remzerovec
+    write
+
+    echo ==================================
+    echo END of Control
+    echo ==================================
+    quit 
+    * ^ This is needed for spicelib (uncommented)
 
 .endc
 

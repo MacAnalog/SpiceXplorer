@@ -40,44 +40,46 @@ x4 v_dd net8 v_in vmeas2 net9 v_ena v_ss ota-improved
 .param temp=27
 .options savecurrents reltol=1e-3 abstol=1e-12 gmin=1e-15
 .control
+
+    echo ==================================
+    echo start of Control
+    echo ==================================
+
     save all
 
-    * Operating Point Analysis
-    op
-    remzerovec
-    write ota-improved_tb-loopgain.raw
-    set appendwrite
-
-    * AC Analysis
+    echo
+    echo (A) start of OP
+    echo ----------------------------------
     ac dec 101 1 100G
     remzerovec
-    write ota-improved_tb-loopgain.raw
-    set appendwrite
 
+    echo
+    echo (B) start of AC Sim
+    echo ----------------------------------
     * Middlebrook's Method
     let tv=-v(vr1)/v(vf1)
     let ti=-i(vir1)/i(vif1)
     let tmb=(tv*ti - 1)/(tv + ti + 2)
 
-    plot db(tmb) ylabel 'Magnitude - Middlebrook'
-    plot 180/pi*cphase(tmb) ylabel 'Phase - Middlebrook'
+    * plot db(tmb) ylabel 'Magnitude - Middlebrook'
+    * plot 180/pi*cphase(tmb) ylabel 'Phase - Middlebrook'
 
-    * Tian's Method
-    * vtest=0, itest=1:
-    let A=i(Vimeas2)
-    let C=v(vmeas2)
+    * * Tian's Method
+    * * vtest=0, itest=1:
+    * let A=i(Vimeas2)
+    * let C=v(vmeas2)
 
-    * vtest=1, itest=0:
-    let B=i(Vimeas1)
-    let D=v(vmeas1)
-    let ttian=(A*D-B*C-A)/(2*(B*C-A*D)+A-D+1)
+    * * vtest=1, itest=0:
+    * let B=i(Vimeas1)
+    * let D=v(vmeas1)
+    * let ttian=(A*D-B*C-A)/(2*(B*C-A*D)+A-D+1)
 
-    plot db(ttian) ylabel 'Magnitude - Tian'
-    plot 180/pi*cphase(ttian) ylabel 'Phase - Tian'
+    * plot db(ttian) ylabel 'Magnitude - Tian'
+    * plot 180/pi*cphase(ttian) ylabel 'Phase - Tian'
 
     * Middlebrook vs. Tian
-    plot db(tmb) db(ttian) ylabel 'Magnitude'
-    plot 180/pi*cphase(tmb) 180/pi*cphase(ttian) ylabel 'Phase'
+    * plot db(tmb) db(ttian) ylabel 'Magnitude'
+    * plot 180/pi*cphase(tmb) 180/pi*cphase(ttian) ylabel 'Phase'
 
     echo (3) measuring performance metrics
     * magnitude
@@ -96,10 +98,21 @@ x4 v_dd net8 v_in vmeas2 net9 v_ena v_ss ota-improved
     meas ac UGF when out_mag=0 fall=1
 
     let PM = (180-unity_gain_phase) % 180
+    
+    echo ----------------------------------
+    echo END of AC sim
+    echo  ----------------------------------
 
+    echo SAVING SIMULATION RESULTS IN THE RAW FILE
+    * save out DCGAIN PM FBW UGF
     write
 
-*quit
+    echo ==================================
+    echo END of Control
+    echo ==================================
+
+    quit
+
 .endc
 
 

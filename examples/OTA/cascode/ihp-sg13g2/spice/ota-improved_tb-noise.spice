@@ -20,29 +20,63 @@ Vin v_cm net1 dc 0 ac 1
 
 .temp 27
 .control
+    echo ==================================
+    echo start of Control
+    echo ==================================
     option sparse
     set filetype=ascii
     save all
 
+    echo
+    echo (A) start of OP
+    echo ----------------------------------
+    * Operating Point Analysis (not needed in the optimization... could be turned on but it is turned off to save sim time)
     op
-    write ota-improved_tb-noise.raw
+    
+    echo
+    echo "=== POWER CONSUMPTION RESULTS ==="
+    * Calculate positive current magnitude (invert the negative sign)
+    let idd_total = -i(Vdd)
+
+    * Calculate Power (Current * Voltage)
+    * We use the defined parameter 'VDD' or the node voltage 'v(v_dd)'
+    let power_total = idd_total * v(v_dd)
+    
+    print idd_total
+    print power_total
+    echo "================================="
+
+    remzerovec
+    write
     set appendwrite
 
-    ac dec 101 1k 1G
-    *write ota-improved_tb-noise.raw
-    plot 20*log10(v_out)
-
+    echo
+    echo (C) start of Noise sim
+    echo ----------------------------------
     noise v(v_out) Vin lin 1000 1MEG 1000MEG 1
     print inoise_total
     print onoise_total
 
+    echo
+    echo SAVING SIMULATION RESULTS IN THE RAW FILE  
+    echo NOISE 1 saving the Integrated Noise
     setplot noise1
-    plot inoise_spectrum linplot
-    plot onoise_spectrum linplot
-
-    setplot noise2
+    * plot inoise_spectrum linplot
+    * plot onoise_spectrum linplot
+    remzerovec
     write
-    print all > noise.txt
+
+    echo
+    echo NOISE 2 saving the Noise Spectral Density Curves
+    setplot noise2
+    remzerovec
+    write 
+
+    echo ==================================
+    echo END of Control
+    echo ==================================
+    quit 
+    * ^ This is needed for spicelib (uncommented)
 .endc
 
 
