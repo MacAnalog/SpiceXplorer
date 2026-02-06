@@ -1,5 +1,8 @@
 ** sch_path: /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved_tb-noise.sch
 **.subckt ota-improved_tb-noise
+*----------------------------------------------------------*
+* Testbench
+*----------------------------------------------------------*
 Vdd v_dd GND VDD
 xota v_dd v_out v_cm net1 net2 v_ena v_ss ota-improved
 Vss v_ss GND 0
@@ -11,14 +14,20 @@ Venable v_ena v_ss VDD
 .save v(v_out)
 .save v(v_ena)
 Vin v_cm net1 dc 0 ac 1
-**** begin user architecture code
 
+*----------------------------------------------------------*
+* Technology Library
+*----------------------------------------------------------*
 .lib cornerMOSlv.lib mos_tt
 .lib cornerRES.lib res_typ
 
 
 
 .temp 27
+
+*----------------------------------------------------------*
+* Control Block
+*----------------------------------------------------------*
 .control
     echo ==================================
     echo start of Control
@@ -53,7 +62,7 @@ Vin v_cm net1 dc 0 ac 1
     echo
     echo (C) start of Noise sim
     echo ----------------------------------
-    noise v(v_out) Vin lin 1000 1MEG 1000MEG 1
+    run
     print inoise_total
     print onoise_total
 
@@ -80,6 +89,9 @@ Vin v_cm net1 dc 0 ac 1
 .endc
 
 
+*----------------------------------------------------------*
+* Parameter Definitions
+*----------------------------------------------------------*
 .param X_DUT_V_BIAS_1 = 0.6
 .param X_DUT_V_BIAS_2 = 0.5
 
@@ -107,11 +119,20 @@ Vin v_cm net1 dc 0 ac 1
 .param V_CM = 0.8
 
 
+.param F_NOISE_START=1MEG
+.param F_NOISE_STOP=1000MEG
 
 
-**** end user architecture code
-**.ends
+*----------------------------------------------------------*
+* ANALYSIS COMMAND (Moved to Netlist)
+*----------------------------------------------------------*
+* By placing this here, we can use { } expansion directly.
+.noise v(v_out) Vin lin 1000 {F_NOISE_START} {F_NOISE_STOP} 1
 
+
+*----------------------------------------------------------*
+* Subcircuit Definition
+*----------------------------------------------------------*
 * expanding   symbol:  ota-improved.sym # of pins=7
 ** sym_path: /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sym
 ** sch_path: /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sch
