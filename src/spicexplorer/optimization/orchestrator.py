@@ -42,18 +42,18 @@ SPICE_OPTIMIZER_CLASSES : Dict[Optimizer_Type_Enum, Type[Spice_Base_Optimizer]] 
 # ------------------ Classes ------------------
 
 class Circuit_Optimizer_Orchestrator_Base(ABC):
-    def __init__(self, project_setup_path: str | Path, optimizer_type: Optimizer_Type_Enum, verbose: bool = False):
+    def __init__(self, project_setup_path: str | Path, optimizer_type: Optimizer_Type_Enum, auto_load: bool = True,verbose: bool = False):
         self.project_setup_path = project_setup_path
         self.optimizer_type = optimizer_type
         self.verbose = verbose
-
-        self.__post_init__()
-
-    def __post_init__(self):
-        # Order matters here
+        
         self.project_setup:     Project_Setup   = self.read_project_setup()
         logger.debug(f"created the project setup for {self.project_setup.name}")
 
+        if auto_load: 
+            self.initialize()
+    
+    def initialize(self):
         self.spicelib_wrappers:  Dict[str, NGSpice_Wrapper] = self.create_spicelib_wrappers()
         logger.debug(f"created the spicelib_wrapper.")
 
