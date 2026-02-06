@@ -1,5 +1,8 @@
 ** sch_path: /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved_tb-loopgain.sch
 **.subckt ota-improved_tb-loopgain
+*----------------------------------------------------------*
+* Testbench
+*----------------------------------------------------------*
 Vdd v_dd GND VDD
 Vss v_ss GND 0
 Vin v_in v_ss dc 0.75
@@ -30,8 +33,10 @@ x1 v_dd vr1 v_in vf1 net1 v_ena v_ss ota-improved
 x2 v_dd net2 v_in net4 net3 v_ena v_ss ota-improved
 x3 v_dd net6 v_in vmeas1 net7 v_ena v_ss ota-improved
 x4 v_dd net8 v_in vmeas2 net9 v_ena v_ss ota-improved
-**** begin user architecture code
 
+*----------------------------------------------------------*
+* Technology Library
+*----------------------------------------------------------*
 .lib cornerMOSlv.lib mos_tt
 .lib cornerRES.lib res_typ
 
@@ -39,6 +44,10 @@ x4 v_dd net8 v_in vmeas2 net9 v_ena v_ss ota-improved
 
 .param temp=27
 .options savecurrents reltol=1e-3 abstol=1e-12 gmin=1e-15
+
+*----------------------------------------------------------*
+* Control Block
+*----------------------------------------------------------*
 .control
 
     echo ==================================
@@ -50,7 +59,7 @@ x4 v_dd net8 v_in vmeas2 net9 v_ena v_ss ota-improved
     echo
     echo (A) start of OP
     echo ----------------------------------
-    ac dec 101 1 100G
+    run
     remzerovec
 
     echo
@@ -116,8 +125,9 @@ x4 v_dd net8 v_in vmeas2 net9 v_ena v_ss ota-improved
 .endc
 
 
-
-
+*----------------------------------------------------------*
+* Parameter Definitions
+*----------------------------------------------------------*
 
 .param X_DUT_V_BIAS_1 = 0.6
 .param X_DUT_V_BIAS_2 = 0.5
@@ -146,7 +156,15 @@ x4 v_dd net8 v_in vmeas2 net9 v_ena v_ss ota-improved
 .param V_CM = 0.8
 
 
+.param F_AC_STEP=101
+.param F_AC_START=1
+.param F_AC_STOP=100G
 
+
+*----------------------------------------------------------*
+* ANALYSIS COMMAND (Moved to Netlist)
+*----------------------------------------------------------*
+.ac dec {F_AC_STEP} {F_AC_START} {F_AC_STOP}
 
 **** end user architecture code
 **.ends

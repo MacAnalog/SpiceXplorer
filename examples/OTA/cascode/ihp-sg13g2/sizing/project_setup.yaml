@@ -143,6 +143,13 @@ project:
         - name : V_CM
           description : input common mode voltage
           val : 0.8
+        - name : F_AC_START
+          description : start frequency for AC analysis
+          val : 1
+        - name : F_AC_STOP
+          description : stop frequency for AC analysis
+          val : 100e9
+
       netlist : spice/ota-improved_tb-loopgain.spice
       enable: True # Optional: Enable or disable this testbench
       description : AC analysis for UGF, Gain, PM
@@ -158,6 +165,13 @@ project:
         - name : V_CM
           description : input common mode voltage
           val : 0.8
+        - name : F_NOISE_START
+          description : start frequency for noise analysis
+          val : 1e6
+        - name : F_NOISE_STOP
+          description : stop frequency for noise analysis
+          val : 1e9
+
       netlist : spice/ota-improved_tb-noise.spice
       enable: True # Optional: Enable or disable this testbench
       description : Noise analysis for input referred noise
@@ -170,8 +184,8 @@ project:
         - name : CL
           description : load capacitance
           val : 50f
-        - name : V_CM
-          description : input common mode voltage
+        - name : V_REF
+          description : reference voltage used for step input
           val : 0.8
       netlist : spice/ota-improved_tb-tran.spice
       enable: True # Optional: Enable or disable this testbench
@@ -183,7 +197,7 @@ project:
   optimizer_config:
     type: nevergrad
     random_seed: 48
-    budget: 10
+    budget: 1
     name: LhsDE   
 
     # The following overwrite [optional] the optimizer bounds.
@@ -207,6 +221,7 @@ project:
         weight:       100.0   # [Optional] non-negative weight factor for this target, else it is 1.0
         log_scale:    False   # [Optional] Used to indicate the spec is on log scale
         error_type:   relative-sigmoid # [Optional] options: absolute, target_spec_val, squared, relative-squared, relative-absolute, relative-exponential
+        reward_type:  log       # if none, it only satisifes the constraint
         enable:       True      # [Optional] Used to exclude from the loss function
 
       - name: dcgain
@@ -219,6 +234,7 @@ project:
         tolerance:    5       # [Optional] allowed deviation in the spec
         weight:       100.0   # [Optional] non-negative weight factor for this target, else it is 1.0
         error_type:   relative-sigmoid # [Optional] options: absolute, target_spec_val, squared, relative-squared, relative-absolute, relative-exponential
+        reward_type:  log     # if none, it only satisifes the constraint
         enable:       True    # [Optional] Used to exclude from the loss function
 
       - name: pm
@@ -231,6 +247,7 @@ project:
         tolerance:    30      # [Optional] allowed deviation in the spec
         weight:       100.0   # [Optional] non-negative weight factor for this target, else it is 1.0
         error_type:   relative-sigmoid # [Optional] options: absolute, target_spec_val, squared, relative-squared, relative-absolute, relative-exponential
+        reward_type:  none    # if none, it only satisifes the constraint
         enable:       True    # [Optional] Used to exclude from the loss function
 
       - name: v(inoise_total)
@@ -243,6 +260,7 @@ project:
         tolerance:    1e-6      # [Optional] allowed deviation in the spec, otherwise 5% margin is assumed.
         weight:       100.0     # [Optional] non-negative weight factor for this target, else it is 1.0
         error_type:   relative-sigmoid # [Optional] options: absolute, target_spec_val, squared, relative-squared, relative-absolute, relative-exponential
+        reward_type:  none      # if none, it only satisifes the constraint
         enable:       True      # [Optional] Used to exclude from the loss function
 
       - name: i(idd_total)
@@ -255,6 +273,7 @@ project:
         tolerance:    1e-6      # [Optional] allowed deviation in the spec, otherwise 5% margin is assumed.
         weight:       100.0     # [Optional] non-negative weight factor for this target, else it is 1.0
         error_type:   relative-sigmoid # [Optional] options: absolute, target_spec_val, squared, relative-squared, relative-absolute, relative-exponential
+        reward_type:  log       # if none, it only satisifes the constraint
         enable:       True      # [Optional] Used to exclude from the loss function
 
       - name: tsettle
@@ -262,9 +281,10 @@ project:
         testbench:    tb_tran
         sim_type:     tran      # options: dc, ac, tran, noise, noise_spectrum
         goal:         minimize  # options: exact, exceed, minimize
-        target:       1.5e-7    # Unit: seconds
+        target:       15e-6     # Unit: seconds
         tolerance:    1e-8      # [Optional] allowed deviation in the spec, otherwise 5% margin is assumed.
         range:        1e-6      # The expected variation range. used in normalizing the metric values
         weight:       100.0     # [Optional] non-negative weight factor for this target, else it is 1.0
         error_type:   relative-sigmoid # [Optional] options: absolute, target_spec_val, squared, relative-squared, relative-absolute, relative-exponential
+        reward_type:  none      # if none, it only satisifes the constraint
         enable:       True     # [Optional] Used to exclude from the loss function 

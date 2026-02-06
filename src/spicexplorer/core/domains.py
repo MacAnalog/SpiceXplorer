@@ -171,6 +171,7 @@ class Param:
     name: str
     min_val: Optional[Union[float, np.float64, str]]
     max_val: Optional[Union[float, np.float64, str]]
+    val: Optional[Union[float, np.float64, str]]
     init: Optional[Union[float, np.float64, str]]
     description: Optional[str]
     log_scale: bool = False
@@ -178,7 +179,7 @@ class Param:
     freeze: bool = True
 
     def needs_resolution(self) -> bool:
-        return isinstance(self.min_val, str) or isinstance(self.max_val, str) or (self.init is not None and isinstance(self.init, str))
+        return isinstance(self.min_val, str) or isinstance(self.max_val, str) or (self.init is not None and isinstance(self.init, str)) or (self.val is not None and isinstance(self.val, str))
 
     def resolve_min_max(self, constraints: Dict[str, np.float64]) -> None:
         if self.min_val is None or self.max_val is None:
@@ -189,6 +190,10 @@ class Param:
             self.init = resolve_reference(self.init, constraints)
         if self.min_val >= self.max_val:
             raise ValueError(f"Param {self.name} has min_val >= max_val ({self.min_val} >= {self.max_val})")
+    
+    def ressolve_val(self, constraints: Dict[str, np.float64]) -> None:
+        if self.val is not None:
+            self.val = resolve_reference(self.val, constraints)
 
     def compute_lin_normalization(self, denorm_val: np.float64) -> np.float64:
         if self.needs_resolution():
@@ -204,6 +209,13 @@ class Param:
             raise ValueError(f"No min/max defined for log-normalization of {self.name}")
         log_min, log_max = np.log(self.min_val), np.log(self.max_val)
         return np.exp(denorm_val * (log_max - log_min) + log_min)
+    
+    def get_val(self) -> float:
+        return float(self.val)
+    
+    def has_val(self) -> bool:
+        return self.val is not None
+    
 
 @dataclass
 class DutParams:
@@ -651,11 +663,20 @@ class Project_Setup:
     # ------------------ Getters & Helpers ------------------
     def resolve_all_parameter_ranges(self) -> None:
         """Resolve all parameter min/max/default values based on tech_spec constraints."""
+        logger.info("resolving DUT parameters...")
         for param in self.dut_params:
             if param.needs_resolution():
                 logger.debug(f"Resolving ranges for param '{param.name}'")
                 param.resolve_min_max(self.tech_spec.constraints)
                 logger.debug(f"Resolved param '{param.name}': min={param.min_val}, max={param.max_val}, default={param.init}")
+
+        logger.info("resolving TESTBENCH parameters...")
+        for tb in self.testbenches:
+            for param in tb.params:
+                param.ressolve_val(self.tech_spec.constraints)
+                logger.debug(f"Resolved value for tb '{tb.name}' param '{param.name}' is {param.val}")
+        logger.info("")
+
             
     def get_constraint_by_name(self, name: str) -> Optional[np.float64]:
         value = self.tech_spec.constraints.get(name)

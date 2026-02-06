@@ -151,6 +151,7 @@ class Base_Optimizer(ABC):
         try:
             with tqdm(range(self.optimizer_config.budget), desc="Optimizing", unit="trial") as pbar:
                 for trial in pbar:
+                    logger.debug(f"---------------------------------------------------------------------------")
                     logger.debug(f"STARTING trial {trial+1}/{self.optimizer_config.budget}...")
                     
                     # (a) Perform the optimization logic for one step/trial
@@ -165,13 +166,14 @@ class Base_Optimizer(ABC):
                     # Update the progress bar with current and best scores
                     current_best = self.optimization_log[self.global_best_index].point.score
                     pbar.set_postfix(score=f"{curr_score:.4f}", best=f"{current_best:.4f}")
+                    logger.debug(f"---------------------------------------------------------------------------")
 
         except KeyboardInterrupt:
             logger.critical(f"User requested interrupt")
         
         # Plot the score as a function of optimization step
         if render_optimization_trace:
-            self.plot_score()
+            self.plot_score(show=True)
         logger.info("Optimization process completed.")
         return self.optimization_log
     
@@ -436,6 +438,22 @@ class Spice_Base_Optimizer(Base_Optimizer):
                 spicelib_wrappers : Dict[str, NGSpice_Wrapper]):
         super().__init__(setup_obj = setup_obj)
         self.spicelib_wrappers = spicelib_wrappers
+        self.__post_init__()
+
+    def __post_init__(self):
+        # ----------------------------------------
+        # Update the tb parameters
+        # ----------------------------------------
+        for tb in self.setup_obj.testbenches:
+            tb_params = {param.name : param.get_val() for param in tb.params if param.has_val()}
+            if tb_params:
+                logger.info(f"updating the parameters for testbench {tb.name} with the following values:")
+                for param_name, param_val in tb_params.items():
+                    logger.info(f"\t{param_name}: {param_val}")
+                logger.info("")
+            self.spicelib_wrappers[tb.name].update_params(parameterization=tb_params)
+            logger.info(f"parameter update is compeleted for testbench {tb.name}")
+        # ----------------------------------------
     
     # --- Helper Methods (only in child class) ---
     def simulate_circuit(self, parameterization: Dict[str, float]) -> Dict[str, RawRead]:
