@@ -26,7 +26,7 @@ Venable v_ena v_ss dc 0 pwl(0 0 1u 0 1.1u VDD)
     echo
     echo (C) start of Transient Sim
     echo ----------------------------------
-    tran 0.005u 15u uic
+    tran 0.01u 30u uic
     * plot v_ena v_out
 
     echo
