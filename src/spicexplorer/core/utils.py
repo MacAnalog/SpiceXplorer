@@ -202,8 +202,25 @@ def compute_squared_error(curr_val: np.float64, target_val: np.float64) -> np.fl
 def compute_exponential_error(curr_val: np.float64, target_val: np.float64) -> np.float64:
     return np.float64(np.exp(np.abs(curr_val - target_val)) - 1)
 # -----------------------------------------------------------------------------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------------------------------------------------------------------------
+# C - Normalized Reward Functions
+def compute_relative_absolute_reward(curr_val: np.float64, target_val: np.float64, normalizing_coeff : np.float64) -> np.float64:
+    return np.float64(np.abs(curr_val - target_val) /  normalizing_coeff)
+# -----------------------------------------------------------------------------------------------------------------------------------------------
+def compute_relative_log_reward(curr_val: np.float64, target_val: np.float64, normalizing_coeff : np.float64) -> np.float64:
+    return np.abs(np.log10(np.abs(curr_val - target_val) / normalizing_coeff))
+# -----------------------------------------------------------------------------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------------------------------------------------------------------------
+# D - Unnormalized Reward Functions
+def compute_log_reward(curr_val: np.float64, target_val: np.float64) -> np.float64:
+    return np.abs(np.log10(curr_val / target_val))
+# -----------------------------------------------------------------------------------------------------------------------------------------------
+
+
 # Dictionary to map error types to functions
-error_compute_functions : Dict[Error_Types, Callable]= {
+ERROR_COMPUTE_FUNCTIONS : Dict[Error_Types, Callable]= {
     # Unnormalized Errors
     Error_Types.ABSOLUTE:     compute_absolute_error,
     Error_Types.SQUARED:      compute_squared_error,
@@ -214,6 +231,15 @@ error_compute_functions : Dict[Error_Types, Callable]= {
     Error_Types.RELATIVE_EXPONENTIAL:   compute_relative_exponential_error,
     Error_Types.RELATIVE_SIGMOID :      compute_relative_sigmoid_error
 }
+
+
+# Dictionary to map error types to functions
+REWARD_COMPUTE_FUNCTIONS : Dict[Reward_Types, Callable]= {
+    Reward_Types.RELATIVE_ABSOLUTE:  compute_relative_absolute_reward,
+    Reward_Types.RELATIVE_LOG:       compute_relative_log_reward,
+    Reward_Types.LOG:       compute_log_reward,
+}
+
 # -----------------------------------------------------------------------------------------------------------------------------------------------
 # [Endpint] - Compute Error 
 def compute_error(curr_val: np.float64, target_val: np.float64, error_type: Error_Types | str, normalizing_coeff: np.float64 | None = None) -> np.float64:
@@ -225,14 +251,24 @@ def compute_error(curr_val: np.float64, target_val: np.float64, error_type: Erro
         if normalizing_coeff is None or normalizing_coeff <= 0:
             logger.error(f"Normalizing coefficient must be provided and > 0 for relative error types. Got: {normalizing_coeff}")
             raise ValueError(f"Normalizing coefficient must be provided and > 0 for relative error types. Got: {normalizing_coeff}")
-        return error_compute_functions[error_type](curr_val, target_val, normalizing_coeff)
-    return error_compute_functions[error_type](curr_val, target_val)
+        return ERROR_COMPUTE_FUNCTIONS[error_type](curr_val, target_val, normalizing_coeff)
+    return ERROR_COMPUTE_FUNCTIONS[error_type](curr_val, target_val)
 
 # [Endpint] - Compute Reward 
 def compute_reward(curr_val: np.float64, target_val: np.float64, reward_type: Reward_Types | str, normalizing_coeff: np.float64 | None = None, goal: OptimizationGoalType = OptimizationGoalType.EXCEED) -> np.float64:
     """Computes the reward for the spec"""
     if isinstance(reward_type, str):
         reward_type = Reward_Types(reward_type)
+
+    if reward_type == Reward_Types.NO_REWARD:
+        return np.float64(0)
+    
+    if "relative" in reward_type.value:
+        if normalizing_coeff is None or normalizing_coeff <= 0:
+            logger.error(f"Normalizing coefficient must be provided and > 0 for relative reward types. Got: {normalizing_coeff}")
+            raise ValueError(f"Normalizing coefficient must be provided and > 0 for relative reward types. Got: {normalizing_coeff}")
+        return REWARD_COMPUTE_FUNCTIONS[reward_type](curr_val, target_val, normalizing_coeff)
+    return REWARD_COMPUTE_FUNCTIONS[reward_type](curr_val, target_val)
 
 
     

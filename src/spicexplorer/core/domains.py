@@ -56,8 +56,12 @@ class Error_Types(str, Enum):
         return "relative" in self.value
 
 class Reward_Types(str, Enum):
-    ABSOLUTE = "absolute"
+    NO_REWARD = "none"
     RELATIVE_ABSOLUTE = "relative-absolute"
+    RELATIVE_LOG = "relative-log"
+    LOG = "log"
+    # Below types are not recommended
+    ABSOLUTE = "absolute"
     RELATIVE_SIGMOID = "relative-sigmoid"
 
     def is_relative(self) -> bool:
@@ -238,7 +242,7 @@ class TargetSpec:
     enable:     bool = True
     range:      Union[np.float64, float, str | None] = None
     error_type: Union[Error_Types, str] = Error_Types.RELATIVE_ABSOLUTE
-    reward_type: Union[Reward_Types, str] = Reward_Types.RELATIVE_ABSOLUTE
+    reward_type: Union[Reward_Types, str] = Reward_Types.NO_REWARD
     weight:     Optional[float | np.float64] = 1.0
     tolerance:  Optional[float | np.float64] = None  # if not given use 5% of target
     description: Optional[str] = None

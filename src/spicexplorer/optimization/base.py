@@ -572,6 +572,43 @@ class Spice_Base_Optimizer(Base_Optimizer):
             logger.info("Opening interactive plot in browser...")
             fig.show()
 
+    def plot_solution(self, parameterization: Dict[str, float], **kwargs):
+        
+        score, fit_summary = self.evaluate(parameterization, append_to_log=False)
+
+        logger.info(f"total score: {score}")
+        for spec_name, spec_info in fit_summary.items():
+            logger.info(f"\tSpec '{spec_name}': curr_val={spec_info['curr_val']}, score={spec_info['score']}")
+
+        if kwargs.get("show_plot", False):
+
+            try:
+                trace_name = kwargs["trace_name"]
+            except KeyError:
+                logger.error("To plot the solution, trace_name must be provided in kwargs")
+                raise RuntimeError("To plot the solution, trace_name must be provided in kwargs")
+            
+            try:
+                plot_type : Ngspice_Plot_Type = kwargs["plot_type"]
+            except KeyError:
+                logger.error("To plot the solution, plot_type must be provided in kwargs")
+                raise RuntimeError("To plot the solution, plot_type must be provided in kwargs")
+            
+            try:
+                tb_name : str = kwargs["testbench_name"]
+            except KeyError:
+                logger.error("To plot the solution, testbench_name must be provided in kwargs")
+                raise RuntimeError("To plot the solution, testbench_name must be provided in kwargs")   
+            
+            trace = self.spicelib_wrappers[tb_name].extract_wave(trace_name, plot_type=plot_type, is_real=False)
+            
+            plot_complex_response(
+                frequencies=self.spicelib_wrappers[tb_name].extract_wave("frequency", plot_type=plot_type, is_real=True),
+                complex_response_list=[trace],
+                labels = kwargs.get("labels", [trace_name]), 
+                title  = kwargs.get("title", f"Response: {trace_name}")
+                )
+
     def clean_up(self, delete_raw_only: bool = False) -> None:
         """Clean up all SPICE simulations if needed."""
         logger.debug(f"Cleaning up all SPICE simulation (delete raws only? {delete_raw_only})...")
@@ -798,43 +835,6 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
         self.clean_up(delete_raw_only=True)
 
         return fitness_score, fit_summary
-    
-    def plot_solution(self, parameterization: Dict[str, float], **kwargs):
-        
-        score, fit_summary = self.evaluate(parameterization, append_to_log=False)
-
-        logger.info(f"total score: {score}")
-        for spec_name, spec_info in fit_summary.items():
-            logger.info(f"\tSpec '{spec_name}': curr_val={spec_info['curr_val']}, score={spec_info['score']}")
-
-        if kwargs.get("show_plot", False):
-
-            try:
-                trace_name = kwargs["trace_name"]
-            except KeyError:
-                logger.error("To plot the solution, trace_name must be provided in kwargs")
-                raise RuntimeError("To plot the solution, trace_name must be provided in kwargs")
-            
-            try:
-                plot_type : Ngspice_Plot_Type = kwargs["plot_type"]
-            except KeyError:
-                logger.error("To plot the solution, plot_type must be provided in kwargs")
-                raise RuntimeError("To plot the solution, plot_type must be provided in kwargs")
-            
-            try:
-                tb_name : str = kwargs["testbench_name"]
-            except KeyError:
-                logger.error("To plot the solution, testbench_name must be provided in kwargs")
-                raise RuntimeError("To plot the solution, testbench_name must be provided in kwargs")   
-            
-            trace = self.spicelib_wrappers[tb_name].extract_wave(trace_name, plot_type=plot_type, is_real=False)
-            
-            plot_complex_response(
-                frequencies=self.spicelib_wrappers[tb_name].extract_wave("frequency", plot_type=plot_type, is_real=True),
-                complex_response_list=[trace],
-                labels = kwargs.get("labels", [trace_name]), 
-                title  = kwargs.get("title", f"Response: {trace_name}")
-                )
 
     def compute_fitness(self, performance_array: Dict[str, float | np.float64 | torch.Tensor]) -> Tuple[np.float64, Dict[str, Any]]:
         """ Compute the fitness based on the performance metrics extracted from SPICE simulations and the target specs. """
@@ -954,7 +954,7 @@ class Spice_Single_Objective(Spice_Constraint_Satisfaction):
 
     # --- Helper Methods (only in this child class) ---
     def compute_reward_for_spec(self, curr_val: np.float64 | float, target_spec: TargetSpec) -> np.float64:
-        """ Compute a non-negative value representing the reward."""
+        """ Compute a non-negative value representing the reward. Returns zero if the constraint is violated"""
         spec_reward:           np.float64 = np.float64(0.0)
         spec_reward_weighted:  np.float64 = np.float64(0.0)
 
@@ -973,21 +973,26 @@ class Spice_Single_Objective(Spice_Constraint_Satisfaction):
         # Case 1: Exceed the Target
         # --------------------------
         if target_spec.goal == OptimizationGoalType.EXCEED:
-            if spec_curr_val < target_val - tolerance:
-                spec_reward = compute_reward(curr_val=spec_curr_val, target_val=adjusted_target, reward_type=target_spec.error_type, normalizing_coeff=normalizing_coeff)
+            if (spec_curr_val - target_val) > EPSILON:
+                spec_reward = compute_reward(curr_val=spec_curr_val, target_val=adjusted_target, reward_type=target_spec.reward_type, normalizing_coeff=normalizing_coeff)
             elif spec_curr_val > target_val + tolerance:
                 spec_reward = np.float64(0.0)
         # --------------------------
         # Case 2: Minimize the Target
         # --------------------------
         elif target_spec.goal == OptimizationGoalType.MINIMIZE:
-            if spec_curr_val > target_val + tolerance:
-                spec_reward = compute_reward(curr_val=spec_curr_val, target_val=adjusted_target, reward_type=target_spec.error_type, normalizing_coeff=normalizing_coeff)
+            if spec_curr_val - target_val < EPSILON:
+                spec_reward = compute_reward(curr_val=spec_curr_val, target_val=adjusted_target, reward_type=target_spec.reward_type, normalizing_coeff=normalizing_coeff)
             else:
                 spec_reward = np.float64(0.0) 
+        # --------------------------
+        # Case 3: Minimize the Target
+        # --------------------------
+        elif target_spec.goal == OptimizationGoalType.EXACT:
+            spec_reward = np.float64(0.0)
 
         # --------------------------
-        # Case 3: Invalid Goal Type 
+        # Case 4: Invalid Goal Type 
         # --------------------------
         else:
             logger.error(f"Unknown optimization goal type: {target_spec.goal}")
@@ -995,7 +1000,7 @@ class Spice_Single_Objective(Spice_Constraint_Satisfaction):
         # --------------------------
         
         spec_reward_weighted = spec_reward * np.float64(target_spec.weight)
-        logger.debug(f"Computed Penalty - Spec '{target_spec.name}': curr_val={curr_val}, target={target_spec.target}, penalty={spec_reward}, weighted_penalty={spec_reward_weighted} - (goal={target_spec.goal})")
+        logger.debug(f"Computed Reward - Spec '{target_spec.name}': curr_val={curr_val}, target={target_spec.target}, reward={spec_reward}, weighted_reward={spec_reward_weighted} - (goal={target_spec.goal})")
         return spec_reward_weighted
     
 # ------------------------------------------------
