@@ -58,6 +58,14 @@ class Base_Optimizer(ABC):
     def __init__(self, setup_obj: Project_Setup):
         self.setup_obj = setup_obj
         self.optimizer_config = setup_obj.optimizer_config
+
+        self._TIMESTAMP = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.autosave_checkpoint_freqeucny : int = 2500
+        self.save_checkpoint_autosave_dir : Path = Path(f"./auto_save/{self.setup_obj.name}_{self.setup_obj.optimizer_config.name}_{self._TIMESTAMP}")
+        self.save_checkpoint_autosave_dir.mkdir(parents=True, exist_ok=True)
+        logger.critical(f"Autosave checkpoints (frequency : {self.autosave_checkpoint_freqeucny}) will be placed in {self.save_checkpoint_autosave_dir.absolute()}.")
+        self.disable_autosave : bool = False
+
         # Instantiated & Typed by the base class
         self.optimization_log : OptimizationLog = OptimizationLog()
         self.global_best_index: int = 0 # the index of the global best solution
@@ -162,6 +170,12 @@ class Base_Optimizer(ABC):
                     if curr_score > self.optimization_log[self.global_best_index].point.score:
                         self.global_best_index = trial
                         logger.info(f"New fit was found... trial {trial} score {curr_score:.2f}")
+                    
+                    # (c) Autosave checkpoint if flag is not disabled
+                    if (not self.disable_autosave) and (self.autosave_checkpoint_freqeucny is not None) and ((trial+1) % self.autosave_checkpoint_freqeucny == 0):
+                        self.save_checkpoint(name=self.get_auto_save_name(append_txt=f"trial{trial+1}"))
+                        self.optimization_log = OptimizationLog()
+                        logger.critical(f"Reset the optimization_log")
 
                     # Update the progress bar with current and best scores
                     current_best = self.optimization_log[self.global_best_index].point.score
@@ -170,6 +184,11 @@ class Base_Optimizer(ABC):
 
         except KeyboardInterrupt:
             logger.critical(f"User requested interrupt")
+
+        if not self.disable_autosave and not self.optimization_log.is_empty():
+            logger.info(f"saving the unsaved results... len = {len(self.optimization_log)} - Last Trial = {trial}")
+            self.save_checkpoint(name=self.get_auto_save_name(append_txt=f"trial{trial+1}_FINAL"))
+
         
         # Plot the score as a function of optimization step
         if render_optimization_trace:
@@ -428,6 +447,8 @@ class Base_Optimizer(ABC):
         logger.info(f"✅ Checkpoint loaded successfully from {path}")
         return obj
 
+    def get_auto_save_name(self, append_txt: str ) -> Path:
+        return self.save_checkpoint_autosave_dir / Path(f"{self.setup_obj.name}_{self.setup_obj.optimizer_config.name}_{self.setup_obj.optimizer_config.budget}_{append_txt}")
 # ------------------------------------------------
 # A [ABSTRACT] SPICE-based Optimizers
 # ------------------------------------------------
