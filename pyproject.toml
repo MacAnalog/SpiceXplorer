@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "SpiceXplorer"
+version = "0.1.0"
+description = "A Pythonic compilation of circuit optimization algorithms with OOP emphasis for accelerated EDA research"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Danial, Noori Zadeh", email = "noorizad@mcmaster.com"}
+]
+requires-python = ">=3.10"
+dependencies = [
+    'sympy  >=1.13.3',
+    'tqdm   >= 4.67.1',
+    'pandas >= 2.2.3 ',
+    'ax-platform >= 0.4.3',
+    'matplotlib >= 3.9.3',
+    'PyYAML >= 6.0.1',
+]
+
+# [project.scripts]
+# run-symbolix = "spicexplorer.symbolic_solver.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spicexplorer"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+  "/docs",
+]
