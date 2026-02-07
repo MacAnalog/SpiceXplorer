@@ -19,13 +19,13 @@ project:
     # PDK RULES
     constraints:
       # n-fet
-      max_nfet_w : 20u
+      max_nfet_w : 200u
       min_nfet_w : 0.18u
       max_nfet_l : 10u
       min_nfet_l : 0.18u
 
       # p-fet
-      max_pfet_w : 20u
+      max_pfet_w : 200u
       min_pfet_w : 0.18u
       max_pfet_l : 10u
       min_pfet_l : 0.18u
@@ -197,8 +197,8 @@ project:
   optimizer_config:
     type: nevergrad
     random_seed: 48
-    budget: 1
-    name: LhsDE   # LhsDE, TinyCMA, LHSSearch, ScrHaltonSearch
+    budget: 2000
+    name: NGOpt   # LhsDE, TinyCMA, LHSSearch, ScrHaltonSearch
 
     # The following overwrite [optional] the optimizer bounds.
     lin_variable_bounds:
@@ -215,9 +215,9 @@ project:
         testbench:    tb_ac
         sim_type:     ac      # options: dc, ac, tran, noise
         goal:         exceed   # options: exact, exceed, minimize
-        target:       20e5    # Unit: MHz
-        range:        1e6     # The expected variation range. used in normalizing the metric values
-        tolerance:    2e5     # [Optional] allowed deviation in the spec, otherwise 5% margin is assumed.
+        target:       200e6    # Unit: MHz
+        range:        100e6     # The expected variation range. used in normalizing the metric values
+        tolerance:    10e6     # [Optional] allowed deviation in the spec, otherwise 5% margin is assumed.
         weight:       100.0   # [Optional] non-negative weight factor for this target, else it is 1.0
         log_scale:    False   # [Optional] Used to indicate the spec is on log scale
         error_type:   relative-sigmoid # [Optional] options: absolute, target_spec_val, squared, relative-squared, relative-absolute, relative-exponential
@@ -229,7 +229,7 @@ project:
         testbench:    tb_ac
         sim_type:     ac      # options: dc, ac, tran, noise
         goal:         exceed  # options: exact, exceed, minimize
-        target:       35      # 40 dB
+        target:       46      # 40 dB
         range:        100     # The expected variation range. used in normalizing the metric values
         tolerance:    5       # [Optional] allowed deviation in the spec
         weight:       100.0   # [Optional] non-negative weight factor for this target, else it is 1.0
@@ -244,7 +244,7 @@ project:
         goal:         exact   # options: exact, exceed, minimize
         target:       60      # in degrees
         range:        45      # The expected variation range. used in normalizing the metric values
-        tolerance:    20      # [Optional] allowed deviation in the spec
+        tolerance:    10      # [Optional] allowed deviation in the spec
         weight:       100.0   # [Optional] non-negative weight factor for this target, else it is 1.0
         error_type:   relative-sigmoid # [Optional] options: absolute, target_spec_val, squared, relative-squared, relative-absolute, relative-exponential
         reward_type:  none    # if none, it only satisifes the constraint
@@ -260,7 +260,7 @@ project:
         tolerance:    1e-6      # [Optional] allowed deviation in the spec, otherwise 5% margin is assumed.
         weight:       100.0     # [Optional] non-negative weight factor for this target, else it is 1.0
         error_type:   relative-sigmoid # [Optional] options: absolute, target_spec_val, squared, relative-squared, relative-absolute, relative-exponential
-        reward_type:  none      # if none, it only satisifes the constraint
+        reward_type:  log       # if none, it only satisifes the constraint
         enable:       True      # [Optional] Used to exclude from the loss function
 
       - name: i(idd_total)
@@ -268,7 +268,7 @@ project:
         testbench:    tb_noise
         sim_type:     op     # options: dc, ac, tran, noise, noise_spectrum
         goal:         minimize  # options: exact, exceed, minimize
-        target:       15e-6    # Unit: Amps
+        target:       20e-6    # Unit: Amps
         range:        1000e-6      # The expected variation range. used in normalizing the metric values
         tolerance:    1e-6      # [Optional] allowed deviation in the spec, otherwise 5% margin is assumed.
         weight:       100.0     # [Optional] non-negative weight factor for this target, else it is 1.0
