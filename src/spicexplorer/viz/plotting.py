@@ -93,6 +93,32 @@ class Optimization_Log_Visualizer:
     def list_available_params(self) -> List[str]:
         return self.optimization_log.list_available_params()
 
+
+    def filter_top_n(self, n: int) -> None:
+        """
+        Filters the internal optimization log to keep only the top N entries
+        based on the highest scores.
+        
+        WARNING: This permanently modifies the data stored in this Visualizer instance.
+        """
+        
+        if self.is_empty():
+            return
+
+        # 1. Sort the internal log list by score (Descending: Best -> Worst)
+        #    We access the underlying list via self.optimization_log.log
+        sorted_entries = sorted(
+            self.optimization_log.log, 
+            key=lambda entry: entry.get_score(), 
+            reverse=True
+        )
+
+        # 2. Slice the list to keep only the top n
+        self.optimization_log.log = sorted_entries[:n]
+        
+        logger.info(f"✂️ Filtered optimization log: keeping top {len(self.optimization_log.log)} entries.")
+
+
     # ------------------------------------------------------------
     # Re-computing Loss
     # ------------------------------------------------------------
@@ -115,12 +141,12 @@ class Optimization_Log_Visualizer:
         log_y: bool = False
     ) -> Tuple[np.ndarray, np.ndarray] | None:
 
-        logger = logging.getLogger("SpiceXplorer.plotter")
-
-        if not self.is_empty():
+        if self.is_empty():
+            logger.warning(f"optimizatio log is empty")
             return None
 
         if not self.has_param(param_x) or not self.has_param(param_y):
+            logger.warning(f"param_x {param_x} or param_y {param_y} not found in optimization log")
             return None
 
         x_values = np.array(
@@ -184,7 +210,7 @@ class Optimization_Log_Visualizer:
         log_y: bool = False
     ) -> Tuple[np.ndarray, np.ndarray] | None:
 
-        if not self.is_empty():
+        if self.is_empty():
             return None
 
         fit_summary = self.optimization_log[0].get_fit_summary()
@@ -257,7 +283,6 @@ class Optimization_Log_Visualizer:
         """
         Plots the Total Score, Best Score So Far, and individual metric contributions.
         """
-        logger = logging.getLogger("SpiceXplorer.plotter")
 
         if self.is_empty():
             return None
@@ -363,7 +388,6 @@ class Optimization_Log_Visualizer:
         Plots the 'Best Score So Far' (Cumulative Maximum) for the Total Score 
         and for each individual metric independently.
         """
-        logger = logging.getLogger("SpiceXplorer.plotter")
 
         if self.is_empty():
             return None
@@ -451,22 +475,48 @@ class Optimization_Log_Visualizer:
             fig.show()
 
         return fig
+    
+    
     # ------------------------------------------------------------
     # Exporting Methods
     # ------------------------------------------------------------
-    def to_df(self) -> pd.DataFrame:
+    def to_df(self, top_n: int | None = None) -> pd.DataFrame:
         if self.is_empty():
             return pd.DataFrame()
 
-        # Convert entries to dicts and remove 'log_file' before flattening
+        # 1. Sort the log entries by score (descending) if top_n is requested
+        log_entries = self.optimization_log.log
+        if top_n is not None:
+            # Sort in-place for temporary list, or create new list
+            sorted_entries = sorted(
+                log_entries, 
+                key=lambda x: x.get_score(), 
+                reverse=True
+            )
+            log_entries = sorted_entries[:top_n]
+
+        # 2. Convert filtered/sorted entries to dicts
         data = []
-        for entry in self.optimization_log:
+        for entry in log_entries:
             entry_dict = asdict(entry)
-            entry_dict.pop("log_file", None) # Remove log_file key if it exists
+            entry_dict.pop("log_file", None)  # Remove log_file key
             data.append(entry_dict)
 
-        # Flatten nested dictionaries into dot-notation columns
+        # 3. Flatten
         return pd.json_normalize(data)
-    
-    def to_csv(self, path: Path, index: bool = False) -> None:
-        self.to_df().to_csv(path, index=index)
+
+    def to_csv(self, path: Path | str, index: bool = False, top_n: int | None = None) -> None:
+        """
+        Export the log to a CSV file.
+        
+        Args:
+            path: File path to save the CSV.
+            index: Whether to write row names (index).
+            top_n: If provided, writes only the top N entries sorted by score.
+        """
+        df = self.to_df(top_n=top_n)
+        
+        # Ensure parent directory exists
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        
+        df.to_csv(path, index=index)
