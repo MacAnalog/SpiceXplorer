@@ -72,6 +72,46 @@ class Optimization_Log_Visualizer:
         logger.info(f"✅ Checkpoint loaded successfully from {path}")
         return obj
     
+    def save_checkpoint(self, path_to_checkpoint: str | Path) -> None:
+        """
+        Save the current optimization log to a JSON checkpoint.
+        
+        Handles serialization of PosixPath (to string) and Numpy types (to float/list).
+        """
+        path = Path(path_to_checkpoint)
+        
+        # 1. Convert internal log entries to list of dictionaries
+        serializable_log = [asdict(entry) for entry in self.optimization_log]
+
+        # 2. Construct the data wrapper
+        data = {
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "optimization_log": serializable_log
+        }
+
+        # 3. Define a custom encoder for Path and Numpy objects
+        class SpiceXplorerEncoder(json.JSONEncoder):
+            def default(self, o):
+                if isinstance(o, Path):
+                    return str(o)
+                if isinstance(o, (np.integer, np.floating)):
+                    return float(o)
+                if isinstance(o, np.ndarray):
+                    return o.tolist()
+                return super().default(o)
+
+        # 4. Save to file
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(data, f, indent=2, cls=SpiceXplorerEncoder)
+            
+            logger.info(f"💾 Checkpoint saved successfully to {path}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to save checkpoint: {e}")
+            raise e
+        
     # ------------------------------------------------------------
     # Helper Methods
     # ------------------------------------------------------------
@@ -92,7 +132,6 @@ class Optimization_Log_Visualizer:
     
     def list_available_params(self) -> List[str]:
         return self.optimization_log.list_available_params()
-
 
     def filter_top_n(self, n: int) -> None:
         """
@@ -117,7 +156,6 @@ class Optimization_Log_Visualizer:
         self.optimization_log.log = sorted_entries[:n]
         
         logger.info(f"✂️ Filtered optimization log: keeping top {len(self.optimization_log.log)} entries.")
-
 
     # ------------------------------------------------------------
     # Re-computing Loss
@@ -475,11 +513,82 @@ class Optimization_Log_Visualizer:
             fig.show()
 
         return fig
-    
-    
+      
     # ------------------------------------------------------------
     # Exporting Methods
     # ------------------------------------------------------------
+    def extract_best_score_evolution(
+        self, 
+        include_metrics: bool = True, 
+        running_avg_n: int | None = None
+    ) -> pd.DataFrame:
+        """
+        Returns a DataFrame tracking the 'Best Score So Far' (Cumulative Maximum)
+        for the total score and optionally for each individual metric.
+
+        Args:
+            include_metrics: If True, includes columns for individual metric scores.
+            running_avg_n: If set to an integer > 1, adds columns for the 
+                           n-point moving average of the scores.
+        """
+        if self.is_empty():
+            logger.warning("Optimization log is empty... returning empty dataframe.")
+            return pd.DataFrame()
+
+        # 1. Total Score Data
+        total_scores = np.array(
+            [entry.get_score() for entry in self.optimization_log],
+            dtype=float
+        )
+        # Calculate cumulative maximum
+        best_total = np.maximum.accumulate(total_scores)
+
+        data = {
+            "iteration": np.arange(len(self.optimization_log)),
+            "score_current": total_scores,         # Raw score (useful for reference)
+            "score_best_so_far": best_total        # Cumulative Max
+        }
+
+        # 2. Calculate Total Score Running Average (if requested)
+        if running_avg_n is not None and running_avg_n > 1:
+            # We use pandas Series for easy rolling window calculation
+            data[f"score_moving_avg_{running_avg_n}"] = (
+                pd.Series(total_scores).rolling(window=running_avg_n, min_periods=1).mean()
+            )
+
+        # 3. Individual Metrics (Optional)
+        if include_metrics:
+            # We assume the first entry has all metric keys
+            first_summary = self.optimization_log[0].get_fit_summary()
+            metric_keys = list(first_summary.keys())
+
+            for metric in metric_keys:
+                metric_scores = []
+                for entry in self.optimization_log:
+                    summary = entry.get_fit_summary()
+                    # Default to NaN so it doesn't skew averages (or -inf for max)
+                    val = summary.get(metric, {}).get("score", np.nan)
+                    metric_scores.append(val)
+                
+                metric_scores = np.array(metric_scores, dtype=float)
+                
+                # A. Metric Best So Far (ignoring NaNs for max calculation)
+                # We replace NaN with -inf just for the accumulate step, then revert if needed
+                temp_scores_for_max = np.nan_to_num(metric_scores, nan=-np.inf)
+                data[f"{metric}_best_so_far"] = np.maximum.accumulate(temp_scores_for_max)
+
+                # B. Metric Running Average (if requested)
+                if running_avg_n is not None and running_avg_n > 1:
+                    data[f"{metric}_moving_avg_{running_avg_n}"] = (
+                        pd.Series(metric_scores).rolling(window=running_avg_n, min_periods=1).mean()
+                    )
+
+        # 4. Create DataFrame
+        df = pd.DataFrame(data)
+        df.set_index("iteration", inplace=True)
+        
+        return df
+
     def to_df(self, top_n: int | None = None) -> pd.DataFrame:
         if self.is_empty():
             return pd.DataFrame()
