@@ -9,11 +9,6 @@ TIMESTAMP = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 ### (1) Configuration ###
 
-BASE_SAVE_DIR = Path(f"./save/save_opt_{TIMESTAMP}")
-# BASE_SAVE_DIR = Path(f"./save")
-BASE_SAVE_DIR.mkdir(exist_ok=True, parents=True)
-logger.critical(f"Optimization Script - results will be saved to {BASE_SAVE_DIR.absolute()}")
-
 path_to_project_setup = Path("./project_setup.yaml")
 optimizer_type = Optimizer_Type_Enum.NEVERGRAD_SINGLE
 
@@ -38,6 +33,9 @@ orchestrator.initialize()
 optimizer = orchestrator.get_optimizer()
 optimizer.parameterize()
 # orchestrator.run_sanity_on_spicelib_wrapper()
+
+BASE_SAVE_DIR = optimizer.autosave_checkpoint_dir
+logger.critical(f"Optimization Script - results will be saved to {BASE_SAVE_DIR.absolute()}")
 
 # optimizer.autosave_checkpoint_freqeucny = 5
 optimizer.optimize(render_optimization_trace=False, keep_history=False)
