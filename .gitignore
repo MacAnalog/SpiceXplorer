@@ -1,0 +1,49 @@
+# pickle files
+*.pkl
+
+# Notebook outputs
+
+# LaTeX auxiliary files
+*.aux
+*.log
+*.fls
+*.gz
+*.fdb_latexmk
+*.toc
+*.tex
+
+# VS Code configuration
+.vscode
+
+# Python cache directories
+**/__pycache__
+
+# Hidden files and directories
+
+
+# Python virtual environments
+venv/
+
+# Build and distribution directories
+build/
+dist/
+
+# Egg info
+*.egg-info/
+examples.zip
+*.zip
+*/.DS_Store
+.DS_Store
+examples/tunable-tia/docs/ECE748 Final Project.pdf
+
+# Simulation outputs
+# examples/**/*.spice
+# simulation/**/*.raw
+# examples/**/*.json
+# checkpoints/**
+
+*.html
+*raw
+*json
+
+**/temp_spice_out*/**
