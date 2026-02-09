@@ -61,9 +61,9 @@ class Base_Optimizer(ABC):
 
         self._TIMESTAMP = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.autosave_checkpoint_freqeucny : int = 2500
-        self.save_checkpoint_autosave_dir : Path = Path(f"./auto_save/{self.setup_obj.name}_{self.setup_obj.optimizer_config.name}_{self._TIMESTAMP}")
-        self.save_checkpoint_autosave_dir.mkdir(parents=True, exist_ok=True)
-        logger.critical(f"Autosave checkpoints (frequency : {self.autosave_checkpoint_freqeucny}) will be placed in {self.save_checkpoint_autosave_dir.absolute()}.")
+        self.autosave_checkpoint_dir : Path = Path(f"./auto_save/{self.setup_obj.name}_{self.setup_obj.optimizer_config.name}_{self._TIMESTAMP}")
+        self.autosave_checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        logger.critical(f"Autosave checkpoints (frequency : {self.autosave_checkpoint_freqeucny}) will be placed in {self.autosave_checkpoint_dir.absolute()}.")
         self.disable_autosave : bool = False
 
         # Instantiated & Typed by the base class
@@ -448,7 +448,7 @@ class Base_Optimizer(ABC):
         return obj
 
     def get_auto_save_name(self, append_txt: str ) -> Path:
-        return self.save_checkpoint_autosave_dir / Path(f"{self.setup_obj.name}_{self.setup_obj.optimizer_config.name}_{self.setup_obj.optimizer_config.budget}_{append_txt}")
+        return self.autosave_checkpoint_dir / Path(f"{self.setup_obj.name}_{self.setup_obj.optimizer_config.name}_{self.setup_obj.optimizer_config.budget}_{append_txt}")
 # ------------------------------------------------
 # A [ABSTRACT] SPICE-based Optimizers
 # ------------------------------------------------
@@ -1007,13 +1007,12 @@ class Spice_Single_Objective(Spice_Constraint_Satisfaction):
             tolerance     = np.float64(convert_linear_to_log(tolerance))
 
         normalizing_coeff = np.float64(target_spec.range)
-        adjusted_target = target_val - tolerance if spec_curr_val < target_val else target_val + tolerance
         # --------------------------
         # Case 1: Exceed the Target
         # --------------------------
         if target_spec.goal == OptimizationGoalType.EXCEED:
             if (spec_curr_val - target_val) > EPSILON:
-                spec_reward = compute_reward(curr_val=spec_curr_val, target_val=adjusted_target, reward_type=target_spec.reward_type, normalizing_coeff=normalizing_coeff)
+                spec_reward = compute_reward(curr_val=spec_curr_val, target_val=target_val, reward_type=target_spec.reward_type, normalizing_coeff=normalizing_coeff)
             elif spec_curr_val > target_val + tolerance:
                 spec_reward = np.float64(0.0)
         # --------------------------
@@ -1021,7 +1020,7 @@ class Spice_Single_Objective(Spice_Constraint_Satisfaction):
         # --------------------------
         elif target_spec.goal == OptimizationGoalType.MINIMIZE:
             if spec_curr_val - target_val < EPSILON:
-                spec_reward = compute_reward(curr_val=spec_curr_val, target_val=adjusted_target, reward_type=target_spec.reward_type, normalizing_coeff=normalizing_coeff)
+                spec_reward = compute_reward(curr_val=spec_curr_val, target_val=target_val, reward_type=target_spec.reward_type, normalizing_coeff=normalizing_coeff)
             else:
                 spec_reward = np.float64(0.0) 
         # --------------------------
