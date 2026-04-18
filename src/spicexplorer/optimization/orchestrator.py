@@ -4,7 +4,7 @@ import numpy        as np
 
 # Third-party imports
 from    enum        import Enum
-from    typing      import Dict, Tuple, Any, List, Type
+from    typing      import Callable, Dict, Tuple, Any, List, Type
 from    pathlib     import Path
 from    abc         import ABC, abstractmethod
 
@@ -14,11 +14,22 @@ from    spicexplorer.core.domains    import Project_Setup, TestbenchParams
 
 from    .base           import Spice_Base_Optimizer, Base_Optimizer
 from    .stochastic.nevergrad      import Nevergrad_Spice_Bode_Optimizer, Nevergrad_Spice_Constraint_Satisfaction,  Nevergrad_Spice_Single_Objective
-from    .stochastic.bayesian_ax    import Ax_Spice_Constraint_Satisfaction, Ax_Spice_Single_Objective
 
 # ------------------ Module Logger ------------------
 
 logger = logging.getLogger("spicexplorer.optimization.orchestrator")
+
+
+def _load_ax_optimizer_classes() -> tuple[Type[Spice_Base_Optimizer], Type[Spice_Base_Optimizer]]:
+    """Import Ax-backed optimizers only when the Ax extra is installed."""
+    try:
+        from .stochastic.bayesian_ax import Ax_Spice_Constraint_Satisfaction, Ax_Spice_Single_Objective
+    except ImportError as exc:
+        raise ImportError(
+            "Ax optimizers require the optional 'ax' dependencies. "
+            "Install them with `uv sync --extra ax`."
+        ) from exc
+    return Ax_Spice_Constraint_Satisfaction, Ax_Spice_Single_Objective
 
 
 # ------------------ Enums ------------------
@@ -31,12 +42,12 @@ class Optimizer_Type_Enum(Enum):
     AX_CONSTRAINT = "ax_constraint"
     AX_SINGLE = "ax_single"
 
-SPICE_OPTIMIZER_CLASSES : Dict[Optimizer_Type_Enum, Type[Spice_Base_Optimizer]] = {
+SPICE_OPTIMIZER_CLASSES : Dict[Optimizer_Type_Enum, Callable[[], Type[Spice_Base_Optimizer]] | Type[Spice_Base_Optimizer]] = {
     Optimizer_Type_Enum.NEVERGRAD_BODE: Nevergrad_Spice_Bode_Optimizer,
     Optimizer_Type_Enum.NEVERGRAD_CONSTRAINT: Nevergrad_Spice_Constraint_Satisfaction,
     Optimizer_Type_Enum.NEVERGRAD_SINGLE: Nevergrad_Spice_Single_Objective,
-    Optimizer_Type_Enum.AX_CONSTRAINT: Ax_Spice_Constraint_Satisfaction,
-    Optimizer_Type_Enum.AX_SINGLE: Ax_Spice_Single_Objective,
+    Optimizer_Type_Enum.AX_CONSTRAINT: lambda: _load_ax_optimizer_classes()[0],
+    Optimizer_Type_Enum.AX_SINGLE: lambda: _load_ax_optimizer_classes()[1],
 }
 
 # ------------------ Classes ------------------
@@ -132,7 +143,9 @@ class Circuit_Optimizer_Orchestrator_Base(ABC):
 class Circuit_Optimizer_Orchestrator_with_SPICE(Circuit_Optimizer_Orchestrator_Base):
     def get_optimizer(self) -> Spice_Base_Optimizer:
         logger.info(f"creating the circuit_optimizer of type {self.optimizer_type.value}")
-        circuit_optimizer = SPICE_OPTIMIZER_CLASSES[self.optimizer_type](
+        optimizer_factory = SPICE_OPTIMIZER_CLASSES[self.optimizer_type]
+        optimizer_cls = optimizer_factory() if callable(optimizer_factory) and not isinstance(optimizer_factory, type) else optimizer_factory
+        circuit_optimizer = optimizer_cls(
             spicelib_wrappers=self.spicelib_wrappers,
             setup_obj=self.project_setup
         )

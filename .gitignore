@@ -23,6 +23,7 @@
 
 # Python virtual environments
 venv/
+.venv/
 
 # Build and distribution directories
 build/
