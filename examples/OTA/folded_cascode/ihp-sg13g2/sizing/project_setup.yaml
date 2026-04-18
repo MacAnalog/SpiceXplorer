@@ -32,6 +32,22 @@ project:
       # supply voltage
       max_vdd : 1.8
 
+    pvt_map:
+      tt : 
+        - name : tt
+        spice_corner : mos_tt
+        lib_name  : cornerMOSlv.lib
+
+      ss :
+        - name : ss
+        spice_corner : mos_ss
+        lib_name  : cornerMOSlv.lib
+
+      ff :
+        - name : ff
+        spice_corner : mos_ff
+        lib_name  : cornerMOSlv.lib
+
   # ------------------------
   # PVT Corners: Define the PVT corners for simulations
   # ------------------------
@@ -152,7 +168,8 @@ project:
     # Biasing Current
     # ------------------------
     - name : x_dut_IB
-      # init : 34u
+      # init : 34u  
+      freeze_to : 34u   # Freezes the parameter value to this value
       min_val: 1u
       max_val: 100u
       
