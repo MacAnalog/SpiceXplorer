@@ -1,26 +1,13 @@
+from pathlib import Path
+
 from spicexplorer.optimization.rl.utils.hyperparameters import DDPGConfig
 
-# Load hyperparameters from the YAML file
-try:
-    hyperparams = DDPGConfig.from_yaml("tests/ddpg_hyperparameters.yaml")
 
-    # Print the loaded hyperparameters
-    print("Loaded DDPG Hyperparameters:")
-    print(hyperparams)
+def test_ddpg_hyperparameters_from_yaml():
+    hyperparams = DDPGConfig.from_yaml(str(Path("tests/ddpg_hyperparameters.yaml")))
 
-    # Access nested parameters
-    print("\nActor learning rate:", hyperparams.actor.lr)
-    print("Actor hidden units:", hyperparams.actor.hidden_units)
-    print("Critic grad clip:", hyperparams.critic.grad_clip)
-    print("Memory buffer size:", hyperparams.memory.buffer_size)
-    print("Training gamma:", hyperparams.training.gamma)
-
-    # Convert to dictionary for compatibility with the agent
-    hyperparams_dict = hyperparams.to_dict()
-    print("\nHyperparameters as dictionary:")
-    print(hyperparams_dict)
-
-except FileNotFoundError:
-    print("Error: 'ddpg_hyperparameters.yaml' not found. Make sure the file exists in the 'example' directory.")
-except Exception as e:
-    print(f"An error occurred: {e}")
+    assert hyperparams.actor.lr == 5e-4
+    assert hyperparams.actor.hidden_units == [256, 128]
+    assert hyperparams.critic.grad_clip == 1.0
+    assert hyperparams.memory.buffer_size == 500000
+    assert hyperparams.training.gamma == 0.99

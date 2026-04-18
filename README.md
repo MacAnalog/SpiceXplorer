@@ -6,6 +6,35 @@ The main documented workflow today is NGSpice-centered: a `project_setup.yaml` f
 
 `project_setup.yaml` -> `Project_Setup.from_yaml(...)` -> `Circuit_Optimizer_Orchestrator_with_SPICE` -> NGSpice testbench execution -> optimizer scoring -> checkpoints and HTML plots
 
+## Development Setup
+
+This repository is managed with `uv` for environment creation, locking, and command execution. The package build backend remains `hatchling`.
+
+Create the default development environment:
+
+```bash
+uv sync
+```
+
+This creates a project-local `.venv/`, installs the package in editable mode, installs the default `dev` dependency group, and uses the pinned interpreter from `.python-version`.
+
+Useful commands:
+
+```bash
+uv run pytest
+uv run python -c "import spicexplorer.optimization as opt; print(opt.Optimizer_Type_Enum.NEVERGRAD_SINGLE)"
+uv build
+```
+
+To work on the optional Ax backend, install the extra dependencies:
+
+```bash
+uv sync --extra ax
+uv run python -c "from spicexplorer.optimization import Ax_Spice_Single_Objective; print(Ax_Spice_Single_Objective)"
+```
+
+The RL stack is intentionally not normalized in this migration because it still depends on an external `rl_framework` package that is not part of this repository.
+
 ## Features
 
 - YAML-based project DSL for circuit setup, optimization variables, testbenches, and target specifications.
@@ -106,6 +135,12 @@ The main example lives under [`examples/OTA/cascode`](examples/OTA/cascode):
 - `sizing/` contains the YAML setup plus runner scripts and notebooks.
 
 For the clearest end-to-end script entry point, see [`examples/OTA/cascode/ihp-sg13g2/sizing/nevergrad_single_obj_opt.py`](examples/OTA/cascode/ihp-sg13g2/sizing/nevergrad_single_obj_opt.py). That script loads `project_setup.yaml`, instantiates the orchestrator, creates a Nevergrad optimizer, runs the optimization loop, and saves visualization outputs.
+
+You can run the example from the managed environment with:
+
+```bash
+uv run python examples/OTA/cascode/ihp-sg13g2/sizing/nevergrad_single_obj_opt.py
+```
 
 Typical outputs from that workflow include autosaved JSON checkpoints, timestamped log files, and Plotly HTML reports for scores and metric traces.
 

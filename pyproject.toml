@@ -13,16 +13,31 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    'sympy  >=1.13.3',
-    'tqdm   >= 4.67.1',
-    'pandas >= 2.2.3 ',
-    'ax-platform >= 0.4.3',
-    'matplotlib >= 3.9.3',
-    'PyYAML >= 6.0.1',
+    "control>=0.10",
+    "dacite>=1.9",
+    "nevergrad>=1.0",
+    "numpy>=2.2",
+    "pandas>=2.2.3",
+    "plotly>=6.0",
+    "PyYAML>=6.0.1",
+    "spicelib>=1.4",
+    "sympy>=1.13.3",
+    "torch>=2.6",
+    "tqdm>=4.67.1",
+]
+
+[project.optional-dependencies]
+ax = [
+    "ax-platform>=1.2.4; python_version >= '3.11'",
 ]
 
 # [project.scripts]
 # run-symbolix = "spicexplorer.symbolic_solver.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/spicexplorer"]
