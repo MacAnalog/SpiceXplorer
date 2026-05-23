@@ -12,438 +12,242 @@ Constraints: easy local setup (two commands), looks polished in a presentation, 
 
 ---
 
-## Technology Stack
+## Implementation Status
 
-Follows `examples/coding_style.xml`:
+### ✅ Completed (branch: `dev/ui`, single commit `2e82124`)
 
-| Layer | Choice |
+#### Infrastructure
+- `pyproject.toml` — added `[project.optional-dependencies] ui` group (`fastapi`, `uvicorn`, `python-multipart`)
+- `uv.lock` — updated
+- `.gitignore` — added `ui/node_modules/`, `ui/.next/`, exclusions for package.json
+- `ui/demo_config.json` — configurable demo paths (repo-root-relative)
+- `ui/.env.local` — `NEXT_PUBLIC_API_URL=http://localhost:8000`
+- `scripts/run_newcas_ui.sh` — starts both FastAPI (:8000) and Next.js (:3000) concurrently
+
+#### FastAPI Backend (`ui/backend/`)
+| File | Description |
 |---|---|
-| Frontend | Next.js 14 (TypeScript, App Router) |
-| Styling | TailwindCSS + shadcn/ui |
-| Icons | Lucide |
-| State | Zustand |
-| YAML editor | Monaco Editor (`@monaco-editor/react`) |
-| Backend | FastAPI (Python) — thin adapter over `spicexplorer` |
-| Live updates | Server-Sent Events (SSE) for streaming optimization progress |
-| Charts | Plotly.js (`react-plotly.js`) — matches existing `spicexplorer/viz` output |
+| `main.py` | App entry point, CORS for localhost:3000, all routers at `/api` prefix |
+| `app_config.py` | Reads `ui/demo_config.json`, resolves repo-root-relative paths |
+| `routes/config.py` | `GET /api/config` — returns demo config to hydrate frontend dropdowns |
+| `routes/project.py` | `POST /api/project/load`, `POST /api/project/validate` |
+| `routes/score.py` | `POST /api/score` — sigmoid + linear penalties |
+| `routes/optimize.py` | `POST /api/optimize/start`, `POST /api/optimize/stop/{id}`, `GET /api/optimize/stream/{id}` (SSE) |
+| `routes/checkpoint.py` | `GET /api/checkpoint`, `GET /api/checkpoint/{id}`, `/envelope`, `/scatter` |
+| `routes/schematic.py` | `GET /api/schematic` — serves SVG via FileResponse |
+| `services/score_service.py` | `compute_score()` — calls `compute_relative_absolute_error` and `compute_relative_sigmoid_error` from `spicexplorer.core.utils`, builds penalty curve for PenaltyCurveChart |
+| `services/checkpoint_reader.py` | `read_checkpoint()` — unified dispatcher for `.json` (via `Optimization_Log_Visualizer`) and `.csv` (NEWCAS_SUBMISSION_APPENDIX traces). Fixed: uses `df.iterrows()` not `itertuples()` to handle dotted column names like `point.score`. Also computes envelope and scatter. |
+| `services/optimizer_runner.py` | `_StreamingOpt` subclass of `Nevergrad_Spice_Single_Objective` that pushes events to an `asyncio.Queue` via `run_coroutine_threadsafe`. `_run_replay()` drip-feeds CSV rows at 50 ms intervals. `_runs: dict[str, RunState]` module-level registry. |
 
-**Setup target**:
-```bash
-uv run python ui/backend/main.py   # FastAPI on :8000
-cd ui/frontend && npm run dev      # Next.js on :3000
-```
+#### Next.js Frontend (`ui/src/`)
+| File | Description |
+|---|---|
+| `app/page.tsx` | 4-tab shell: Setup, Score Shaping, Optimize, Explorer. Indigo underline nav, running status pill. Loads `api.config()` on mount. Score Shaping and Optimize tabs disabled until project is applied. |
+| `app/api/yaml-text/route.ts` | `GET /api/yaml-text?path=...` — serves raw YAML file content for Monaco editor |
+| `lib/api.ts` | Typed fetch client; `BASE = NEXT_PUBLIC_API_URL ?? "http://localhost:8000"`. All backend calls typed. |
+| `lib/utils.ts` | `cn()`, `formatNumber()`, `statusForGoal()` (kept from Codex era) + new `formatEng()` for µ/n/p/k/M/G formatting |
+| `types/api.ts` | Full TypeScript mirror of FastAPI response shapes: `ProjectSummary`, `ScoreResponse`, `ScoreCurve`, `SSEEvent`, `CheckpointData`, `CheckpointMeta`, `EnvelopeEntry`, `ScatterPoint`, `DemoConfig` |
+| `stores/projectStore.ts` | yaml, yamlPath, summary, validationErrors, isApplied; `apply()` unlocks other tabs |
+| `stores/runStore.ts` | runId, isRunning, isReplay, budget, events, bestMetrics, bestParams, currentIter |
+| `stores/explorerStore.ts` | availableCheckpoints, runA/B, envelopeA, scatterMetricX/Y, selectedMetric |
+
+**UI primitives** (`components/ui/`): `badge.tsx` (pass/fail/neutral/warning/indigo variants), `select.tsx`, `slider.tsx`, `separator.tsx`, `button.tsx`, `panel.tsx`
+
+**Chart components** (`components/charts/`) — all use `react-plotly.js` via `PlotlyChart.tsx` base (dynamic import, `displayModeBar: false`, zinc/indigo/emerald theming):
+- `ScoreConvergenceChart.tsx` — raw + best-so-far score lines, emerald zero line
+- `MetricConvergenceChart.tsx` — best-so-far per metric, amber dashed target line
+- `PenaltyCurveChart.tsx` — sigmoid vs linear penalty curves, vertical markers for target and current value
+- `MetricScatterChart.tsx` — feasibility-colored scatter (zinc = infeasible, indigo = feasible), dashed target lines
+- `MetricHistogramChart.tsx` — overlaid histograms, amber target line
+
+**Tab components** (`components/tabs/`):
+- `SetupTab.tsx` — Monaco YAML editor (600 ms debounced validation), Load Demo dropdown, Upload, Validate, Apply. Right panel: project meta grid, testbenches list, DUT params table (`formatEng()`), target specs table.
+- `ScoreShapingTab.tsx` — Spec selector + value slider (range = target ± 3×range). Debounced 150 ms `POST /api/score`. PenaltyCurveChart updates live. Per-spec breakdown table with sigmoid/linear P̂ columns, aggregate F(x) footer row. Auto callout identifying highest-penalty spec.
+- `OptimizeTab.tsx` — Algorithm dropdown (LhsDE, LHSSearch, LogBFGSCMAPlus), budget input, Demo Checkpoint replay dropdown. Start/Stop with SSE via `EventSource`. Progress bar. ScoreConvergenceChart + MetricConvergenceChart (metric dropdown). Live spec status chips (emerald/red) from `bestMetrics`.
+- `ExplorerTab.tsx` — Run A/B checkpoint selectors + Load buttons. Row 1: ScoreConvergenceChart overlay + MetricConvergenceChart (metric dropdown). Row 2: MetricScatterChart (X/Y dropdowns) + Performance Envelope table. Row 3: MetricHistogramChart + Best Design Params table. Row 4: Spec Summary table (goal, target, Run A best, Run B best, pass/fail per run).
+
+#### Demo Data
+`ui/demo_config.json` points to the three CSV traces in `examples/OTA/cascode/NEWCAS_SUBMISSION_APPENDIX/`:
+- `sigmoid_de` — `CASCODE-OTA_LhsDE_2026-02-07_10-54-54_sigmoid-loss.csv`
+- `linear_de` — `CASCODE-OTA_LhsDE_2026-02-07_14-53-23_relAbs-loss.csv`
+- `blind_search` — `CASCODE-OTA_LHSSearch_2026-02-07_10-53-21_blind-search_sigmoid-loss.csv`
+
+Default YAML: `examples/OTA/cascode/ihp-sg13g2/sizing/project_setup.yaml`
 
 ---
 
-## Architecture
+### ❌ Not Yet Implemented
+
+#### 1. Create Wizard (Tab 1, Mode B) — highest priority for the demo
+
+The Setup tab currently only has Load/Edit mode. The Create Wizard is the step-by-step form that generates a YAML from scratch. The plan calls for:
+
+**Frontend** — new directory `ui/src/components/wizard/`:
+- `WizardShell.tsx` — step navigator, progress indicator, back/next buttons, live YAML preview pane on the right
+- `steps/BasicInfoStep.tsx` — project name, description, simulator dropdown, workspace root
+- `steps/PDKRulesStep.tsx` — technology name, add key/value constraint rows (e.g., `min_nfet_w = 0.18µ`)
+- `steps/DutParamsStep.tsx` — upload DUT netlist → calls `POST /api/netlist/parse`, pre-fills param rows. Each row: name, min, max (dropdown from PDK constraints or raw), is_integer, log_scale, freeze toggles.
+- `steps/PVTStep.tsx` — add rows: temp (°C), corner string, supply voltage
+- `steps/TestbenchesStep.tsx` — add/remove testbench cards: name, netlist upload, parameter rows, enable toggle
+- `steps/TargetSpecsStep.tsx` — add/remove spec rows (accordion): name, testbench dropdown, goal, target, tolerance, range, weight, error_type, reward_type, enable
+- `steps/OptimizerStep.tsx` — algorithm dropdown, budget, random seed
+
+The wizard needs a "Save YAML" button that writes the generated file to the workspace root, then switches SetupTab to Load/Edit mode with the new file loaded.
+
+**SetupTab.tsx** needs a segmented control at the top to toggle between Load/Edit and Create Wizard modes.
+
+**Backend** — two new routes and two new services:
+- `routes/netlist.py` — `POST /api/netlist/parse`: accept an uploaded `.spice` file, extract `.param name=val` lines via regex, return `[{name, default_val}]`
+- `routes/project.py` (extend) — `POST /api/project/generate`: accept wizard form data as JSON, return generated YAML string (via `yaml_generator.py`)
+- `services/netlist_parser.py` — regex over `.param` lines; no full SPICE parser needed
+- `services/yaml_generator.py` — converts wizard form data dict into a valid `project_setup.yaml` string, using PyYAML + the known YAML DSL schema
+
+#### 2. Minor UX gaps in existing tabs
+
+- **SetupTab**: The "Apply" button currently re-calls `api.loadProject()` even if the YAML was just manually edited (it re-reads from disk, not from the editor). Should POST the current editor content to `/api/project/load` with the YAML text, not the path — or save to a temp file first. This means edits in the Monaco editor that aren't saved to disk won't be reflected after Apply.
+- **OptimizeTab**: The algorithm selection currently doesn't affect the live run — `api.startRun()` sends `yaml_path` and `budget` but not the chosen algorithm or score function. The backend `optimizer_runner.py` needs to accept and use those.
+- **Score function toggle** described in the plan (sigmoid vs linear radio button) is not in the current OptimizeTab — the score function is fixed by what's in the YAML.
+
+#### 3. Demo checkpoint format
+
+`demo_config.json` currently uses CSV paths from `NEWCAS_SUBMISSION_APPENDIX`. The original plan described using JSON checkpoint files (`demo_sigmoid_de.json`, etc.). The CSV reader in `checkpoint_reader.py` handles both formats but JSON checkpoints from actual runs would give richer data. When new runs are recorded with the live optimizer, their JSON checkpoints appear automatically in the Explorer tab's list.
+
+---
+
+## Architecture (as built)
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Next.js Frontend  (localhost:3000)                      │
+│  ui/src/app/page.tsx  ← 4-tab shell                     │
 │  ┌──────────┐ ┌─────────┐ ┌──────────┐ ┌────────────┐  │
 │  │  Setup   │ │ Shaping │ │ Optimize │ │  Explorer  │  │
-│  │  Wizard  │ │         │ │          │ │            │  │
+│  │ (Load/   │ │         │ │          │ │            │  │
+│  │  Edit)   │ │         │ │          │ │            │  │
+│  │ Wizard ❌│ │         │ │          │ │            │  │
 │  └──────────┘ └─────────┘ └──────────┘ └────────────┘  │
 └───────────────────────┬─────────────────────────────────┘
                         │ REST + SSE
 ┌───────────────────────▼─────────────────────────────────┐
 │  FastAPI Backend  (localhost:8000)                       │
-│  /api/project/*   — load, validate, generate YAML        │
-│  /api/netlist/*   — upload, parse parameter names        │
-│  /api/score       — sigmoid vs. linear penalty compute   │
-│  /api/optimize/*  — start/stop runs, SSE stream          │
-│  /api/checkpoint  — list/load OptimizationLog files      │
+│  /api/config            ✅                               │
+│  /api/project/load      ✅                               │
+│  /api/project/validate  ✅                               │
+│  /api/project/generate  ❌ (wizard not built)            │
+│  /api/netlist/parse     ❌ (wizard not built)            │
+│  /api/score             ✅                               │
+│  /api/optimize/*        ✅ (start/stop/stream SSE)       │
+│  /api/checkpoint/*      ✅ (list/load/envelope/scatter)  │
+│  /api/schematic         ✅                               │
 └───────────────────────┬─────────────────────────────────┘
                         │ Python imports
            spicexplorer.core + .optimization + .viz
 ```
 
-The backend is a **thin FastAPI wrapper** — all domain logic stays in `spicexplorer`. No logic is duplicated.
-
 ---
 
-## Demo Configuration File
-
-A single file at `ui/demo_config.json` controls all pre-baked paths so the demo can be reconfigured without touching code:
-
-```json
-{
-  "default_yaml": "examples/OTA/cascode/ihp-sg13g2/sizing/project_setup.yaml",
-  "demo_checkpoints": {
-    "sigmoid_de": "examples/OTA/cascode/ihp-sg13g2/sizing/checkpoints/demo_sigmoid_de.json",
-    "linear_de":  "examples/OTA/cascode/ihp-sg13g2/sizing/checkpoints/demo_linear_de.json"
-  },
-  "demo_netlists": {
-    "dut":       "examples/OTA/cascode/ihp-sg13g2/spice/ota-improved.spice",
-    "tb_ac":     "examples/OTA/cascode/ihp-sg13g2/spice/ota-improved_tb-loopgain.spice",
-    "tb_noise":  "examples/OTA/cascode/ihp-sg13g2/spice/ota-improved_tb-noise.spice",
-    "tb_tran":   "examples/OTA/cascode/ihp-sg13g2/spice/ota-improved_tb-tran.spice"
-  }
-}
-```
-
-All paths are relative to the repo root. The backend reads this file on startup.
-
----
-
-## Page Layout
-
-Five-tab shell. The status pill in the header reflects a running optimization.
-
-```
-┌────────────────────────────────────────────────────────────────┐
-│  ⚡ SpiceXplorer  │ Setup │ Score Shaping │ Optimize │ Explorer │  ● Running  │
-├────────────────────────────────────────────────────────────────┤
-│                                                                │
-│                       < active tab >                           │
-│                                                                │
-└────────────────────────────────────────────────────────────────┘
-```
-
-Color palette: **zinc** neutral base, **indigo** accent for interactive elements, **emerald/red** for pass/fail, **amber** for warnings.
-
----
-
-## Tab 1 — Project Setup
-
-This tab has two modes toggled by a segmented control at the top: **Load/Edit** and **Create Wizard**.
-
-### Mode A: Load / Edit
-
-```
-  ┌─ Mode ──────────────────────────────────────────────┐
-  │  (● Load/Edit)   (○ Create Wizard)                  │
-  └─────────────────────────────────────────────────────┘
-
-  [Load Demo ▾]   [Upload YAML]           [Validate] [Apply]
-  ┌──────────────────────────┬──────────────────────────┐
-  │  Monaco YAML Editor      │  Parsed Summary           │
-  │                          │                           │
-  │  project:                │  ✓ Valid schema           │
-  │    name: CASCODE-OTA     │  Tech: ihp-sg13g2         │
-  │    simulator: ngspice    │                           │
-  │    ...                   │  DUT Params (14)          │
-  │                          │  ┌──────────────┬───┬───┐ │
-  │                          │  │ Name         │Min│Max│ │
-  │                          │  │ X_DUT_M1M2_W │180n│200u│
-  │                          │  │ ...          │   │   │ │
-  │  ── schema errors ──     │  └──────────────┴───┴───┘ │
-  │  ❌ line 42: unknown key │  PVT Corners (1)          │
-  │                          │  tb_ac ✓  tb_noise ✓      │
-  └──────────────────────────┴──────────────────────────┘
-```
-
-- **Load Demo** dropdown lists entries from `demo_config.json → default_yaml`
-- Monaco editor: full edit + live schema validation on keystroke (debounced, calls `POST /api/project/validate`)
-- **Validate** button triggers a full parse and highlights schema errors inline
-- **Apply** commits the project to Zustand state (makes it available to Optimize tab)
-- Engineering-unit formatting in the summary table (e.g., `180 nm`, `200 µm`)
-- Testbench enable toggles in the summary panel (write back to YAML automatically)
-
-### Mode B: Create Wizard
-
-A multi-step form that auto-generates the YAML. The live YAML preview updates on every keystroke in a right panel.
-
-```
-  ┌─ Mode ──────────────────────────────────────────────┐
-  │  (○ Load/Edit)   (● Create Wizard)                  │
-  └─────────────────────────────────────────────────────┘
-
-  ┌── Step Navigator ──────────────────────────────────────────────┐
-  │  ① Basic Info  ② PDK Rules  ③ DUT Params  ④ PVT  ⑤ Testbenches  ⑥ Target Specs  ⑦ Optimizer  │
-  │      ✓              ✓            ●                                                              │
-  └────────────────────────────────────────────────────────────────┘
-
-  ┌── Active Step ─────────────────┬── Live YAML Preview ─────────┐
-  │                                │                               │
-  │  Step 3: DUT Parameters        │  project:                     │
-  │                                │    name: MY-OTA               │
-  │  Upload DUT netlist:           │    ...                        │
-  │  [📁 ota.spice]  ✓ parsed      │    dut_params:                │
-  │                                │      - name: X_DUT_M1_W       │
-  │  Detected parameters:          │        min_val: min_nfet_w    │
-  │  ┌────────────────────────────┐│        max_val: max_nfet_w    │
-  │  │ Name       │ Min  │ Max  │ Int │ Log │        │
-  │  │ X_DUT_M1_W │ min_nfet_w▾│max_nfet_w▾│ ○ │ ○ │
-  │  │ X_DUT_M1_L │ min_nfet_l▾│max_nfet_l▾│ ○ │ ○ │
-  │  │ + Add row  │            │           │   │   │
-  │  └────────────────────────────┘│                               │
-  │                                │                               │
-  │         [← Back]  [Next →]     │  [Copy YAML]  [Save YAML]    │
-  └────────────────────────────────┴───────────────────────────────┘
-```
-
-**Wizard Steps:**
-
-1. **Basic Info** — project name, description, simulator (dropdown: `ngspice`), workspace root path
-
-2. **PDK Rules** — technology name, add key/value constraint rows (e.g., `min_nfet_w = 0.18u`). Constraints defined here appear as autocomplete options in step 3.
-
-3. **DUT Parameters** — upload DUT netlist → `POST /api/netlist/parse` returns detected `.param` names as pre-filled rows. User sets min/max (from PDK constraint dropdown or raw value), flags `is_integer`, `log_scale`, `freeze`.
-
-4. **PVT Corners** — add rows: temp (°C), corner string, supply voltage. At least one required.
-
-5. **Testbenches** — add/remove testbench cards. Per card: name, upload netlist (stored server-side), set parameter name/val/description rows, enable toggle.
-
-6. **Target Specs** — add/remove spec rows. Per spec: name, testbench (dropdown from step 5), sim_type, goal, target, tolerance, range, weight, error_type, reward_type, enable. Layout: one accordion row per spec, expand to edit.
-
-7. **Optimizer Config** — algorithm dropdown (`LogBFGSCMAPlus`, `LhsDE`, etc.), budget, random seed, lin/log variable bounds.
-
-**Netlist Parsing** (`POST /api/netlist/parse`): Backend scans the uploaded `.spice` file for `.param name=val` lines and returns `[{name, default_val}]`. Simple regex, no full SPICE parse needed.
-
-On **Save YAML**: write the generated file to the workspace root, then switch to Load/Edit mode with the new file loaded.
-
----
-
-## Tab 2 — Score Shaping
-
-**Goal**: Visually demonstrate the paper's contribution — why sigmoid outperforms linear normalization.
-
-```
-  ┌──────────────────────────────────────────────────────────────────┐
-  │  Score Shaping Visualizer                                        │
-  │                                                                  │
-  │  Spec: [ugf ▾]    Goal: exceed    Target: 200 MHz               │
-  │  Current value m: [──────●──────────────────] 187 MHz            │
-  │  α (sigmoid rate): [─────●──────────────────] 5.0               │
-  │                                                                  │
-  │  ┌──────────────────────────────────────────────────────────┐    │
-  │  │  Normalized Penalty P̂(m)          ← current m           │    │
-  │  │  1.0 ┤               ____________________________  ─ ─   │    │
-  │  │      │          ____/              sigmoid              │    │
-  │  │  0.5 ┤     ____/         ╷                             │    │
-  │  │      │ ___/  linear─ ─ ─ ╷                             │    │
-  │  │  0.0 ┤─────────────────── ╷ ─────────────────────────  │    │
-  │  │     far below   -tol  target  +tol   above              │    │
-  │  └──────────────────────────────────────────────────────────┘    │
-  │                                                                  │
-  │  Per-spec breakdown (current design point)          API-driven   │
-  │  ┌───────────────┬──────┬───────┬──────────┬──────────────────┐  │
-  │  │ Spec          │ Val  │Target │ Sigmoid P̂│ Linear P̂        │  │
-  │  │ ugf           │187M  │>200M  │  0.18    │  0.87            │  │
-  │  │ dcgain        │ 44   │> 40   │  0.00    │  0.00            │  │
-  │  │ pm            │ 57°  │60±10° │  0.00    │  0.00            │  │
-  │  │ inoise        │1.08m │<1.2m  │  0.00    │  0.00            │  │
-  │  │ current       │ 28µ  │< 25µ  │  0.09    │  0.56            │  │
-  │  └───────────────┴──────┴───────┴──────────┴──────────────────┘  │
-  │  Aggregate F(x):   Sigmoid = -0.27    Linear = -1.43             │
-  │                                                                  │
-  │  ╰── Note: linear current penalty (0.56) dominates the          │
-  │     aggregate, masking ugf's proximity to spec. Sigmoid         │
-  │     keeps both visible to the optimizer.                         │
-  └──────────────────────────────────────────────────────────────────┘
-```
-
-- Sliders drive `POST /api/score` — backend uses the loaded project's `TargetSpec` objects to compute penalties with both methods
-- Chart and table update on every slider change (debounced 150 ms)
-- "Aggregate F(x)" row shows the full fitness under both modes
-- Callout box auto-generated: identifies which spec has the highest linear penalty and quotes why that's a problem
-
-Backend: `POST /api/score` body: `{project_id, metric_values: {ugf: 187e6, ...}}` → response: `{per_spec: {ugf: {sigmoid: 0.18, linear: 0.87}, ...}, aggregate: {sigmoid: -0.27, linear: -1.43}}`. Computed via `TargetSpec.get_simple_penalty()`.
-
----
-
-## Tab 3 — Optimize
-
-**Goal**: Launch and watch a live optimization run.
-
-```
-  ┌── Run Configuration ──────────────────────────────────── [▶ Start Run] ──┐
-  │  Project: CASCODE-OTA  ✓ valid                                            │
-  │                                                                           │
-  │  Optimizer: [LogBFGSCMAPlus ▾]   Budget: [2000]   Seed: [48]            │
-  │  Score fn:  (● Sigmoid  ○ Linear)                                        │
-  │  Testbenches: [tb_ac ✓]  [tb_noise ✓]  [tb_tran ✓]                      │
-  │  [Load Demo Checkpoint ▾]  ← skip live run, replay saved trace           │
-  └───────────────────────────────────────────────────────────────────────────┘
-
-  ┌── Live Progress ────────────────────────── iter 342 / 2000  17% ──────────┐
-  │  ██████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░                           │
-  │                                                                           │
-  │  ┌── Score vs. Iteration ──────────────────────────────────────────────┐  │
-  │  │ 50 ┤                                      ╭─── score (best-so-far) │  │
-  │  │  0 ┤──────────────────────────────────────  feasibility boundary   │  │
-  │  │-100┤  ╲_______________                                              │  │
-  │  │-250┤────────────────────────────────────────────────────────────── │  │
-  │  └────────────────────────────────────────────────────────────────────┘  │
-  │                                                                           │
-  │  ┌── Per-Metric Best-So-Far ──────────────────────────────────────────┐  │
-  │  │   [ugf ▾]                                                          │  │
-  │  │  250M ┤                                            ╭─── best ugf  │  │
-  │  │  200M ┤ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  target           │  │
-  │  │  150M ┤  ╲_______________________________                         │  │
-  │  └────────────────────────────────────────────────────────────────────┘  │
-  │                                                                           │
-  │  Live Status Chips (best design)                          [■ Stop]        │
-  │  [ugf 187M ✗]  [dcgain 44dB ✓]  [pm 57° ✓]  [inoise 1.1mV ✓]           │
-  │  [current 22µA ✓]  [tsettle 12µs ✓]                                      │
-  └───────────────────────────────────────────────────────────────────────────┘
-```
-
-- **Load Demo Checkpoint** dropdown (from `demo_config.json`) replays a saved `OptimizationLog` through the SSE stream at 10× speed — safe fallback for a conference where NGSpice might be slow
-- **Per-Metric Best-So-Far** chart: second live chart tracking the best observed value of any one metric vs. iteration (dropdown to switch metric). Dashed target line overlaid.
-- **Score function toggle** is the key demo moment — start sigmoid, show convergence, then explain why linear would not converge by pointing to Tab 2
-- Stop button triggers `POST /api/optimize/stop/{run_id}`, run is auto-checkpointed
-- Completed/stopped runs appear immediately in the Explorer tab's checkpoint list
-
-SSE event schema:
-```json
-{
-  "iter": 342,
-  "score": -18.4,
-  "best_score": -18.4,
-  "metrics": { "ugf": 1.87e8, "dcgain": 44.3, "pm": 57.1, "inoise": 1.08e-3, "current": 2.21e-5, "tsettle": 1.18e-5 },
-  "best_params": { "X_DUT_M1M2_W": 2.1e-6, "..." : "..." }
-}
-```
-
----
-
-## Tab 4 — Trace Explorer
-
-**Goal**: Post-run exploration of what the optimizer found and what the topology can achieve. Answers the question: *what are the performance limits of this topology?*
-
-```
-  ┌── Checkpoint Manager ─────────────────────────────────────────────────────┐
-  │  Run A: [demo_sigmoid_de ▾]   Run B: [demo_linear_de ▾]  [+ Add Run]      │
-  └───────────────────────────────────────────────────────────────────────────┘
-
-  ┌── Panel Row 1 ─────────────────────────────────────────────────────────────┐
-  │  ┌──────────────────────────────┐  ┌──────────────────────────────────────┐│
-  │  │  Score Convergence           │  │  Per-Spec Convergence                ││
-  │  │  Run A ─── (sigmoid)         │  │  Metric: [ugf ▾]                     ││
-  │  │  Run B ─ ─ (linear)          │  │  Run A ─── best-so-far ugf           ││
-  │  │  Feasibility boundary ─ ─ ─  │  │  Run B ─ ─                           ││
-  │  │                              │  │  ─ ─ target                           ││
-  │  └──────────────────────────────┘  └──────────────────────────────────────┘│
-  └────────────────────────────────────────────────────────────────────────────┘
-
-  ┌── Panel Row 2: Topology Performance Limits ────────────────────────────────┐
-  │                                                                            │
-  │  ┌── Metric Scatter ────────────────────┐  ┌── Performance Envelope ─────┐│
-  │  │  X: [ugf ▾]   Y: [current ▾]         │  │  What can this topology do? ││
-  │  │                                      │  │                              ││
-  │  │  ·  ·    ·  ·   ← all visited        │  │  Metric  Best Ever  Target  ││
-  │  │  ·    ●●●  ·      designs            │  │  ugf     247 MHz   >200✓    ││
-  │  │     ●●●●●●        ● = feasible       │  │  dcgain  52.1 dB   >40 ✓    ││
-  │  │  ─ ─ ─ ─ ─ ─ target line            │  │  pm      71°       60±10✓   ││
-  │  │                                      │  │  inoise  0.87mV    <1.2 ✓   ││
-  │  │  [Run A] [Run B] [Both]              │  │  current 14.2µA    <25  ✓   ││
-  │  └──────────────────────────────────────┘  │  tsettle 6.8µs     <15  ✓   ││
-  │                                            └──────────────────────────────┘│
-  └────────────────────────────────────────────────────────────────────────────┘
-
-  ┌── Panel Row 3 ─────────────────────────────────────────────────────────────┐
-  │  ┌── Metric Distribution ───────────────┐  ┌── Best Design Params ───────┐│
-  │  │  Metric: [ugf ▾]  Bins: [40]         │  │  Run A (sigmoid)            ││
-  │  │  ▓▓▓▓                                │  │  X_DUT_M1M2_W    2.1 µm     ││
-  │  │  ▓▓▓▓▓▓▓                             │  │  X_DUT_M1M2_L    360 nm     ││
-  │  │  ▓▓▓▓▓▓▓▓▓▓▓▓▓                       │  │  X_DUT_M3M4_W    5.4 µm     ││
-  │  │  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓              │  │  V_BIAS1          0.62 V     ││
-  │  │          │target                     │  │  ...                        ││
-  │  │  ← Run A ─── Run B ─ ─              │  └─────────────────────────────┘│
-  │  └──────────────────────────────────────┘                                 │
-  │                                                                            │
-  │  ┌── Spec Summary (best design) ────────────────────────────────────────┐ │
-  │  │  Metric   Goal   Target   Achieved   Unit   Status   (Run A / Run B) │ │
-  │  │  ugf      >      200      221 / 198  MHz    ✓  /  ✗                  │ │
-  │  │  dcgain   >      40       44 / 41    dB     ✓  /  ✓                  │ │
-  │  │  pm       =60    ±10      58 / 55    deg    ✓  /  ✓                  │ │
-  │  │  inoise   <      1.2      1.05/1.19  mV     ✓  /  ✓                  │ │
-  │  └──────────────────────────────────────────────────────────────────────┘ │
-  └────────────────────────────────────────────────────────────────────────────┘
-```
-
-**Performance Envelope** panel is the "topology limits" feature. It reads all `OptimizationLogEntry` objects from the checkpoint (not just the best design) and computes, per metric, the single best value ever observed across all sampled designs — regardless of whether that design met other specs. This tells the designer: "your topology's ceiling for UGF is ~247 MHz even if it came at the cost of power." The feasibility tag (✓/✗ relative to target) is computed independently.
-
-**Metric Scatter**: plots all visited designs as points in 2D metric space. Feasible designs highlighted. Target lines drawn. Shows the trade-off region (e.g., UGF vs. current) — the "shape" of what's achievable by this topology.
-
-**Multi-run comparison** is powered by loading two `OptimizationLog` checkpoint files, each produced by `spicexplorer`'s existing checkpoint mechanism. The backend endpoint `GET /api/checkpoint/{name}` deserializes via the existing `Optimization_Log_Visualizer.load_checkpoint()` method.
-
----
-
-## Backend API Summary
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/api/config` | GET | Return `demo_config.json` to populate demo dropdowns |
-| `/api/project/load` | POST | Load and parse a YAML path → return `ProjectSummary` |
-| `/api/project/validate` | POST | Validate YAML string against schema → errors list |
-| `/api/project/generate` | POST | Accept wizard form data → return generated YAML string |
-| `/api/netlist/parse` | POST | Upload `.spice` file → return detected `.param` names |
-| `/api/score` | POST | Compute sigmoid + linear penalties for all specs |
-| `/api/optimize/start` | POST | Start background run → `{run_id}` |
-| `/api/optimize/stop/{run_id}` | POST | Gracefully stop, auto-checkpoint |
-| `/api/optimize/stream/{run_id}` | GET (SSE) | Stream `{iter, score, metrics, best_params}` |
-| `/api/checkpoint` | GET | List available `.json` checkpoint files |
-| `/api/checkpoint/{name}` | GET | Load `OptimizationLog` via `Optimization_Log_Visualizer` |
-| `/api/checkpoint/{name}/envelope` | GET | Compute per-metric best-ever across all entries |
-| `/api/checkpoint/{name}/scatter` | GET | Return all `{metric_x, metric_y, feasible}` points for scatter |
-
----
-
-## Directory Structure
+## Directory Structure (as built)
 
 ```
 ui/
-  demo_config.json               ← configurable demo paths (repo root-relative)
+  demo_config.json              ← configurable demo paths (repo-root-relative)
+  .env.local                    ← NEXT_PUBLIC_API_URL=http://localhost:8000
   backend/
-    main.py                      ← FastAPI app, route registration
+    main.py
+    app_config.py
     routes/
-      project.py                 ← /api/project/*
-      netlist.py                 ← /api/netlist/*
-      score.py                   ← /api/score
-      optimize.py                ← /api/optimize/*
-      checkpoint.py              ← /api/checkpoint/*
+      config.py
+      project.py
+      score.py
+      optimize.py
+      checkpoint.py
+      schematic.py
     services/
-      optimizer_runner.py        ← background task + SSE event queue
-      netlist_parser.py          ← .param regex extraction
-      score_service.py           ← wraps TargetSpec penalty methods
-      yaml_generator.py          ← wizard form data → YAML string
-  frontend/
-    src/
-      app/
-        page.tsx                 ← tab shell + global layout
-      components/
-        tabs/
-          SetupTab.tsx
-          ScoreShapingTab.tsx
-          OptimizeTab.tsx
-          ExplorerTab.tsx
-        wizard/
-          WizardShell.tsx        ← step navigator + progress
-          steps/
-            BasicInfoStep.tsx
-            PDKRulesStep.tsx
-            DutParamsStep.tsx
-            PVTStep.tsx
-            TestbenchesStep.tsx
-            TargetSpecsStep.tsx
-            OptimizerStep.tsx
-        charts/
-          ScoreConvergenceChart.tsx
-          MetricConvergenceChart.tsx
-          PenaltyCurveChart.tsx
-          MetricScatterChart.tsx
-          MetricHistogramChart.tsx
-        ui/                      ← shadcn/ui primitives
-      stores/
-        projectStore.ts          ← loaded project config + validation state
-        runStore.ts              ← active run state, SSE data, live metrics
-        explorerStore.ts         ← loaded checkpoints, selected runs A/B
-      types/
-        api.ts                   ← shared request/response types
-        project.ts               ← frontend mirror of domain types
+      score_service.py
+      checkpoint_reader.py
+      optimizer_runner.py
+      [netlist_parser.py]       ← ❌ not yet
+      [yaml_generator.py]       ← ❌ not yet
+  src/
+    app/
+      page.tsx                  ← 4-tab shell
+      api/yaml-text/route.ts    ← serve raw YAML for Monaco
+    components/
+      tabs/
+        SetupTab.tsx             ← Load/Edit only; wizard toggle ❌
+        ScoreShapingTab.tsx
+        OptimizeTab.tsx
+        ExplorerTab.tsx
+      [wizard/]                 ← ❌ not yet
+        [WizardShell.tsx]
+        [steps/*.tsx]
+      charts/
+        PlotlyChart.tsx          ← shared base (dynamic import, zinc theming)
+        ScoreConvergenceChart.tsx
+        MetricConvergenceChart.tsx
+        PenaltyCurveChart.tsx
+        MetricScatterChart.tsx
+        MetricHistogramChart.tsx
+      ui/
+        badge.tsx / button.tsx / panel.tsx
+        select.tsx / slider.tsx / separator.tsx
+    lib/
+      api.ts                    ← typed fetch client
+      utils.ts                  ← cn(), formatNumber(), formatEng()
+    stores/
+      projectStore.ts
+      runStore.ts
+      explorerStore.ts
+    types/
+      api.ts                    ← shared request/response types
 ```
 
 ---
 
-## Key Demo Script (NEWCAS Presentation Flow)
+## Technology Stack
 
-1. **Tab 1 — Setup** (1.5 min): Switch to Create Wizard. Upload the OTA netlist — params auto-populate. Walk through steps 3 and 6 to show how a sizing problem is described. Switch back to Load/Edit to show the full generated YAML. Hit Validate — green banner.
+| Layer | Choice |
+|---|---|
+| Frontend | Next.js 14 (TypeScript, App Router, `ui/src/`) |
+| Styling | TailwindCSS + custom shadcn-style primitives |
+| Icons | Lucide |
+| State | Zustand (3 stores) |
+| YAML editor | `@monaco-editor/react` (dynamic import, SSR disabled) |
+| Backend | FastAPI (Python) — thin adapter over `spicexplorer` |
+| Live updates | SSE (`EventSource` on frontend, `StreamingResponse` on backend) |
+| Charts | `react-plotly.js` (dynamic import, SSR disabled), consistent zinc/indigo theming |
 
-2. **Tab 2 — Score Shaping** (2 min): Load the project. Drag the UGF slider to just below target (187 MHz). Point to the linear penalty (0.87) vs. sigmoid (0.18). Show that the linear aggregate (-1.43) is dominated by current, masking the UGF miss. "This is the paper's core claim — let's verify it empirically."
+**Start command:**
+```bash
+./scripts/run_newcas_ui.sh
+# FastAPI → http://localhost:8000
+# Next.js  → http://localhost:3000
+```
 
-3. **Tab 3 — Optimize** (2 min): Start sigmoid run. Watch the score convergence cross zero at ~500 iterations while the per-metric chart shows each spec converging. If NGSpice is running fast, let it go to 1000 iterations live; otherwise use "Load Demo Checkpoint" to replay at 10× speed.
+---
 
-4. **Tab 4 — Explorer** (2 min): Load sigmoid + linear checkpoints. Overlay convergence traces — sigmoid crosses zero, linear stagnates. Open Metric Scatter (UGF vs. Current) to show the feasible cloud. Show Performance Envelope table: "this topology can reach 247 MHz UGF — our optimizer found 221 MHz. The sigmoid score got us to 90% of the topology's ceiling."
+## Key Implementation Decisions (for future reference)
+
+1. **CSV vs JSON checkpoints**: `checkpoint_reader.py` handles both formats — `.csv` from `NEWCAS_SUBMISSION_APPENDIX` for demo replay, `.json` from new live runs via `Optimization_Log_Visualizer`. Detection is by file extension.
+
+2. **CSV column dotted names**: Pandas `.itertuples()` sanitizes dots in column names like `point.score` into inaccessible attributes. The reader uses `.iterrows()` instead, which returns a Series where `row.get("point.score")` works correctly.
+
+3. **SSE + threading**: The optimizer runs in a background thread. Events are pushed to `asyncio.Queue` via `asyncio.run_coroutine_threadsafe(queue.put(event), loop)`. The SSE endpoint drains the queue with a 60 s timeout. Replay mode drips CSV rows at 50 ms intervals via an async coroutine.
+
+4. **Monaco / Plotly SSR**: Both use `dynamic(() => import(...), { ssr: false })` to avoid `window is not defined` errors in Next.js server rendering.
+
+5. **Plotly axis titles**: Must be `{ title: { text: "..." } }` not a bare string — the TypeScript types require `Partial<DataTitle>`.
+
+6. **Score computation**: The backend computes a penalty curve by sweeping `target ± 3×range` across 200 points and returning it to the frontend for `PenaltyCurveChart`. Raw directional error is computed first (`_raw_directional_error`), then normalized via both methods.
+
+---
+
+## Demo Script (NEWCAS Presentation Flow)
+
+1. **Tab 1 — Setup** (1 min): Click "Load demo…" → "OTA Cascode (default)". Hit **Apply**. Walk through the parsed summary (DUT params, testbenches, specs).
+
+2. **Tab 2 — Score Shaping** (2 min): Pick `ugf` spec. Drag value slider to 187 MHz (just below 200 MHz target). Point to linear P̂ (0.87) vs sigmoid P̂ (0.18). Show how the linear aggregate is dominated by current, masking the UGF miss. "This is the paper's core claim."
+
+3. **Tab 3 — Optimize** (2 min): Select "sigmoid_de" from Demo Checkpoint dropdown → hit **Replay**. Watch score convergence and per-metric best-so-far animate via SSE. Spec chips turn green as specs are met.
+
+4. **Tab 4 — Explorer** (2 min): Load Run A = `sigmoid_de`, Run B = `linear_de`. Overlay convergence traces. Open Metric Scatter (UGF vs. Current) to show the feasible cloud. Show Performance Envelope table — topology ceiling for each spec.
