@@ -25,13 +25,27 @@ Adds a step-by-step YAML generator to the Setup tab. Full spec in `PLAN_UI_DESIG
 
 ## 2. UX fixes in existing tabs
 
+- [ ] **Wizard DutParamsStep — column header misalignment**: The header row labels (MIN, MAX, INIT, INT, LOG, FRZ) don't line up with the input cells below them. The name cell contains a flex sub-row (input + optional Badge) that shifts subsequent columns. Fix by centering each header label over its cell, or switch the name column to a fixed-width so the badge doesn't affect column widths (`DutParamsStep.tsx` line 94–103).
+- [ ] **OptimizeTab — Sanity Check "NoneType has no attribute 'ask'"**: Trial evaluation (1-iteration sanity check) crashes with `'NoneType' object has no attribute 'ask'`, meaning the optimizer instrument is never constructed before `.ask()` is called. Trace the sanity-check backend path; ensure the Nevergrad optimizer is initialized (budget ≥ 1, valid param space) before invoking `ask`.
 - [ ] **SetupTab — Apply from editor content**: "Apply" currently re-reads from disk via `api.loadProject()`, discarding unsaved Monaco edits. Fix: POST current editor content directly to `/api/project/load` (as YAML text, not path), or write to a temp file first.
 - [ ] **OptimizeTab — wire algorithm selection to live run**: `api.startRun()` sends `yaml_path` and `budget` but not the chosen algorithm. Pass algorithm name to backend; `optimizer_runner.py` needs to accept and use it.
 - [ ] **OptimizeTab — score function toggle**: Add sigmoid vs linear radio button; pass choice to `api.startRun()` and honour it in the optimizer runner (currently fixed by YAML).
 
 ---
 
-## 3. Demo checkpoint format
+## 3. Score Shaping tab — multi-metric interactive explorer
+
+The current tab lets you tweak one spec value at a time in isolation. For multi-metric optimization the key insight is _how specs trade off against each other_, not just individual penalty curves. Rewrite the tab around simultaneous multi-spec editing and aggregate score visualization. **All score computation must call `spicexplorer.core.utils.compute_relative_absolute_error` / `compute_relative_sigmoid_error` through the existing `/api/score` backend — do not duplicate the loss math on the frontend.**
+
+- [ ] **Multi-spec value panel**: replace the single spec+slider with a table of all specs, each row having an inline value input (or mini-slider showing ± 3× range). All rows editable simultaneously; a single debounced `POST /api/score` fires with the full vector of current values and returns per-spec and aggregate penalties in one shot.
+- [ ] **Equi-score contour overlay**: pick any two specs as X/Y axes; render a 2-D grid of aggregate F(x) values (sweeping those two specs while holding the rest at their current values) as a Plotly `contour` trace. Overlay the current operating point as a crosshair. This shows the optimizer's actual objective landscape and which spec is the binding constraint.
+- [ ] **Score contribution waterfall / bar chart**: horizontal bar chart where each spec contributes its signed penalty to the aggregate F(x). Bars colored red (fail) / green (pass). Updates live as values are changed. Replaces the static per-spec breakdown table.
+- [ ] **Sigmoid vs linear toggle applies globally**: the score-function radio (sigmoid / linear) should recompute the full multi-spec vector via `/api/score` and redraw all visualizations, not just the single-spec penalty curve.
+- [ ] **"Worst-case corner" mode**: allow setting each spec value to its worst-case across PVT corners (loaded from the current project) and see the resulting aggregate score — answers "would this design pass across all corners."
+
+---
+
+## 4. Demo checkpoint format
 
 - [ ] Record new live runs and save their JSON checkpoints to replace CSV demo traces in `ui/app_config.json`. JSON gives richer data (full param history). `checkpoint_reader.py` already supports both formats.
 

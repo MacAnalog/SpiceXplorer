@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Optional
 
 import yaml
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from spicexplorer.core.domains import Project_Setup
+from ui.backend.services.yaml_generator import generate_yaml, project_dict_to_form
 
 router = APIRouter()
 
@@ -19,6 +20,16 @@ class LoadRequest(BaseModel):
 
 class ValidateRequest(BaseModel):
     yaml_content: str
+
+
+class GenerateRequest(BaseModel):
+    form: Dict[str, Any]
+    save_path: Optional[str] = None  # absolute or workspace-relative path; if set, write to disk
+
+
+class ParseToFormRequest(BaseModel):
+    yaml_path: Optional[str] = None
+    yaml_content: Optional[str] = None
 
 
 def _summarise(project: Project_Setup) -> dict[str, Any]:
@@ -124,3 +135,66 @@ def validate_yaml(body: ValidateRequest):
         return {"ok": False, "errors": [str(e)]}
     finally:
         os.unlink(tmp_path)
+
+
+@router.post("/project/generate")
+def generate_project(body: GenerateRequest):
+    """Render wizard form → YAML string. If `save_path` is given, also write to disk."""
+    try:
+        yaml_text = generate_yaml(body.form)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"YAML generation failed: {e}")
+
+    saved_path: Optional[str] = None
+    if body.save_path:
+        path = Path(body.save_path).expanduser()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(yaml_text)
+            saved_path = str(path)
+        except OSError as e:
+            raise HTTPException(status_code=400, detail=f"Could not write YAML to {path}: {e}")
+
+    # Best-effort validation; surface errors but still return the rendered YAML
+    errors: list[str] = []
+    import tempfile, os
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
+        tmp.write(yaml_text)
+        tmp_path = tmp.name
+    try:
+        Project_Setup.from_yaml(tmp_path)
+    except Exception as e:
+        errors.append(str(e))
+    finally:
+        os.unlink(tmp_path)
+
+    return {
+        "ok": not errors,
+        "yaml": yaml_text,
+        "errors": errors,
+        "saved_path": saved_path,
+    }
+
+
+@router.post("/project/parse-to-form")
+def parse_project_to_form(body: ParseToFormRequest):
+    """Inverse of /project/generate — load a YAML and return a wizard-form dict."""
+    if not body.yaml_path and not body.yaml_content:
+        raise HTTPException(status_code=400, detail="Provide yaml_path or yaml_content")
+    try:
+        if body.yaml_content:
+            data = yaml.safe_load(body.yaml_content)
+        else:
+            path = Path(body.yaml_path)  # type: ignore[arg-type]
+            if not path.exists():
+                raise HTTPException(status_code=404, detail=f"YAML file not found: {path}")
+            with path.open() as f:
+                data = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise HTTPException(status_code=422, detail=f"YAML parse error: {e}")
+
+    if not isinstance(data, dict) or "project" not in data:
+        raise HTTPException(status_code=422, detail="Top-level 'project:' key is required")
+
+    form = project_dict_to_form(data)
+    return {"ok": True, "form": form}

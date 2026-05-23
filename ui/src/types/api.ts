@@ -165,6 +165,10 @@ export interface SanityTestbenchResult {
   name: string;
   ok: boolean;
   error: string | null;
+  elapsed_ms: number | null;
+  log_path: string | null;
+  log_tail: string | null;
+  log_size_bytes: number | null;
 }
 
 export interface SanityTrialResult {
@@ -172,6 +176,9 @@ export interface SanityTrialResult {
   score: number | null;
   metrics: Record<string, number | null>;
   error: string | null;
+  elapsed_ms: number | null;
+  log_files: Record<string, string>;
+  log_tails: Record<string, string>;
 }
 
 export interface SanityCheckResponse {
@@ -179,6 +186,10 @@ export interface SanityCheckResponse {
   testbenches: SanityTestbenchResult[];
   trial: SanityTrialResult | null;
   error: string | null;
+  elapsed_ms_total: number | null;
+  elapsed_ms_load: number | null;
+  elapsed_ms_optimizer_init: number | null;
+  ngspice_path: string | null;
 }
 
 // Config
@@ -187,4 +198,122 @@ export interface AppConfig {
   default_yaml: string;
   preset_checkpoints: CheckpointMeta[];
   schematic_svg_path: string;
+}
+
+// Wizard
+
+export interface NetlistParam {
+  name: string;
+  default_val: string;
+}
+
+export interface NetlistParseResponse {
+  ok: boolean;
+  filename: string;
+  params: NetlistParam[];
+}
+
+export interface GenerateProjectResponse {
+  ok: boolean;
+  yaml: string;
+  errors: string[];
+  saved_path: string | null;
+}
+
+export interface ParseProjectResponse {
+  ok: boolean;
+  form: WizardForm;
+}
+
+// Wizard form shapes — mirrors yaml_generator.py expectations
+export interface WizardProjectInfo {
+  name: string;
+  description: string;
+  simulator: string;
+  save_sim: boolean;
+  parallel_sim: boolean;
+  ws_root: string;
+  netlist: string;
+  outdir: string;
+}
+
+export interface ConstraintRow { key: string; value: string }
+
+export interface WizardTech {
+  name: string;
+  constraints: ConstraintRow[];
+}
+
+export interface WizardPVT {
+  name: string;
+  temp: string | number;
+  corner: string;
+  supply: string | number;
+}
+
+export interface WizardDutParam {
+  name: string;
+  default_val?: string; // from netlist, displayed only
+  min_val: string;
+  max_val: string;
+  init?: string;
+  is_integer: boolean;
+  log_scale: boolean;
+  freeze: boolean;
+  source?: "netlist" | "manual";
+}
+
+export interface WizardTbParam {
+  name: string;
+  val: string;
+  description?: string;
+  source?: "netlist" | "manual";
+}
+
+export interface WizardTestbench {
+  name: string;
+  netlist: string;
+  enable: boolean;
+  description: string;
+  params: WizardTbParam[];
+}
+
+export interface WizardTargetSpec {
+  name: string;
+  testbench: string;
+  sim_type: "ac" | "dc" | "op" | "tran" | "noise" | "noise_spectrum";
+  goal: "exceed" | "minimize" | "exact";
+  target: string;
+  range: string;
+  tolerance: string;
+  weight: string;
+  log_scale: boolean;
+  error_type: string;
+  reward_type: string;
+  enable: boolean;
+  description: string;
+}
+
+export interface OptimizerKwargRow { key: string; value: string }
+
+export interface WizardOptimizer {
+  type: string;
+  name: string;
+  budget: number | string;
+  random_seed: number | string;
+  lin_min: string;
+  lin_max: string;
+  log_min: string;
+  log_max: string;
+  optimizer_kwargs: OptimizerKwargRow[];
+}
+
+export interface WizardForm {
+  project: WizardProjectInfo;
+  tech: WizardTech;
+  pvt_corners: WizardPVT[];
+  dut_params: WizardDutParam[];
+  testbenches: WizardTestbench[];
+  target_specs: WizardTargetSpec[];
+  optimizer: WizardOptimizer;
 }

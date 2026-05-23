@@ -7,11 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useProjectStore } from "@/stores/projectStore";
 import { api } from "@/lib/api";
-import { formatEng } from "@/lib/utils";
+import { formatEng, cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { selectCn } from "@/components/ui/select";
 import { Thead, Th, Tr, Td } from "@/components/ui/table";
 import type { AppConfig } from "@/types/api";
+import { WizardShell } from "@/components/wizard/WizardShell";
+import { useWizardStore } from "@/stores/wizardStore";
+import { Pencil } from "lucide-react";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
@@ -19,11 +22,14 @@ interface Props {
   appConfig: AppConfig | null;
 }
 
+type SetupMode = "load" | "wizard";
+
 export function SetupTab({ appConfig }: Props) {
   const { yaml, yamlPath, summary, validationErrors, isApplied, setYaml, setValidationErrors, apply } =
     useProjectStore();
   const [loading, setLoading] = useState(false);
   const [validating, setValidating] = useState(false);
+  const [mode, setMode] = useState<SetupMode>("load");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadDemoYaml = useCallback(async (path: string) => {
@@ -97,7 +103,75 @@ export function SetupTab({ appConfig }: Props) {
     reader.readAsText(file);
   };
 
+  const handleWizardSaved = useCallback(async (path: string) => {
+    setMode("load");
+    await loadDemoYaml(path);
+  }, [loadDemoYaml]);
+
+  const { setForm } = useWizardStore();
+  const [hydrateError, setHydrateError] = useState<string | null>(null);
+  const editInWizard = useCallback(async () => {
+    setHydrateError(null);
+    if (!yaml.trim() && !yamlPath) {
+      setHydrateError("Load a YAML first.");
+      return;
+    }
+    try {
+      const res = yaml.trim()
+        ? await api.parseProjectToForm({ yaml_content: yaml })
+        : await api.parseProjectToForm({ yaml_path: yamlPath });
+      setForm(res.form);
+      setMode("wizard");
+    } catch (e) {
+      setHydrateError(e instanceof Error ? e.message : String(e));
+    }
+  }, [yaml, yamlPath, setForm]);
+
   return (
+    <div className="space-y-4">
+      {/* Mode switcher + always-visible demo loader */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1 rounded-md border border-zinc-200 bg-white p-1 text-xs">
+          {(["load", "wizard"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              className={cn(
+                "rounded-md px-3 py-1.5 transition",
+                mode === m
+                  ? "bg-indigo-50 font-semibold text-indigo-700"
+                  : "text-zinc-600 hover:bg-zinc-50",
+              )}
+            >
+              {m === "load" ? "Load / Edit YAML" : "Create Wizard"}
+            </button>
+          ))}
+        </div>
+        {appConfig && (
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+              Demo DSL
+            </span>
+            <select
+              className={selectCn("sm")}
+              value=""
+              onChange={(e) => {
+                if (!e.target.value) return;
+                setMode("load");
+                loadDemoYaml(e.target.value);
+              }}
+            >
+              <option value="">Load example…</option>
+              <option value={appConfig.default_yaml}>OTA Cascode (default)</option>
+            </select>
+          </div>
+        )}
+      </div>
+
+      {mode === "wizard" ? (
+        <WizardShell onSaved={handleWizardSaved} />
+      ) : (
     <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
       {/* Left: YAML editor */}
       <Panel>
@@ -125,6 +199,9 @@ export function SetupTab({ appConfig }: Props) {
             </label>
             <Button variant="secondary" onClick={handleValidate} disabled={validating || !yaml}>
               {validating ? "Checking…" : "Validate"}
+            </Button>
+            <Button variant="secondary" onClick={editInWizard} disabled={!yaml && !yamlPath}>
+              <Pencil className="h-3 w-3" /> Edit in Wizard
             </Button>
             <Button onClick={handleApply} disabled={loading || !yamlPath}>
               {loading ? "Loading…" : "Apply"}
@@ -164,6 +241,11 @@ export function SetupTab({ appConfig }: Props) {
             </div>
           ) : (
             <div className="text-xs text-zinc-400">No YAML loaded yet — select an example or upload a file.</div>
+          )}
+          {hydrateError && (
+            <div className="mt-2 flex items-start gap-2 text-xs text-red-600">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {hydrateError}
+            </div>
           )}
         </div>
       </Panel>
@@ -283,6 +365,8 @@ export function SetupTab({ appConfig }: Props) {
           </>
         )}
       </div>
+    </div>
+      )}
     </div>
   );
 }

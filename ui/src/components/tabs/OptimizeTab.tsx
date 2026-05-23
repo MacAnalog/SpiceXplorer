@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Play, Square, FlaskConical, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { Play, Square, FlaskConical, CheckCircle2, XCircle, Loader2, FileText, Clock } from "lucide-react";
 import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -318,7 +318,26 @@ export function OptimizeTab({ appConfig }: Props) {
                   <span className={`text-sm font-medium ${sanityResult.ok ? "text-green-700" : "text-red-700"}`}>
                     {sanityResult.ok ? "All checks passed" : "One or more checks failed"}
                   </span>
+                  {sanityResult.elapsed_ms_total != null && (
+                    <Badge variant="neutral" className="ml-auto">
+                      <Clock className="h-3 w-3" /> {fmtMs(sanityResult.elapsed_ms_total)} total
+                    </Badge>
+                  )}
                 </div>
+
+                {(sanityResult.elapsed_ms_load != null || sanityResult.elapsed_ms_optimizer_init != null || sanityResult.ngspice_path) && (
+                  <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-500">
+                    {sanityResult.elapsed_ms_load != null && (
+                      <span>YAML load: <span className="font-mono">{fmtMs(sanityResult.elapsed_ms_load)}</span></span>
+                    )}
+                    {sanityResult.elapsed_ms_optimizer_init != null && (
+                      <span>· Optimizer init: <span className="font-mono">{fmtMs(sanityResult.elapsed_ms_optimizer_init)}</span></span>
+                    )}
+                    {sanityResult.ngspice_path && (
+                      <span>· Simulator: <span className="font-mono">{sanityResult.ngspice_path}</span></span>
+                    )}
+                  </div>
+                )}
 
                 {sanityResult.error && (
                   <p className="text-xs text-red-600 bg-red-50 rounded p-2">{sanityResult.error}</p>
@@ -326,21 +345,37 @@ export function OptimizeTab({ appConfig }: Props) {
 
                 {/* Per-testbench results */}
                 {sanityResult.testbenches.length > 0 && (
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Testbenches</p>
                     {sanityResult.testbenches.map((tb) => (
-                      <div key={tb.name} className="flex items-start gap-2">
-                        {tb.ok ? (
-                          <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
-                        )}
-                        <div>
+                      <div key={tb.name} className="rounded border border-zinc-200 bg-zinc-50/50">
+                        <div className="flex items-center gap-2 px-2 py-1.5">
+                          {tb.ok ? (
+                            <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-red-500 shrink-0" />
+                          )}
                           <span className="text-xs font-mono">{tb.name}</span>
-                          {tb.error && (
-                            <p className="text-xs text-red-600 mt-0.5">{tb.error}</p>
+                          {tb.elapsed_ms != null && (
+                            <span className="text-[10px] text-zinc-500"><Clock className="inline h-3 w-3 mr-0.5" />{fmtMs(tb.elapsed_ms)}</span>
+                          )}
+                          {tb.log_size_bytes != null && (
+                            <span className="text-[10px] text-zinc-400">· {fmtBytes(tb.log_size_bytes)} log</span>
                           )}
                         </div>
+                        {tb.error && (
+                          <p className="text-xs text-red-600 px-2 pb-1.5">{tb.error}</p>
+                        )}
+                        {tb.log_tail && (
+                          <details className="border-t border-zinc-200 px-2 py-1 text-[11px]">
+                            <summary className="cursor-pointer text-zinc-500 hover:text-zinc-700">
+                              <FileText className="inline h-3 w-3 mr-1" />
+                              ngspice log tail
+                              {tb.log_path && <span className="text-zinc-400 ml-1 font-mono text-[10px]">{tb.log_path}</span>}
+                            </summary>
+                            <pre className="mt-1 max-h-60 overflow-auto rounded bg-zinc-900 p-2 font-mono text-[10px] leading-tight text-zinc-100">{tb.log_tail}</pre>
+                          </details>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -348,8 +383,13 @@ export function OptimizeTab({ appConfig }: Props) {
 
                 {/* Trial evaluation results */}
                 {sanityResult.trial && (
-                  <div className="space-y-1">
-                    <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Trial Evaluation (1 iteration)</p>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Trial Evaluation (1 iteration)</p>
+                      {sanityResult.trial.elapsed_ms != null && (
+                        <Badge variant="neutral"><Clock className="h-3 w-3" /> {fmtMs(sanityResult.trial.elapsed_ms)}</Badge>
+                      )}
+                    </div>
                     {sanityResult.trial.error ? (
                       <p className="text-xs text-red-600 bg-red-50 rounded p-2">{sanityResult.trial.error}</p>
                     ) : (
@@ -401,6 +441,23 @@ export function OptimizeTab({ appConfig }: Props) {
                             </tbody>
                           </table>
                         )}
+                        {Object.keys(sanityResult.trial.log_tails || {}).length > 0 && (
+                          <div className="space-y-1 pt-1">
+                            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">Trial sim logs</p>
+                            {Object.entries(sanityResult.trial.log_tails).map(([name, tail]) => (
+                              <details key={name} className="rounded border border-zinc-200 px-2 py-1 text-[11px]">
+                                <summary className="cursor-pointer text-zinc-500 hover:text-zinc-700">
+                                  <FileText className="inline h-3 w-3 mr-1" />
+                                  <span className="font-mono">{name}</span>
+                                  {sanityResult.trial!.log_files[name] && (
+                                    <span className="text-zinc-400 ml-1 font-mono text-[10px]">{sanityResult.trial!.log_files[name]}</span>
+                                  )}
+                                </summary>
+                                <pre className="mt-1 max-h-60 overflow-auto rounded bg-zinc-900 p-2 font-mono text-[10px] leading-tight text-zinc-100">{tail}</pre>
+                              </details>
+                            ))}
+                          </div>
+                        )}
                       </>
                     )}
                   </div>
@@ -444,4 +501,21 @@ export function OptimizeTab({ appConfig }: Props) {
       )}
     </div>
   );
+}
+
+function fmtMs(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms)) return "—";
+  if (ms < 1) return `${ms.toFixed(2)} ms`;
+  if (ms < 1000) return `${ms.toFixed(0)} ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(2)} s`;
+  const m = Math.floor(s / 60);
+  return `${m}m ${Math.round(s - m * 60)}s`;
+}
+
+function fmtBytes(bytes: number | null | undefined): string {
+  if (bytes == null) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }

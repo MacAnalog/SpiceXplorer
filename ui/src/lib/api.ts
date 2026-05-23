@@ -10,6 +10,10 @@ import type {
   EnvelopeEntry,
   ScatterPoint,
   SanityCheckResponse,
+  NetlistParseResponse,
+  GenerateProjectResponse,
+  ParseProjectResponse,
+  WizardForm,
 } from "@/types/api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -103,5 +107,32 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ yaml_path }),
+    }),
+
+  // Wizard
+  parseNetlist: async (file: File): Promise<NetlistParseResponse> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`${BASE}/api/netlist/parse`, { method: "POST", body: fd });
+    if (!res.ok) {
+      let msg = `API error ${res.status}`;
+      try { const b = await res.json(); msg = b.detail ?? msg; } catch {}
+      throw new Error(msg);
+    }
+    return res.json();
+  },
+
+  generateProject: (form: WizardForm, save_path?: string) =>
+    req<GenerateProjectResponse>("/api/project/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ form, save_path: save_path ?? null }),
+    }),
+
+  parseProjectToForm: (args: { yaml_path?: string; yaml_content?: string }) =>
+    req<ParseProjectResponse>("/api/project/parse-to-form", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(args),
     }),
 };
