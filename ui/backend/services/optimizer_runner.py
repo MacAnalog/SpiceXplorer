@@ -44,6 +44,28 @@ _runs: dict[str, RunState] = {}
 
 # ---------- live optimizer ----------
 
+def _build_spicelib_wrappers(project: Project_Setup):
+    from pathlib import Path
+    from spicexplorer.spice_engine import NGSpice_Wrapper, Sim_Execution_Type
+
+    output_folder = Path(project.ws_root) / Path(project.outdir)
+    sim_execution_t = Sim_Execution_Type.RUN_AND_WAIT
+    path_to_simulator = Path(project.simulator)
+
+    wrappers = {}
+    for tb in project.testbenches:
+        if not tb.enable:
+            continue
+        wrappers[tb.name] = NGSpice_Wrapper(
+            testbench_name=tb.name,
+            netlist_filename=Path(project.ws_root) / Path(tb.netlist),
+            output_folder=output_folder,
+            sim_execution_t=sim_execution_t,
+            path_to_simulator=path_to_simulator,
+        )
+    return wrappers
+
+
 def _make_streaming_optimizer(project: Project_Setup, state: RunState):
     """Create a Nevergrad optimizer subclass that emits SSE events per step."""
     from spicexplorer.optimization.stochastic.nevergrad import Nevergrad_Spice_Single_Objective
@@ -68,7 +90,8 @@ def _make_streaming_optimizer(project: Project_Setup, state: RunState):
             asyncio.run_coroutine_threadsafe(state.queue.put(event), state.loop)
             return result
 
-    return _StreamingOpt(project)
+    spicelib_wrappers = _build_spicelib_wrappers(project)
+    return _StreamingOpt(setup_obj=project, spicelib_wrappers=spicelib_wrappers)
 
 
 def _run_live(state: RunState, project_path: str) -> None:

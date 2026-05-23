@@ -9,6 +9,7 @@ import type {
   CheckpointMeta,
   EnvelopeEntry,
   ScatterPoint,
+  SanityCheckResponse,
 } from "@/types/api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -96,4 +97,11 @@ export const api = {
     ),
 
   schematicUrl: () => `${BASE}/api/schematic`,
+
+  sanityCheck: (yaml_path: string) =>
+    req<SanityCheckResponse>("/api/sanity-check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ yaml_path }),
+    }),
 };

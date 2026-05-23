@@ -159,6 +159,28 @@ export interface ScatterPoint {
   iter: number;
 }
 
+// Sanity check
+
+export interface SanityTestbenchResult {
+  name: string;
+  ok: boolean;
+  error: string | null;
+}
+
+export interface SanityTrialResult {
+  ok: boolean;
+  score: number | null;
+  metrics: Record<string, number | null>;
+  error: string | null;
+}
+
+export interface SanityCheckResponse {
+  ok: boolean;
+  testbenches: SanityTestbenchResult[];
+  trial: SanityTrialResult | null;
+  error: string | null;
+}
+
 // Config
 
 export interface AppConfig {

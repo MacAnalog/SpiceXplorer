@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Play, Square } from "lucide-react";
+import { Play, Square, FlaskConical, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +11,7 @@ import { COLORS } from "@/components/charts/PlotlyChart";
 import { Select, selectCn } from "@/components/ui/select";
 import { ScoreConvergenceChart } from "@/components/charts/ScoreConvergenceChart";
 import { MetricConvergenceChart } from "@/components/charts/MetricConvergenceChart";
-import type { AppConfig } from "@/types/api";
+import type { AppConfig, SanityCheckResponse } from "@/types/api";
 
 interface Props {
   appConfig: AppConfig | null;
@@ -39,6 +39,10 @@ export function OptimizeTab({ appConfig }: Props) {
   const [selectedMetric, setSelectedMetric] = useState<string>("");
   const [startError, setStartError] = useState<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+
+  const [sanityResult, setSanityResult] = useState<SanityCheckResponse | null>(null);
+  const [isSanityRunning, setIsSanityRunning] = useState(false);
+  const [sanityError, setSanityError] = useState<string | null>(null);
 
   const enabledSpecs = summary?.target_specs.filter((s) => s.enable) ?? [];
   const metricNames = enabledSpecs.map((s) => s.name);
@@ -89,6 +93,21 @@ export function OptimizeTab({ appConfig }: Props) {
     if (runId) await api.stopRun(runId).catch(() => {});
     stopRun();
     eventSourceRef.current?.close();
+  };
+
+  const handleSanityCheck = async () => {
+    if (!yamlPath) return;
+    setSanityResult(null);
+    setSanityError(null);
+    setIsSanityRunning(true);
+    try {
+      const result = await api.sanityCheck(yamlPath);
+      setSanityResult(result);
+    } catch (err) {
+      setSanityError(err instanceof Error ? err.message : "Sanity check failed");
+    } finally {
+      setIsSanityRunning(false);
+    }
   };
 
   // Cleanup on unmount
@@ -255,6 +274,142 @@ export function OptimizeTab({ appConfig }: Props) {
           </PanelBody>
         </Panel>
       </div>
+
+      {/* Sanity Check */}
+      {isApplied && (
+        <Panel>
+          <PanelHeader className="flex items-center justify-between">
+            <span className="text-sm font-semibold">Sanity Check</span>
+            <Button
+              onClick={handleSanityCheck}
+              disabled={isSanityRunning || isRunning}
+            >
+              {isSanityRunning ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Testing…</>
+              ) : (
+                <><FlaskConical className="h-4 w-4" /> Run Sanity Check</>
+              )}
+            </Button>
+          </PanelHeader>
+          <PanelBody>
+            {!sanityResult && !sanityError && !isSanityRunning && (
+              <p className="text-xs text-zinc-400">
+                Runs one SPICE simulation per testbench and one trial optimization step to verify the full pipeline before committing to a full run.
+              </p>
+            )}
+
+            {isSanityRunning && (
+              <p className="text-xs text-zinc-500">Running SPICE simulations — this may take a moment…</p>
+            )}
+
+            {sanityError && (
+              <p role="alert" className="text-xs text-red-600">{sanityError}</p>
+            )}
+
+            {sanityResult && (
+              <div className="space-y-3">
+                {/* Overall status */}
+                <div className="flex items-center gap-2">
+                  {sanityResult.ok ? (
+                    <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0" />
+                  ) : (
+                    <XCircle className="h-5 w-5 text-red-500 shrink-0" />
+                  )}
+                  <span className={`text-sm font-medium ${sanityResult.ok ? "text-green-700" : "text-red-700"}`}>
+                    {sanityResult.ok ? "All checks passed" : "One or more checks failed"}
+                  </span>
+                </div>
+
+                {sanityResult.error && (
+                  <p className="text-xs text-red-600 bg-red-50 rounded p-2">{sanityResult.error}</p>
+                )}
+
+                {/* Per-testbench results */}
+                {sanityResult.testbenches.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Testbenches</p>
+                    {sanityResult.testbenches.map((tb) => (
+                      <div key={tb.name} className="flex items-start gap-2">
+                        {tb.ok ? (
+                          <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                        ) : (
+                          <XCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+                        )}
+                        <div>
+                          <span className="text-xs font-mono">{tb.name}</span>
+                          {tb.error && (
+                            <p className="text-xs text-red-600 mt-0.5">{tb.error}</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Trial evaluation results */}
+                {sanityResult.trial && (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Trial Evaluation (1 iteration)</p>
+                    {sanityResult.trial.error ? (
+                      <p className="text-xs text-red-600 bg-red-50 rounded p-2">{sanityResult.trial.error}</p>
+                    ) : (
+                      <>
+                        {sanityResult.trial.score != null && (
+                          <p className="text-xs text-zinc-600">
+                            Score: <span className="font-mono font-medium">{sanityResult.trial.score.toFixed(4)}</span>
+                          </p>
+                        )}
+                        {Object.keys(sanityResult.trial.metrics).length > 0 && (
+                          <table className="w-full text-xs border-collapse mt-1">
+                            <thead>
+                              <tr className="text-zinc-400 text-left">
+                                <th className="pb-1 pr-4 font-medium">Metric</th>
+                                <th className="pb-1 pr-4 font-medium">Simulated</th>
+                                <th className="pb-1 pr-4 font-medium">Target</th>
+                                <th className="pb-1 font-medium">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {enabledSpecs.map((spec) => {
+                                const val = sanityResult.trial!.metrics[spec.name];
+                                if (val == null) return null;
+                                const tol = spec.tolerance ?? Math.abs(spec.target) * 0.05;
+                                const passes =
+                                  spec.goal === "exceed"
+                                    ? val >= spec.target
+                                    : spec.goal === "minimize"
+                                      ? val <= spec.target
+                                      : Math.abs(val - spec.target) <= tol;
+                                return (
+                                  <tr key={spec.name} className="border-t border-zinc-100">
+                                    <td className="py-1 pr-4 font-mono">{spec.name}</td>
+                                    <td className="py-1 pr-4 font-mono">{val.toPrecision(4)}</td>
+                                    <td className="py-1 pr-4 text-zinc-400">
+                                      {spec.goal === "exceed" ? "≥" : spec.goal === "minimize" ? "≤" : "≈"}{" "}
+                                      {spec.target}
+                                    </td>
+                                    <td className="py-1">
+                                      {passes ? (
+                                        <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                                      ) : (
+                                        <XCircle className="h-3.5 w-3.5 text-red-500" />
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </PanelBody>
+        </Panel>
+      )}
 
       {/* Charts — only visible when data exists */}
       {events.length > 0 && (
