@@ -1,6 +1,6 @@
-# SpiceXplorer NEWCAS 2026 — UI
+# SpiceXplorer UI
 
-Conference demo for NEWCAS 2026 showcasing score shaping, live circuit optimization, and topology performance exploration for the cascode OTA case study.
+A web interface for the SpiceXplorer circuit optimization library. It provides interactive score shaping, live SPICE-backed optimization runs, and multi-run exploration — currently demonstrated on the cascode OTA case study with the IHP SG13G2 PDK.
 
 ---
 
@@ -54,26 +54,26 @@ Browser (localhost:4000)
 | `ui/backend/routes/` | One file per API group (config, project, score, optimize, checkpoint, schematic) |
 | `ui/backend/services/optimizer_runner.py` | Background thread + SSE queue for live/replay runs |
 | `ui/backend/services/checkpoint_reader.py` | Unified CSV + JSON checkpoint loader |
-| `ui/src/app/page.tsx` | 4-tab shell, tab navigation, demo config fetch |
+| `ui/app_config.json` | Preset checkpoint paths + default YAML (repo-root-relative) |
+| `ui/src/app/page.tsx` | 4-tab shell, tab navigation, app config fetch |
 | `ui/src/components/tabs/` | SetupTab, ScoreShapingTab, OptimizeTab, ExplorerTab |
 | `ui/src/components/charts/` | Plotly-backed chart components (all SSR-disabled) |
 | `ui/src/components/ui/` | Shared primitives: Button, Badge, Panel, Select, Table, EmptyState |
 | `ui/src/stores/` | Zustand state: projectStore, runStore, explorerStore |
 | `ui/src/lib/api.ts` | Typed fetch client — all backend calls go through here |
 | `ui/src/types/api.ts` | TypeScript mirrors of all FastAPI response shapes |
-| `ui/demo_config.json` | Demo checkpoint paths + default YAML (repo-root-relative) |
 | `ui/.env.local` | `NEXT_PUBLIC_API_URL=http://localhost:8000` |
 
 ---
 
-## Demo Script (NEWCAS Presentation Flow)
+## Workflow
 
-| Tab | Duration | What to show |
-|---|---|---|
-| **Setup** | 1 min | Load demo → "OTA Cascode (default)" → Apply. Walk through DUT params, testbenches, specs. |
-| **Score Shaping** | 2 min | Select `ugf`, drag slider to 187 MHz. Compare linear P̂ (0.87) vs sigmoid P̂ (0.18). Show how linear is dominated by a severe violation. |
-| **Optimize** | 2 min | Select `sigmoid_de` from Demo Checkpoint → Replay. Watch score convergence animate and spec chips turn green. |
-| **Explorer** | 2 min | Load Run A = `sigmoid_de`, Run B = `linear_de`. Overlay convergence. Open Metric Scatter (UGF vs Current). Show Performance Envelope table. |
+| Tab | What it does |
+|---|---|
+| **Setup** | Load a project YAML (example dropdown or file upload), edit in Monaco, validate, apply. Displays project metadata, testbenches, DUT params, and target specs. |
+| **Score Shaping** | Select a spec, drag a slider to explore metric values. Compares linear vs sigmoid penalty curves and shows per-spec breakdown. |
+| **Optimize** | Select algorithm and budget, then either start a live SPICE run or replay a preset checkpoint. Streams score and metric convergence in real time with live spec status chips. |
+| **Explorer** | Load two checkpoints (Run A / Run B), overlay convergence, plot metric scatter, inspect the performance envelope table and best design parameters. |
 
 ---
 
@@ -81,9 +81,9 @@ Browser (localhost:4000)
 
 ### Implemented ✅
 
-- **Setup tab** — Monaco YAML editor (600 ms debounced validation), Load Demo dropdown, Upload, Validate, Apply. Right panel: project meta grid, testbenches, DUT params, target specs.
+- **Setup tab** — Monaco YAML editor (600 ms debounced validation), example project dropdown, Upload, Validate, Apply. Right panel: project meta grid, testbenches, DUT params, target specs.
 - **Score Shaping tab** — Spec selector + slider (range = target ± 3×range), live penalty curve chart, per-spec breakdown table (linear/sigmoid), highest-penalty callout.
-- **Optimize tab** — Algorithm dropdown, budget input, Demo Checkpoint replay, Start/Stop with SSE streaming, progress bar, score + metric convergence charts, live spec status chips.
+- **Optimize tab** — Algorithm dropdown, budget input, preset checkpoint replay, Start/Stop with SSE streaming, progress bar, score + metric convergence charts, live spec status chips.
 - **Explorer tab** — Run A/B checkpoint selectors, overlaid convergence charts, metric scatter (X/Y selectors), performance envelope table, metric histogram, best design params, spec summary.
 - **UI primitives** — `Button`, `Badge` (5 variants), `Panel`/`PanelHeader`/`PanelBody`, `Select` + `selectCn()`, `Thead`/`Th`/`Tr`/`Td`, `EmptyState`.
 - **Logging** — `setup_loggers(console_level=...)` in the library; backend reads `LOG_LEVEL` env var. Log files written to `logs/SpiceXplorer_<timestamp>.log`.
@@ -91,7 +91,7 @@ Browser (localhost:4000)
 
 ### Not Yet Implemented ❌
 
-- **Create Wizard** (highest priority for demo) — Step-by-step form to generate a YAML from scratch: BasicInfo → PDKRules → DUT Params (with netlist upload) → PVT → Testbenches → Target Specs → Optimizer. Requires `POST /api/netlist/parse` and `POST /api/project/generate` backend routes, plus `ui/src/components/wizard/` frontend directory.
+- **Create Wizard** (highest priority) — Step-by-step form to generate a YAML from scratch: BasicInfo → PDKRules → DUT Params (with netlist upload) → PVT → Testbenches → Target Specs → Optimizer. Requires `POST /api/netlist/parse` and `POST /api/project/generate` backend routes, plus `ui/src/components/wizard/` frontend directory.
 - **Apply from editor content** — Currently "Apply" re-reads from disk; edits made in the Monaco editor that aren't saved to disk are lost on Apply.
 - **Algorithm selection wired to live run** — The algorithm dropdown in OptimizeTab is UI-only; the backend always uses the algorithm from the YAML.
 - **Score function toggle for live runs** — Sigmoid vs linear choice is fixed by YAML; no runtime switch exposed yet.
@@ -161,17 +161,17 @@ Tests are skipped automatically if `ngspice` is not in `PATH`.
 
 ## Common Bugs & Debugging
 
-### "Load demo…" dropdown missing
+### "Load example…" dropdown missing
 
-**Cause:** The dropdown is conditional on `demoConfig` — it only renders when the FastAPI backend responds to `GET /api/config`. If the backend is not running or the browser made the request before it was up, `demoConfig` stays `null`.
+**Cause:** The dropdown renders only when the backend responds to `GET /api/config`. If the backend was not yet running when the page loaded, `appConfig` stays `null`.
 
 **Fix:** Make sure both processes are running, then **hard-refresh** the page (`Ctrl+Shift+R`).
 
 ### App loads but backend calls fail (CORS error in browser console)
 
-**Cause:** Next.js landed on a different port (e.g., 3001) than the backend's CORS allowlist.
+**Cause:** Next.js landed on a different port than the backend's CORS allowlist.
 
-**Fix:** The CORS config now uses `allow_origin_regex` matching any `localhost:<port>`. If you still see this after the fix, restart the backend.
+**Fix:** The CORS config uses `allow_origin_regex` matching any `localhost:<port>`. If you still see this after the fix, restart the backend.
 
 ### Port 4000 already in use / Next.js falls back to 4001
 
@@ -186,9 +186,9 @@ lsof -ti tcp:4000 | xargs kill   # kill whatever is on 4000
 
 ### "Start Live Run" button stops immediately with no events
 
-**Cause:** The optimizer thread threw an exception (SPICE binary not found, bad netlist path, missing PDK models, etc.). The error was previously swallowed silently.
+**Cause:** The optimizer thread threw an exception (SPICE binary not found, bad netlist path, missing PDK models, etc.).
 
-**Fix (already patched):** The error is now shown in the UI below the Start button. Also check the backend log — the full traceback is printed at `ERROR` level with `[run <id>]` prefix.
+**Fix:** Check the error message shown below the Start button. Also check the backend log — the full traceback is printed at `ERROR` level with `[run <id>]` prefix.
 
 **Common root causes:**
 - `ngspice` not in PATH → run `which ngspice`; add its directory to PATH or pass `path_to_simulator` in the YAML
@@ -223,7 +223,7 @@ rm -rf ui/.next
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/api/config` | Demo config (checkpoints, default YAML path) |
+| GET | `/api/config` | App config (preset checkpoints, default YAML path) |
 | POST | `/api/project/load` | Load + parse a YAML file by path |
 | POST | `/api/project/validate` | Validate YAML text without applying |
 | POST | `/api/score` | Compute sigmoid + linear penalties for given metric values |

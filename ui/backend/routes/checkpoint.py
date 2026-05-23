@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ui.backend.app_config import demo_checkpoint_paths, REPO_ROOT
+from ui.backend.app_config import preset_checkpoint_paths, REPO_ROOT
 from ui.backend.services.checkpoint_reader import read_checkpoint, compute_envelope, compute_scatter
 
 router = APIRouter()
@@ -40,7 +40,7 @@ def _list_autosave_checkpoints() -> list[dict[str, Any]]:
 @router.get("/checkpoint")
 def list_checkpoints():
     items = []
-    for key, path in demo_checkpoint_paths().items():
+    for key, path in preset_checkpoint_paths().items():
         if path.exists():
             items.append({
                 "id": key,
@@ -55,9 +55,8 @@ def list_checkpoints():
 
 @router.get("/checkpoint/{checkpoint_id}")
 def load_checkpoint(checkpoint_id: str, limit: int = Query(default=0)):
-    # Try demo checkpoints first
-    demos = demo_checkpoint_paths()
-    path: Path | None = demos.get(checkpoint_id)
+    presets = preset_checkpoint_paths()
+    path: Path | None = presets.get(checkpoint_id)
 
     if path is None:
         # Try autosave
@@ -82,8 +81,8 @@ def checkpoint_envelope(checkpoint_id: str, yaml_path: str = Query(default="")):
     from pathlib import Path as _Path
     from spicexplorer.core.domains import Project_Setup
 
-    demos = demo_checkpoint_paths()
-    path = demos.get(checkpoint_id)
+    presets = preset_checkpoint_paths()
+    path = presets.get(checkpoint_id)
     if path is None or not path.exists():
         raise HTTPException(404, f"Checkpoint '{checkpoint_id}' not found")
 
@@ -114,8 +113,8 @@ def checkpoint_scatter(
     from pathlib import Path as _Path
     from spicexplorer.core.domains import Project_Setup
 
-    demos = demo_checkpoint_paths()
-    path = demos.get(checkpoint_id)
+    presets = preset_checkpoint_paths()
+    path = presets.get(checkpoint_id)
     if path is None or not path.exists():
         raise HTTPException(404, f"Checkpoint '{checkpoint_id}' not found")
 

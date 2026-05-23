@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ui.backend.app_config import default_yaml_path, demo_checkpoint_paths
+from ui.backend.app_config import default_yaml_path, preset_checkpoint_paths
 from ui.backend.services import optimizer_runner as runner
 
 router = APIRouter()
@@ -30,10 +30,10 @@ async def start_run(body: StartRequest, request: Request):
 
     checkpoint_path: Path | None = None
     if body.replay and body.checkpoint_id:
-        demos = demo_checkpoint_paths()
-        checkpoint_path = demos.get(body.checkpoint_id)
+        presets = preset_checkpoint_paths()
+        checkpoint_path = presets.get(body.checkpoint_id)
         if checkpoint_path is None or not checkpoint_path.exists():
-            raise HTTPException(404, f"Demo checkpoint '{body.checkpoint_id}' not found")
+            raise HTTPException(404, f"Checkpoint '{body.checkpoint_id}' not found")
 
     run_id = runner.start_run(
         project_path=yaml_path if not body.replay else None,

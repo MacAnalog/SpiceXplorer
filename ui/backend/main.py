@@ -1,4 +1,4 @@
-"""SpiceXplorer NEWCAS Demo — FastAPI backend."""
+"""SpiceXplorer UI — FastAPI backend."""
 import logging
 import os
 from pathlib import Path
@@ -29,7 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ui.backend.routes import config, project, score, optimize, checkpoint, schematic
 
-app = FastAPI(title="SpiceXplorer Demo API", version="1.0.0")
+app = FastAPI(title="SpiceXplorer API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,

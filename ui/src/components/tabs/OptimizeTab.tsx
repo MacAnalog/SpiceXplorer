@@ -11,13 +11,13 @@ import { COLORS } from "@/components/charts/PlotlyChart";
 import { Select, selectCn } from "@/components/ui/select";
 import { ScoreConvergenceChart } from "@/components/charts/ScoreConvergenceChart";
 import { MetricConvergenceChart } from "@/components/charts/MetricConvergenceChart";
-import type { DemoConfig } from "@/types/api";
+import type { AppConfig } from "@/types/api";
 
 interface Props {
-  demoConfig: DemoConfig | null;
+  appConfig: AppConfig | null;
 }
 
-export function OptimizeTab({ demoConfig }: Props) {
+export function OptimizeTab({ appConfig }: Props) {
   const { summary, yamlPath, isApplied } = useProjectStore();
   const {
     runId,
@@ -157,16 +157,16 @@ export function OptimizeTab({ demoConfig }: Props) {
                 />
               </div>
             </div>
-            {demoConfig && (
+            {appConfig && (
               <Select
-                label="Demo Checkpoint (Replay)"
+                label="Preset Checkpoint (Replay)"
                 id="checkpoint-select"
                 value={replayCheckpoint}
                 onChange={(e) => setReplayCheckpoint(e.target.value)}
                 disabled={isRunning}
               >
                 <option value="">— Live run (requires SPICE) —</option>
-                {demoConfig.demo_checkpoints.map((ck) => (
+                {appConfig.preset_checkpoints.map((ck) => (
                   <option key={ck.id} value={ck.id}>
                     {ck.label}
                   </option>
@@ -249,7 +249,7 @@ export function OptimizeTab({ demoConfig }: Props) {
 
             {!canStart && !isRunning && (
               <p className="text-xs text-zinc-400">
-                Apply a project or select a demo checkpoint to enable run.
+                Apply a project or select a preset checkpoint to enable run.
               </p>
             )}
           </PanelBody>

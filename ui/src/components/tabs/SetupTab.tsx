@@ -11,15 +11,15 @@ import { formatEng } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { selectCn } from "@/components/ui/select";
 import { Thead, Th, Tr, Td } from "@/components/ui/table";
-import type { DemoConfig } from "@/types/api";
+import type { AppConfig } from "@/types/api";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
 interface Props {
-  demoConfig: DemoConfig | null;
+  appConfig: AppConfig | null;
 }
 
-export function SetupTab({ demoConfig }: Props) {
+export function SetupTab({ appConfig }: Props) {
   const { yaml, yamlPath, summary, validationErrors, isApplied, setYaml, setValidationErrors, apply } =
     useProjectStore();
   const [loading, setLoading] = useState(false);
@@ -107,14 +107,14 @@ export function SetupTab({ demoConfig }: Props) {
             Project YAML
           </div>
           <div className="flex items-center gap-2">
-            {demoConfig && (
+            {appConfig && (
               <select
                 className={selectCn("xs")}
                 value=""
                 onChange={(e) => { if (e.target.value) loadDemoYaml(e.target.value); }}
               >
-                <option value="">Load demo...</option>
-                <option value={demoConfig.default_yaml}>OTA Cascode (default)</option>
+                <option value="">Load example...</option>
+                <option value={appConfig.default_yaml}>OTA Cascode (default)</option>
               </select>
             )}
             <label className="cursor-pointer" aria-label="Upload YAML file">
@@ -163,7 +163,7 @@ export function SetupTab({ demoConfig }: Props) {
               ))}
             </div>
           ) : (
-            <div className="text-xs text-zinc-400">No YAML loaded yet — select a demo or upload a file.</div>
+            <div className="text-xs text-zinc-400">No YAML loaded yet — select an example or upload a file.</div>
           )}
         </div>
       </Panel>

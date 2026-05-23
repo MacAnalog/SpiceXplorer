@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SpiceXplorer NEWCAS Demo",
-  description: "Conference demo UI for the SpiceXplorer cascode OTA case study"
+  title: "SpiceXplorer",
+  description: "Interactive UI for circuit optimization with SpiceXplorer"
 };
 
 export default function RootLayout({

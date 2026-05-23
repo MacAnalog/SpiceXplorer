@@ -1,6 +1,6 @@
 // Typed API client — all calls go to the FastAPI backend on :8000
 import type {
-  DemoConfig,
+  AppConfig,
   LoadProjectResponse,
   ValidateResponse,
   ScoreResponse,
@@ -28,7 +28,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   // Config
-  config: () => req<DemoConfig>("/api/config"),
+  config: () => req<AppConfig>("/api/config"),
 
   // Project
   loadProject: (yaml_path: string) =>

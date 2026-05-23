@@ -9,7 +9,7 @@ import { SetupTab } from "@/components/tabs/SetupTab";
 import { ScoreShapingTab } from "@/components/tabs/ScoreShapingTab";
 import { OptimizeTab } from "@/components/tabs/OptimizeTab";
 import { ExplorerTab } from "@/components/tabs/ExplorerTab";
-import type { DemoConfig } from "@/types/api";
+import type { AppConfig } from "@/types/api";
 
 type TabId = "setup" | "shaping" | "optimize" | "explorer";
 
@@ -22,12 +22,12 @@ const TABS: Array<{ id: TabId; label: string; icon: typeof Zap }> = [
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<TabId>("setup");
-  const [demoConfig, setDemoConfig] = useState<DemoConfig | null>(null);
+  const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const { isApplied } = useProjectStore();
   const { isRunning } = useRunStore();
 
   useEffect(() => {
-    api.config().then(setDemoConfig).catch(() => null);
+    api.config().then(setAppConfig).catch(() => null);
   }, []);
 
   return (
@@ -38,7 +38,7 @@ export default function Home() {
             <Zap className="h-5 w-5 text-indigo-600" />
             <span className="text-lg font-semibold text-zinc-900">SpiceXplorer</span>
             <span className="hidden rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] text-zinc-400 sm:inline">
-              NEWCAS 2026
+              v0.1
             </span>
           </div>
           {isRunning && (
@@ -87,9 +87,9 @@ export default function Home() {
           role="tabpanel"
           aria-labelledby={`${activeTab}-tab`}
         >
-          {activeTab === "setup" && <SetupTab demoConfig={demoConfig} />}
+          {activeTab === "setup" && <SetupTab appConfig={appConfig} />}
           {activeTab === "shaping" && <ScoreShapingTab />}
-          {activeTab === "optimize" && <OptimizeTab demoConfig={demoConfig} />}
+          {activeTab === "optimize" && <OptimizeTab appConfig={appConfig} />}
           {activeTab === "explorer" && <ExplorerTab />}
         </section>
       </div>

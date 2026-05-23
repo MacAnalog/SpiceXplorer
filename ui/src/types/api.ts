@@ -161,8 +161,8 @@ export interface ScatterPoint {
 
 // Config
 
-export interface DemoConfig {
+export interface AppConfig {
   default_yaml: string;
-  demo_checkpoints: CheckpointMeta[];
+  preset_checkpoints: CheckpointMeta[];
   schematic_svg_path: string;
 }
