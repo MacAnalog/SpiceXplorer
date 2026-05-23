@@ -1,32 +1,32 @@
 # TODO
 
-## 1. Create Wizard (highest priority)
+## 1. Create Wizard ✅
 
 Adds a step-by-step YAML generator to the Setup tab. Full spec in `PLAN_UI_DESIGN.md`.
 
-### Backend
-- [ ] `ui/backend/routes/netlist.py` — `POST /api/netlist/parse`: accept `.spice` upload, extract `.param name=val` lines via regex, return `[{name, default_val}]`
-- [ ] `ui/backend/services/netlist_parser.py` — regex over `.param` lines (no full SPICE parser needed)
-- [ ] `ui/backend/routes/project.py` — add `POST /api/project/generate`: accept wizard form data as JSON, return generated YAML string
-- [ ] `ui/backend/services/yaml_generator.py` — convert wizard form dict → valid `project_setup.yaml` string via PyYAML
+### Backend ✅
+- [x] `ui/backend/routes/netlist.py` — `POST /api/netlist/parse`: accept `.spice` upload, extract `.param name=val` lines via regex, return `[{name, default_val}]`
+- [x] `ui/backend/services/netlist_parser.py` — regex over `.param` lines (no full SPICE parser needed)
+- [x] `ui/backend/routes/project.py` — `POST /api/project/generate`: accept wizard form data as JSON, return generated YAML string; `POST /api/project/parse-to-form`: inverse, load YAML → wizard form dict
+- [x] `ui/backend/services/yaml_generator.py` — convert wizard form dict → valid `project_setup.yaml` string via PyYAML; `project_dict_to_form()` for round-trip
 
-### Frontend
-- [ ] `ui/src/components/wizard/WizardShell.tsx` — step navigator, progress bar, back/next buttons, live YAML preview pane
-- [ ] `ui/src/components/wizard/steps/BasicInfoStep.tsx` — project name, description, simulator dropdown, workspace root
-- [ ] `ui/src/components/wizard/steps/PDKRulesStep.tsx` — tech name + add key/value constraint rows
-- [ ] `ui/src/components/wizard/steps/DutParamsStep.tsx` — netlist upload → `POST /api/netlist/parse`, pre-fills param rows (name, min, max, is_integer, log_scale, freeze)
-- [ ] `ui/src/components/wizard/steps/PVTStep.tsx` — add rows: temp, corner, supply
-- [ ] `ui/src/components/wizard/steps/TestbenchesStep.tsx` — add/remove testbench cards with netlist upload and param rows
-- [ ] `ui/src/components/wizard/steps/TargetSpecsStep.tsx` — accordion rows: name, testbench, goal, target, tolerance, range, weight, error_type, reward_type, enable
-- [ ] `ui/src/components/wizard/steps/OptimizerStep.tsx` — algorithm dropdown, budget, random seed
-- [ ] `ui/src/components/tabs/SetupTab.tsx` — add segmented control to toggle Load/Edit ↔ Create Wizard; "Save YAML" button writes file and switches back to Load/Edit with the new file loaded
+### Frontend ✅
+- [x] `ui/src/components/wizard/WizardShell.tsx` — step navigator, progress bar, back/next buttons, live YAML preview pane
+- [x] `ui/src/components/wizard/steps/BasicInfoStep.tsx` — project name, description, simulator dropdown, workspace root
+- [x] `ui/src/components/wizard/steps/PDKRulesStep.tsx` — tech name + add key/value constraint rows
+- [x] `ui/src/components/wizard/steps/DutParamsStep.tsx` — netlist upload → `POST /api/netlist/parse`, pre-fills param rows (name, min, max, is_integer, log_scale, freeze)
+- [x] `ui/src/components/wizard/steps/PVTStep.tsx` — add rows: temp, corner, supply
+- [x] `ui/src/components/wizard/steps/TestbenchesStep.tsx` — add/remove testbench cards with netlist upload and param rows
+- [x] `ui/src/components/wizard/steps/TargetSpecsStep.tsx` — accordion rows: name, testbench, goal, target, tolerance, range, weight, error_type, reward_type, enable
+- [x] `ui/src/components/wizard/steps/OptimizerStep.tsx` — algorithm dropdown (full Nevergrad registry + Ax branch), budget, random seed, optimizer_kwargs editor
+- [x] `ui/src/components/tabs/SetupTab.tsx` — segmented Load/Edit ↔ Create Wizard toggle; "Edit in Wizard" button hydrates wizard from current YAML; "Save YAML" switches back to Load/Edit
 
 ---
 
 ## 2. UX fixes in existing tabs
 
 - [ ] **Wizard DutParamsStep — column header misalignment**: The header row labels (MIN, MAX, INIT, INT, LOG, FRZ) don't line up with the input cells below them. The name cell contains a flex sub-row (input + optional Badge) that shifts subsequent columns. Fix by centering each header label over its cell, or switch the name column to a fixed-width so the badge doesn't affect column widths (`DutParamsStep.tsx` line 94–103).
-- [ ] **OptimizeTab — Sanity Check "NoneType has no attribute 'ask'"**: Trial evaluation (1-iteration sanity check) crashes with `'NoneType' object has no attribute 'ask'`, meaning the optimizer instrument is never constructed before `.ask()` is called. Trace the sanity-check backend path; ensure the Nevergrad optimizer is initialized (budget ≥ 1, valid param space) before invoking `ask`.
+- [x] **OptimizeTab — Sanity Check "NoneType has no attribute 'ask'"**: Fixed in `ui/backend/routes/sanity.py` — `_create_optimizer_obj()` is now called before `optimization_step()` so `self.optimizer` is never None when `.ask()` is invoked.
 - [ ] **SetupTab — Apply from editor content**: "Apply" currently re-reads from disk via `api.loadProject()`, discarding unsaved Monaco edits. Fix: POST current editor content directly to `/api/project/load` (as YAML text, not path), or write to a temp file first.
 - [ ] **OptimizeTab — wire algorithm selection to live run**: `api.startRun()` sends `yaml_path` and `budget` but not the chosen algorithm. Pass algorithm name to backend; `optimizer_runner.py` needs to accept and use it.
 - [ ] **OptimizeTab — score function toggle**: Add sigmoid vs linear radio button; pass choice to `api.startRun()` and honour it in the optimizer runner (currently fixed by YAML).
@@ -56,10 +56,10 @@ The current tab lets you tweak one spec value at a time in isolation. For multi-
 The wizard's job is to produce a valid `project_setup.yaml` that fully describes a run — the YAML IS the artifact, the checkpoint, and the way runs are transported between machines. Frame every step around "what does this become in YAML."
 
 ### Netlist-driven parameter flow
-- [ ] **DUT Params step — auto-detect from netlist**: on netlist upload, parse `.param` lines and present them as a checklist (default: all selected). Each row has name, default_val (from netlist), and an "edit" pencil that opens a popover with min/max/is_integer/log_scale/freeze. No need to re-type param names.
+- [x] **DUT Params step — auto-detect from netlist**: on netlist upload, parse `.param` lines and pre-fill param rows (name, default_val from netlist). Each row has name, min, max, is_integer, log_scale, freeze.
 - [ ] **DUT Params step — optional `params.yaml` enrichment**: allow uploading a `params.yaml` that pre-fills bounds, types, and freeze state for matching param names. Auto-merge: netlist provides names + defaults, params.yaml overlays bounds/options. Show a merge preview before commit.
 - [ ] **DUT Params step — manual add**: an "Add custom param" button for params not in the netlist (rare but needed for sweeps over derived quantities).
-- [ ] **Testbenches step — share param auto-detection**: each testbench card has its own netlist upload → same `.param` extraction → param row prefill. Mark params as "from netlist" vs "manual override" so the user sees what came from where.
+- [x] **Testbenches step — share param auto-detection**: each testbench card has its own netlist upload → same `.param` extraction → param row prefill.
 
 ### Target specs auto-config
 - [ ] **Target Specs step — auto-discover candidates**: after testbench netlists are uploaded, scan for typical measurement output names (e.g., `.meas` lines in the netlist, or known patterns like `ugf`, `gain_db`, `pm`, `cmrr`). Present them as a checklist of candidate specs the user can enable, with sensible default goal/target/tolerance.
@@ -67,7 +67,7 @@ The wizard's job is to produce a valid `project_setup.yaml` that fully describes
 - [ ] **Spec library**: ship a small `examples/spec_library.yaml` with standard analog specs (UGF, PM, GBW, slew rate, CMRR, PSRR, etc.) the wizard can offer as one-click adds.
 
 ### Wizard plumbing
-- [ ] **Round-trip with existing YAML**: the wizard should be openable from an existing YAML — parse it, populate every step's form state, let the user edit, re-emit. This makes the wizard a DSL editor, not just a one-shot generator.
+- [x] **Round-trip with existing YAML**: wizard is openable from an existing YAML via "Edit in Wizard" — `POST /api/project/parse-to-form` parses it and populates every step's form state. Re-emit via "Save YAML".
 - [ ] **Live YAML preview**: right pane shows the generated YAML diffing against the previous step's version (highlight changed lines). User can copy or download at any step.
 - [ ] **DSL validation surfaced step-by-step**: each step's "Next" button runs schema validation on its slice of the YAML before allowing progress. Errors point to the exact field.
 
