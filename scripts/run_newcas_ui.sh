@@ -4,9 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 UI_DIR="${ROOT_DIR}/ui"
 
+# Console log level for the spicexplorer library (DEBUG/INFO/WARNING/ERROR/CRITICAL)
+LOG_LEVEL="${LOG_LEVEL:-INFO}"
+
 # Start FastAPI backend
-echo "Starting FastAPI backend on :8000…"
-uv run --extra ui uvicorn ui.backend.main:app --reload --port 8000 &
+echo "Starting FastAPI backend on :8000… (LOG_LEVEL=${LOG_LEVEL})"
+LOG_LEVEL="${LOG_LEVEL}" uv run --extra ui uvicorn ui.backend.main:app --reload --port 8000 &
 BACKEND_PID=$!
 
 # Start Next.js frontend on :4000 (avoids VS Code Remote SSH occupying :3000)
