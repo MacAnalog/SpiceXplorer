@@ -8,6 +8,7 @@ import { useProjectStore } from "@/stores/projectStore";
 import { useRunStore } from "@/stores/runStore";
 import { api } from "@/lib/api";
 import { COLORS } from "@/components/charts/PlotlyChart";
+import { Select, selectCn } from "@/components/ui/select";
 import { ScoreConvergenceChart } from "@/components/charts/ScoreConvergenceChart";
 import { MetricConvergenceChart } from "@/components/charts/MetricConvergenceChart";
 import type { DemoConfig } from "@/types/api";
@@ -62,7 +63,13 @@ export function OptimizeTab({ demoConfig }: Props) {
       eventSourceRef.current = src;
       src.onmessage = (e) => {
         const evt = JSON.parse(e.data);
-        if (evt.done || evt.error) {
+        if (evt.error) {
+          setStartError(`Optimizer error: ${evt.error}`);
+          stopRun();
+          src.close();
+          return;
+        }
+        if (evt.done) {
           stopRun();
           src.close();
           return;
@@ -120,55 +127,51 @@ export function OptimizeTab({ demoConfig }: Props) {
           </PanelHeader>
           <PanelBody className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-                  Algorithm
-                </label>
-                <select
-                  value={algorithm}
-                  onChange={(e) => setAlgorithm(e.target.value)}
-                  disabled={isRunning}
-                  className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              <Select
+                label="Algorithm"
+                id="algorithm-select"
+                value={algorithm}
+                onChange={(e) => setAlgorithm(e.target.value)}
+                disabled={isRunning}
+              >
+                <option value="LhsDE">LhsDE</option>
+                <option value="LHSSearch">LHSSearch (blind)</option>
+                <option value="LogBFGSCMAPlus">LogBFGS CMA+</option>
+              </Select>
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor="budget-input"
+                  className="text-xs font-medium uppercase tracking-wide text-zinc-500"
                 >
-                  <option value="LhsDE">LhsDE</option>
-                  <option value="LHSSearch">LHSSearch (blind)</option>
-                  <option value="LogBFGSCMAPlus">LogBFGS CMA+</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-medium uppercase tracking-wide text-zinc-500">
                   Budget
                 </label>
                 <input
+                  id="budget-input"
                   type="number"
                   min={10}
                   max={2000}
                   value={runBudget}
                   onChange={(e) => setRunBudget(Number(e.target.value))}
                   disabled={isRunning}
-                  className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className={selectCn()}
                 />
               </div>
             </div>
             {demoConfig && (
-              <div>
-                <label className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-                  Demo Checkpoint (Replay)
-                </label>
-                <select
-                  value={replayCheckpoint}
-                  onChange={(e) => setReplayCheckpoint(e.target.value)}
-                  disabled={isRunning}
-                  className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value="">— Live run (requires SPICE) —</option>
-                  {demoConfig.demo_checkpoints.map((ck) => (
-                    <option key={ck.id} value={ck.id}>
-                      {ck.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <Select
+                label="Demo Checkpoint (Replay)"
+                id="checkpoint-select"
+                value={replayCheckpoint}
+                onChange={(e) => setReplayCheckpoint(e.target.value)}
+                disabled={isRunning}
+              >
+                <option value="">— Live run (requires SPICE) —</option>
+                {demoConfig.demo_checkpoints.map((ck) => (
+                  <option key={ck.id} value={ck.id}>
+                    {ck.label}
+                  </option>
+                ))}
+              </Select>
             )}
           </PanelBody>
         </Panel>
@@ -200,7 +203,7 @@ export function OptimizeTab({ demoConfig }: Props) {
             </div>
 
             {startError && (
-              <p className="text-xs text-red-600">{startError}</p>
+              <p role="alert" className="text-xs text-red-600">{startError}</p>
             )}
 
             {events.length > 0 && (
@@ -264,7 +267,7 @@ export function OptimizeTab({ demoConfig }: Props) {
               <select
                 value={selectedMetric}
                 onChange={(e) => setSelectedMetric(e.target.value)}
-                className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className={selectCn("xs")}
               >
                 {metricNames.map((m) => (
                   <option key={m} value={m}>

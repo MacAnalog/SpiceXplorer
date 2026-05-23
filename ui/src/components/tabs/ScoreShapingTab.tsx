@@ -8,6 +8,9 @@ import { api } from "@/lib/api";
 import { formatEng } from "@/lib/utils";
 import type { ScoreResponse, TargetSpec } from "@/types/api";
 import { PenaltyCurveChart } from "@/components/charts/PenaltyCurveChart";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Select } from "@/components/ui/select";
+import { Thead, Th, Tr, Td } from "@/components/ui/table";
 
 export function ScoreShapingTab() {
   const { summary, yamlPath, isApplied } = useProjectStore();
@@ -58,9 +61,9 @@ export function ScoreShapingTab() {
 
   if (!isApplied || !summary) {
     return (
-      <div className="flex min-h-60 items-center justify-center rounded-lg border border-dashed border-zinc-300 bg-white text-sm text-zinc-400">
+      <EmptyState bordered minHeight="min-h-60">
         Apply a project first to explore score shaping.
-      </div>
+      </EmptyState>
     );
   }
 
@@ -87,22 +90,18 @@ export function ScoreShapingTab() {
             <span className="text-sm font-semibold">Spec &amp; Value</span>
           </PanelHeader>
           <PanelBody className="space-y-4">
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-                Spec
-              </label>
-              <select
-                value={selectedSpec}
-                onChange={(e) => handleSpecChange(e.target.value)}
-                className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              >
-                {enabledSpecs.map((s) => (
-                  <option key={s.name} value={s.name}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <Select
+              label="Spec"
+              id="spec-select"
+              value={selectedSpec}
+              onChange={(e) => handleSpecChange(e.target.value)}
+            >
+              {enabledSpecs.map((s) => (
+                <option key={s.name} value={s.name}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
             {currentSpecObj && (
               <div>
                 <label className="block text-xs font-medium uppercase tracking-wide text-zinc-500">
@@ -156,38 +155,33 @@ export function ScoreShapingTab() {
       <Panel>
         <PanelHeader>
           <span className="text-sm font-semibold">Per-Spec Breakdown</span>
-          {loading && <span className="text-xs text-zinc-400">Computing…</span>}
+          {loading && <span aria-live="polite" className="text-xs text-zinc-400">Computing…</span>}
         </PanelHeader>
         <PanelBody className="p-0">
           <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-zinc-100 bg-zinc-50 text-left text-zinc-500">
-                <th className="px-3 py-2 font-medium">Spec</th>
-                <th className="px-3 py-2 font-medium">Value</th>
-                <th className="px-3 py-2 font-medium">Linear P̂</th>
-                <th className="px-3 py-2 font-medium">Sigmoid P̂</th>
-                <th className="px-3 py-2 font-medium">Status</th>
-              </tr>
-            </thead>
+            <Thead>
+              <Th>Spec</Th>
+              <Th>Value</Th>
+              <Th>Linear P̂</Th>
+              <Th>Sigmoid P̂</Th>
+              <Th>Status</Th>
+            </Thead>
             <tbody>
               {enabledSpecs.map((s) => {
                 const entry = scoreData?.per_spec[s.name];
                 return (
-                  <tr
-                    key={s.name}
-                    className={`border-b border-zinc-50 last:border-0 hover:bg-zinc-50 ${selectedSpec === s.name ? "bg-indigo-50" : ""}`}
-                  >
-                    <td className="px-3 py-2 font-mono text-zinc-800">{s.name}</td>
-                    <td className="px-3 py-2 font-mono text-zinc-600">
+                  <Tr key={s.name} highlight={selectedSpec === s.name}>
+                    <Td className="py-2 font-mono text-zinc-800">{s.name}</Td>
+                    <Td className="py-2 font-mono text-zinc-600">
                       {entry?.value != null ? formatEng(entry.value) : "—"}
-                    </td>
-                    <td className="px-3 py-2 font-mono text-zinc-600">
+                    </Td>
+                    <Td className="py-2 font-mono text-zinc-600">
                       {entry?.linear != null ? entry.linear.toFixed(4) : "—"}
-                    </td>
-                    <td className="px-3 py-2 font-mono text-zinc-600">
+                    </Td>
+                    <Td className="py-2 font-mono text-zinc-600">
                       {entry?.sigmoid != null ? entry.sigmoid.toFixed(4) : "—"}
-                    </td>
-                    <td className="px-3 py-2">
+                    </Td>
+                    <Td className="py-2">
                       {entry?.passes != null ? (
                         <Badge variant={entry.passes ? "pass" : "fail"}>
                           {entry.passes ? "pass" : "fail"}
@@ -195,8 +189,8 @@ export function ScoreShapingTab() {
                       ) : (
                         <Badge variant="neutral">n/a</Badge>
                       )}
-                    </td>
-                  </tr>
+                    </Td>
+                  </Tr>
                 );
               })}
             </tbody>

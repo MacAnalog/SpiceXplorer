@@ -52,13 +52,17 @@ export default function Home() {
 
       <div className="mx-auto max-w-7xl px-4 py-4">
         {/* Tab nav */}
-        <nav className="mb-4 flex gap-0 border-b border-zinc-200">
+        <nav role="tablist" aria-label="Main navigation" className="mb-4 flex gap-0 border-b border-zinc-200">
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const disabled = !isApplied && tab.id !== "setup" && tab.id !== "explorer";
             return (
               <button
                 key={tab.id}
+                id={`${tab.id}-tab`}
+                role="tab"
+                aria-selected={activeTab === tab.id}
+                aria-controls={`${tab.id}-panel`}
                 onClick={() => !disabled && setActiveTab(tab.id)}
                 disabled={disabled}
                 className={cn(
@@ -78,7 +82,11 @@ export default function Home() {
         </nav>
 
         {/* Tab content */}
-        <section>
+        <section
+          id={`${activeTab}-panel`}
+          role="tabpanel"
+          aria-labelledby={`${activeTab}-tab`}
+        >
           {activeTab === "setup" && <SetupTab demoConfig={demoConfig} />}
           {activeTab === "shaping" && <ScoreShapingTab />}
           {activeTab === "optimize" && <OptimizeTab demoConfig={demoConfig} />}

@@ -12,6 +12,9 @@ import { ScoreConvergenceChart } from "@/components/charts/ScoreConvergenceChart
 import { MetricConvergenceChart } from "@/components/charts/MetricConvergenceChart";
 import { MetricScatterChart } from "@/components/charts/MetricScatterChart";
 import { MetricHistogramChart } from "@/components/charts/MetricHistogramChart";
+import { EmptyState } from "@/components/ui/empty-state";
+import { selectCn } from "@/components/ui/select";
+import { Thead, Th, Tr, Td } from "@/components/ui/table";
 import type { ScatterPoint } from "@/types/api";
 
 export function ExplorerTab() {
@@ -150,7 +153,7 @@ export function ExplorerTab() {
                 <select
                   value={runAId}
                   onChange={(e) => setRunAId(e.target.value)}
-                  className="flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm focus:outline-none"
+                  className="flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 >
                   <option value="">Select checkpoint…</option>
                   {availableCheckpoints.map((ck) => (
@@ -175,7 +178,7 @@ export function ExplorerTab() {
                 <select
                   value={runBId}
                   onChange={(e) => setRunBId(e.target.value)}
-                  className="flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm focus:outline-none"
+                  className="flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 >
                   <option value="">Select checkpoint…</option>
                   {availableCheckpoints.map((ck) => (
@@ -195,9 +198,7 @@ export function ExplorerTab() {
       </Panel>
 
       {!hasData && (
-        <div className="flex min-h-40 items-center justify-center rounded-lg border border-dashed border-zinc-300 text-sm text-zinc-400">
-          Load checkpoint(s) above to start exploring.
-        </div>
+        <EmptyState bordered>Load checkpoint(s) above to start exploring.</EmptyState>
       )}
 
       {/* Row 1: Score + Metric convergence */}
@@ -210,7 +211,7 @@ export function ExplorerTab() {
               <select
                 value={selectedMetric}
                 onChange={(e) => setSelectedMetric(e.target.value)}
-                className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs focus:outline-none"
+                className={selectCn("xs")}
               >
                 {allMetrics.map((m) => (
                   <option key={m} value={m}>
@@ -241,7 +242,7 @@ export function ExplorerTab() {
                 <select
                   value={scatterMetricX}
                   onChange={(e) => setScatterMetrics(e.target.value, scatterMetricY)}
-                  className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs focus:outline-none"
+                  className={selectCn("xs")}
                 >
                   {allMetrics.map((m) => (
                     <option key={m} value={m}>
@@ -253,7 +254,7 @@ export function ExplorerTab() {
                 <select
                   value={scatterMetricY}
                   onChange={(e) => setScatterMetrics(scatterMetricX, e.target.value)}
-                  className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs focus:outline-none"
+                  className={selectCn("xs")}
                 >
                   {allMetrics.map((m) => (
                     <option key={m} value={m}>
@@ -273,9 +274,7 @@ export function ExplorerTab() {
                   targetY={targetY}
                 />
               ) : (
-                <div className="flex h-40 items-center justify-center text-sm text-zinc-400">
-                  Select metrics to load scatter data
-                </div>
+                <EmptyState minHeight="h-40">Select metrics to load scatter data</EmptyState>
               )}
             </PanelBody>
           </Panel>
@@ -288,25 +287,21 @@ export function ExplorerTab() {
               <PanelBody className="p-0">
                 <div className="overflow-auto">
                   <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b border-zinc-100 bg-zinc-50 text-left text-zinc-500">
-                        <th className="px-3 py-2 font-medium">Metric</th>
-                        <th className="px-3 py-2 font-medium">Best Ever</th>
-                        <th className="px-3 py-2 font-medium">Target</th>
-                        <th className="px-3 py-2 font-medium">Pass</th>
-                      </tr>
-                    </thead>
+                    <Thead>
+                      <Th>Metric</Th>
+                      <Th>Best Ever</Th>
+                      <Th>Target</Th>
+                      <Th>Pass</Th>
+                    </Thead>
                     <tbody>
                       {envelopeA.map((e) => (
-                        <tr key={e.metric} className="border-b border-zinc-50 last:border-0">
-                          <td className="px-3 py-1.5 font-mono text-zinc-800">{e.metric}</td>
-                          <td className="px-3 py-1.5 font-mono text-zinc-600">
-                            {formatEng(e.best_ever)}
-                          </td>
-                          <td className="px-3 py-1.5 font-mono text-zinc-500">
+                        <Tr key={e.metric}>
+                          <Td className="font-mono text-zinc-800">{e.metric}</Td>
+                          <Td className="font-mono text-zinc-600">{formatEng(e.best_ever)}</Td>
+                          <Td className="font-mono text-zinc-500">
                             {e.target != null ? formatEng(e.target) : "—"}
-                          </td>
-                          <td className="px-3 py-1.5">
+                          </Td>
+                          <Td>
                             {e.passes != null ? (
                               <Badge variant={e.passes ? "pass" : "fail"}>
                                 {e.passes ? "yes" : "no"}
@@ -314,8 +309,8 @@ export function ExplorerTab() {
                             ) : (
                               <Badge variant="neutral">—</Badge>
                             )}
-                          </td>
-                        </tr>
+                          </Td>
+                        </Tr>
                       ))}
                     </tbody>
                   </table>
@@ -343,9 +338,7 @@ export function ExplorerTab() {
                   target={selectedSpecObj?.target}
                 />
               ) : (
-                <div className="flex h-40 items-center justify-center text-sm text-zinc-400">
-                  Load a checkpoint to see distribution
-                </div>
+                <EmptyState minHeight="h-40">Load a checkpoint to see distribution</EmptyState>
               )}
             </PanelBody>
           </Panel>
@@ -358,24 +351,22 @@ export function ExplorerTab() {
               <PanelBody className="p-0">
                 <div className="max-h-60 overflow-auto">
                   <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b border-zinc-100 bg-zinc-50 text-left text-zinc-500">
-                        <th className="px-3 py-2 font-medium">Param</th>
-                        <th className="px-3 py-2 font-medium">Value</th>
-                      </tr>
-                    </thead>
+                    <Thead>
+                      <Th>Param</Th>
+                      <Th>Value</Th>
+                    </Thead>
                     <tbody>
                       {Object.entries(runA.params).map(([name, vals]) => {
                         const lastVal = [...vals]
                           .reverse()
                           .find((v): v is number => v !== null);
                         return (
-                          <tr key={name} className="border-b border-zinc-50 last:border-0">
-                            <td className="px-3 py-1.5 font-mono text-zinc-800">{name}</td>
-                            <td className="px-3 py-1.5 font-mono text-zinc-600">
+                          <Tr key={name}>
+                            <Td className="font-mono text-zinc-800">{name}</Td>
+                            <Td className="font-mono text-zinc-600">
                               {lastVal != null ? formatEng(lastVal) : "—"}
-                            </td>
-                          </tr>
+                            </Td>
+                          </Tr>
                         );
                       })}
                     </tbody>
@@ -396,19 +387,13 @@ export function ExplorerTab() {
           <PanelBody className="p-0">
             <div className="overflow-auto">
               <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-zinc-100 bg-zinc-50 text-left text-zinc-500">
-                    <th className="px-3 py-2 font-medium">Spec</th>
-                    <th className="px-3 py-2 font-medium">Goal</th>
-                    <th className="px-3 py-2 font-medium">Target</th>
-                    {runA && (
-                      <th className="px-3 py-2 font-medium">Run A Best</th>
-                    )}
-                    {runB && (
-                      <th className="px-3 py-2 font-medium">Run B Best</th>
-                    )}
-                  </tr>
-                </thead>
+                <Thead>
+                  <Th>Spec</Th>
+                  <Th>Goal</Th>
+                  <Th>Target</Th>
+                  {runA && <Th>Run A Best</Th>}
+                  {runB && <Th>Run B Best</Th>}
+                </Thead>
                 <tbody>
                   {summary.target_specs
                     .filter((s) => s.enable)
@@ -449,12 +434,9 @@ export function ExplorerTab() {
                               : Math.abs(bBest - s.target) <= tol
                           : null;
                       return (
-                        <tr
-                          key={s.name}
-                          className="border-b border-zinc-50 last:border-0 hover:bg-zinc-50"
-                        >
-                          <td className="px-3 py-1.5 font-mono text-zinc-800">{s.name}</td>
-                          <td className="px-3 py-1.5">
+                        <Tr key={s.name}>
+                          <Td className="font-mono text-zinc-800">{s.name}</Td>
+                          <Td>
                             <Badge
                               variant={
                                 s.goal === "exceed"
@@ -466,12 +448,10 @@ export function ExplorerTab() {
                             >
                               {s.goal}
                             </Badge>
-                          </td>
-                          <td className="px-3 py-1.5 font-mono text-zinc-600">
-                            {formatEng(s.target)}
-                          </td>
+                          </Td>
+                          <Td className="font-mono text-zinc-600">{formatEng(s.target)}</Td>
                           {runA && (
-                            <td className="px-3 py-1.5">
+                            <Td>
                               {aBest != null ? (
                                 <span className="inline-flex items-center gap-1 font-mono">
                                   {formatEng(aBest)}
@@ -482,10 +462,10 @@ export function ExplorerTab() {
                               ) : (
                                 <span className="text-zinc-400">—</span>
                               )}
-                            </td>
+                            </Td>
                           )}
                           {runB && (
-                            <td className="px-3 py-1.5">
+                            <Td>
                               {bBest != null ? (
                                 <span className="inline-flex items-center gap-1 font-mono">
                                   {formatEng(bBest)}
@@ -496,9 +476,9 @@ export function ExplorerTab() {
                               ) : (
                                 <span className="text-zinc-400">—</span>
                               )}
-                            </td>
+                            </Td>
                           )}
-                        </tr>
+                        </Tr>
                       );
                     })}
                 </tbody>

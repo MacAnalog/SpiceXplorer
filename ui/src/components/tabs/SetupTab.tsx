@@ -8,6 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { useProjectStore } from "@/stores/projectStore";
 import { api } from "@/lib/api";
 import { formatEng } from "@/lib/utils";
+import { EmptyState } from "@/components/ui/empty-state";
+import { selectCn } from "@/components/ui/select";
+import { Thead, Th, Tr, Td } from "@/components/ui/table";
 import type { DemoConfig } from "@/types/api";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
@@ -106,7 +109,7 @@ export function SetupTab({ demoConfig }: Props) {
           <div className="flex items-center gap-2">
             {demoConfig && (
               <select
-                className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className={selectCn("xs")}
                 value=""
                 onChange={(e) => { if (e.target.value) loadDemoYaml(e.target.value); }}
               >
@@ -114,7 +117,7 @@ export function SetupTab({ demoConfig }: Props) {
                 <option value={demoConfig.default_yaml}>OTA Cascode (default)</option>
               </select>
             )}
-            <label className="cursor-pointer">
+            <label className="cursor-pointer" aria-label="Upload YAML file">
               <input type="file" accept=".yaml,.yml" className="hidden" onChange={handleUpload} />
               <span className="inline-flex items-center gap-1 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-50">
                 <Upload className="h-3 w-3" /> Upload
@@ -152,7 +155,7 @@ export function SetupTab({ demoConfig }: Props) {
               <CheckCircle className="h-3.5 w-3.5" /> Valid schema
             </div>
           ) : validationErrors.length > 0 ? (
-            <div className="space-y-1">
+            <div role="alert" className="space-y-1">
               {validationErrors.map((e, i) => (
                 <div key={i} className="flex items-start gap-2 text-xs text-red-600">
                   <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {e}
@@ -170,9 +173,7 @@ export function SetupTab({ demoConfig }: Props) {
         {!summary ? (
           <Panel>
             <PanelBody>
-              <div className="flex min-h-40 items-center justify-center text-sm text-zinc-400">
-                Apply a project to see the parsed summary.
-              </div>
+              <EmptyState>Apply a project to see the parsed summary.</EmptyState>
             </PanelBody>
           </Panel>
         ) : (
@@ -223,27 +224,25 @@ export function SetupTab({ demoConfig }: Props) {
               <PanelBody className="p-0">
                 <div className="overflow-auto">
                   <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b border-zinc-100 bg-zinc-50 text-left text-zinc-500">
-                        <th className="px-3 py-2 font-medium">Name</th>
-                        <th className="px-3 py-2 font-medium">Min</th>
-                        <th className="px-3 py-2 font-medium">Max</th>
-                        <th className="px-3 py-2 font-medium">Flags</th>
-                      </tr>
-                    </thead>
+                    <Thead>
+                      <Th>Name</Th>
+                      <Th>Min</Th>
+                      <Th>Max</Th>
+                      <Th>Flags</Th>
+                    </Thead>
                     <tbody>
                       {summary.dut_params.map((p) => (
-                        <tr key={p.name} className="border-b border-zinc-50 last:border-0 hover:bg-zinc-50">
-                          <td className="px-3 py-1.5 font-mono text-zinc-800">{p.name}</td>
-                          <td className="px-3 py-1.5 font-mono text-zinc-600">{formatEng(p.min_val)}</td>
-                          <td className="px-3 py-1.5 font-mono text-zinc-600">{formatEng(p.max_val)}</td>
-                          <td className="px-3 py-1.5">
+                        <Tr key={p.name}>
+                          <Td className="font-mono text-zinc-800">{p.name}</Td>
+                          <Td className="font-mono text-zinc-600">{formatEng(p.min_val)}</Td>
+                          <Td className="font-mono text-zinc-600">{formatEng(p.max_val)}</Td>
+                          <Td>
                             <div className="flex gap-1">
                               {p.is_integer && <Badge variant="indigo">int</Badge>}
                               {p.log_scale && <Badge variant="neutral">log</Badge>}
                             </div>
-                          </td>
-                        </tr>
+                          </Td>
+                        </Tr>
                       ))}
                     </tbody>
                   </table>
@@ -258,26 +257,24 @@ export function SetupTab({ demoConfig }: Props) {
               </PanelHeader>
               <PanelBody className="p-0">
                 <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-zinc-100 bg-zinc-50 text-left text-zinc-500">
-                      <th className="px-3 py-2 font-medium">Name</th>
-                      <th className="px-3 py-2 font-medium">Goal</th>
-                      <th className="px-3 py-2 font-medium">Target</th>
-                      <th className="px-3 py-2 font-medium">TB</th>
-                    </tr>
-                  </thead>
+                  <Thead>
+                    <Th>Name</Th>
+                    <Th>Goal</Th>
+                    <Th>Target</Th>
+                    <Th>TB</Th>
+                  </Thead>
                   <tbody>
                     {summary.target_specs.map((s) => (
-                      <tr key={s.name} className="border-b border-zinc-50 last:border-0 hover:bg-zinc-50">
-                        <td className="px-3 py-1.5 font-mono text-zinc-800">{s.name}</td>
-                        <td className="px-3 py-1.5">
+                      <Tr key={s.name}>
+                        <Td className="font-mono text-zinc-800">{s.name}</Td>
+                        <Td>
                           <Badge variant={s.goal === "exceed" ? "indigo" : s.goal === "minimize" ? "warning" : "neutral"}>
                             {s.goal}
                           </Badge>
-                        </td>
-                        <td className="px-3 py-1.5 font-mono text-zinc-600">{formatEng(s.target)}</td>
-                        <td className="px-3 py-1.5 text-zinc-500">{s.testbench}</td>
-                      </tr>
+                        </Td>
+                        <Td className="font-mono text-zinc-600">{formatEng(s.target)}</Td>
+                        <Td className="text-zinc-500">{s.testbench}</Td>
+                      </Tr>
                     ))}
                   </tbody>
                 </table>

@@ -3,15 +3,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import threading
 import time
+import traceback
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from spicexplorer.core.domains import Project_Setup
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_float(v: Any) -> float | None:
@@ -68,14 +72,21 @@ def _make_streaming_optimizer(project: Project_Setup, state: RunState):
 
 
 def _run_live(state: RunState, project_path: str) -> None:
+    logger.info("[run %s] starting live run — project: %s", state.run_id[:8], project_path)
     try:
+        logger.info("[run %s] loading project YAML", state.run_id[:8])
         project = Project_Setup.from_yaml(project_path)
+        logger.info("[run %s] building optimizer", state.run_id[:8])
         opt = _make_streaming_optimizer(project, state)
+        logger.info("[run %s] parameterizing", state.run_id[:8])
         opt.parameterize()
+        logger.info("[run %s] starting optimize() — budget %d", state.run_id[:8], state.budget)
         opt.optimize()
+        logger.info("[run %s] optimize() finished", state.run_id[:8])
     except KeyboardInterrupt:
-        pass
+        logger.info("[run %s] stopped by user", state.run_id[:8])
     except Exception as e:
+        logger.error("[run %s] optimizer error: %s\n%s", state.run_id[:8], e, traceback.format_exc())
         asyncio.run_coroutine_threadsafe(
             state.queue.put({"error": str(e)}), state.loop
         )
