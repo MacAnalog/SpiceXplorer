@@ -1,16 +1,23 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
-import { Badge } from "@/components/ui/badge";
 import { useProjectStore } from "@/stores/projectStore";
 import { api } from "@/lib/api";
 import { formatEng } from "@/lib/utils";
 import type { ScoreResponse, TargetSpec } from "@/types/api";
 import { PenaltyCurveChart } from "@/components/charts/PenaltyCurveChart";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Select } from "@/components/ui/select";
+import { selectCn } from "@/components/ui/select";
 import { Thead, Th, Tr, Td } from "@/components/ui/table";
+import { Slider } from "@/components/ui/slider";
+import { Toolbar, ToolbarLabel, ToolbarSpacer } from "@/components/shell/Toolbar";
+import { Separator } from "@/components/ui/separator";
+
+function goalSym(g: string): string {
+  if (g === "exceed") return ">";
+  if (g === "minimize") return "<";
+  return "≈";
+}
 
 export function ScoreShapingTab() {
   const { summary, yamlPath, isApplied } = useProjectStore();
@@ -20,9 +27,11 @@ export function ScoreShapingTab() {
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const enabledSpecs = summary?.target_specs.filter((s) => s.enable) ?? [];
+  const enabledSpecs = useMemo(
+    () => summary?.target_specs.filter((s) => s.enable) ?? [],
+    [summary],
+  );
 
-  // Init selected spec to first enabled spec when summary loads
   useEffect(() => {
     if (!summary) return;
     const first = enabledSpecs[0];
@@ -30,7 +39,7 @@ export function ScoreShapingTab() {
       setSelectedSpec(first.name);
       setMetricValue(first.target);
     }
-  }, [summary]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [summary, enabledSpecs, selectedSpec]);
 
   const handleSpecChange = (specName: string) => {
     setSelectedSpec(specName);
@@ -45,7 +54,11 @@ export function ScoreShapingTab() {
       debounceRef.current = setTimeout(async () => {
         setLoading(true);
         try {
-          const result = await api.computeScore(yamlPath, { [specName]: value }, specName);
+          const result = await api.computeScore(
+            yamlPath,
+            { [specName]: value },
+            specName,
+          );
           setScoreData(result);
         } finally {
           setLoading(false);
@@ -61,158 +74,243 @@ export function ScoreShapingTab() {
 
   if (!isApplied || !summary) {
     return (
-      <EmptyState bordered minHeight="min-h-60">
-        Apply a project first to explore score shaping.
-      </EmptyState>
+      <div className="flex-1 p-3">
+        <EmptyState bordered minHeight="min-h-60">
+          Apply a project first to explore score shaping.
+        </EmptyState>
+      </div>
     );
   }
 
-  const currentSpecObj: TargetSpec | undefined = enabledSpecs.find((s) => s.name === selectedSpec);
-  const rang =
-    currentSpecObj?.range && currentSpecObj.range > 0
-      ? currentSpecObj.range
-      : Math.max(Math.abs(currentSpecObj?.target ?? 1), 1);
-  const sliderMin = (currentSpecObj?.target ?? 0) - 3 * rang;
-  const sliderMax = (currentSpecObj?.target ?? 0) + 3 * rang;
+  const currentSpec: TargetSpec | undefined = enabledSpecs.find(
+    (s) => s.name === selectedSpec,
+  );
+  const range =
+    currentSpec?.range && currentSpec.range > 0
+      ? currentSpec.range
+      : Math.max(Math.abs(currentSpec?.target ?? 1), 1) * 0.5;
+  const target = currentSpec?.target ?? 0;
+  const sliderMin = target - 3 * range;
+  const sliderMax = target + 3 * range;
 
-  const highestPenaltyEntry = scoreData
+  const aggregate = scoreData?.aggregate;
+  const weightSum = enabledSpecs.reduce((a, s) => a + (s.weight ?? 0), 0);
+
+  // Find dominating spec under each shaping
+  const dominantSig = scoreData
     ? Object.entries(scoreData.per_spec)
-        .filter(([, s]) => (s.linear ?? 0) > 0)
-        .sort(([, a], [, b]) => (b.linear ?? 0) - (a.linear ?? 0))[0]
+        .map(([k, v]) => [k, (v.sigmoid ?? 0) * (v.weight ?? 0)] as const)
+        .sort(([, a], [, b]) => b - a)[0]
+    : null;
+  const dominantLin = scoreData
+    ? Object.entries(scoreData.per_spec)
+        .map(([k, v]) => [k, (v.linear ?? 0) * (v.weight ?? 0)] as const)
+        .sort(([, a], [, b]) => b - a)[0]
     : null;
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
-      {/* Left: spec selector + penalty curve + callout */}
-      <div className="space-y-4">
-        <Panel>
-          <PanelHeader>
-            <span className="text-sm font-semibold">Spec &amp; Value</span>
-          </PanelHeader>
-          <PanelBody className="space-y-4">
-            <Select
-              label="Spec"
-              id="spec-select"
-              value={selectedSpec}
-              onChange={(e) => handleSpecChange(e.target.value)}
-            >
-              {enabledSpecs.map((s) => (
-                <option key={s.name} value={s.name}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
-            {currentSpecObj && (
-              <div>
-                <label className="block text-xs font-medium uppercase tracking-wide text-zinc-500">
-                  Current value —{" "}
-                  <span className="font-semibold text-indigo-600">{formatEng(metricValue)}</span>
-                </label>
-                <input
-                  type="range"
-                  min={sliderMin}
-                  max={sliderMax}
-                  step={(sliderMax - sliderMin) / 200}
-                  value={metricValue}
-                  onChange={(e) => setMetricValue(Number(e.target.value))}
-                  className="mt-2 w-full accent-indigo-600"
-                />
-                <div className="flex justify-between text-xs text-zinc-400">
-                  <span>{formatEng(sliderMin)}</span>
-                  <span className="text-amber-600">
-                    target: {formatEng(currentSpecObj.target)}
-                  </span>
-                  <span>{formatEng(sliderMax)}</span>
-                </div>
-              </div>
-            )}
-          </PanelBody>
-        </Panel>
+    <>
+      <Toolbar>
+        <ToolbarLabel>spec</ToolbarLabel>
+        <select
+          value={selectedSpec}
+          onChange={(e) => handleSpecChange(e.target.value)}
+          className={selectCn("sm")}
+        >
+          {enabledSpecs.map((s) => (
+            <option key={s.name} value={s.name}>
+              {s.name} · {goalSym(s.goal)} {formatEng(s.target)}
+            </option>
+          ))}
+        </select>
+        <Separator />
+        <ToolbarLabel>range</ToolbarLabel>
+        <span className="font-mono text-[11px] text-fg">
+          target ± 3 × {formatEng(range)}
+        </span>
+        <ToolbarSpacer />
+        <span className="font-mono text-[11px] text-muted">
+          POST /api/score · 150ms debounce
+        </span>
+      </Toolbar>
 
-        {scoreData?.curve && (
-          <PenaltyCurveChart curve={scoreData.curve} currentValue={metricValue} />
-        )}
-
-        {highestPenaltyEntry && (
+      <div
+        className="grid min-h-0 flex-1 gap-3 overflow-auto p-3"
+        style={{ gridTemplateColumns: "1.5fr 1fr" }}
+      >
+        {/* Left: penalty chart + slider + callout */}
+        <div className="flex min-w-0 flex-col gap-2.5">
           <Panel>
+            <PanelHeader
+              title="penalty curve"
+              mute="· sigmoid vs linear"
+              right={
+                currentSpec && (
+                  <span className="font-mono text-[10px] text-muted">
+                    {currentSpec.name} · {goalSym(currentSpec.goal)}{" "}
+                    {formatEng(currentSpec.target)}
+                  </span>
+                )
+              }
+            />
             <PanelBody>
-              <div className="flex items-start gap-2">
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
-                <p className="text-sm text-zinc-700">
-                  <span className="font-semibold">{highestPenaltyEntry[0]}</span> has the
-                  highest linear penalty (
-                  {(highestPenaltyEntry[1].linear ?? 0).toFixed(3)}). Sigmoid shaping bounds
-                  its contribution so severe violations don&apos;t dominate the aggregate
-                  score.
-                </p>
-              </div>
+              {scoreData?.curve ? (
+                <PenaltyCurveChart
+                  curve={scoreData.curve}
+                  currentValue={metricValue}
+                />
+              ) : (
+                <EmptyState minHeight="h-[280px]">
+                  {loading ? "Computing…" : "No curve data."}
+                </EmptyState>
+              )}
+              {currentSpec && (
+                <div className="mt-2.5">
+                  <Slider
+                    value={metricValue}
+                    min={sliderMin}
+                    max={sliderMax}
+                    step={(sliderMax - sliderMin) / 200}
+                    onChange={setMetricValue}
+                    markerValue={target}
+                    markerLabel="target"
+                  />
+                  <div className="mt-1.5 flex items-center justify-between font-mono text-[11px]">
+                    <span className="text-muted">{formatEng(sliderMin)}</span>
+                    <span className="font-medium text-fg">
+                      now {formatEng(metricValue)}
+                    </span>
+                    <span className="text-muted">{formatEng(sliderMax)}</span>
+                  </div>
+                </div>
+              )}
             </PanelBody>
           </Panel>
-        )}
-      </div>
 
-      {/* Right: per-spec breakdown table */}
-      <Panel>
-        <PanelHeader>
-          <span className="text-sm font-semibold">Per-Spec Breakdown</span>
-          {loading && <span aria-live="polite" className="text-xs text-zinc-400">Computing…</span>}
-        </PanelHeader>
-        <PanelBody className="p-0">
-          <table className="w-full text-xs">
-            <Thead>
-              <Th>Spec</Th>
-              <Th>Value</Th>
-              <Th>Linear P̂</Th>
-              <Th>Sigmoid P̂</Th>
-              <Th>Status</Th>
-            </Thead>
-            <tbody>
-              {enabledSpecs.map((s) => {
-                const entry = scoreData?.per_spec[s.name];
-                return (
-                  <Tr key={s.name} highlight={selectedSpec === s.name}>
-                    <Td className="py-2 font-mono text-zinc-800">{s.name}</Td>
-                    <Td className="py-2 font-mono text-zinc-600">
-                      {entry?.value != null ? formatEng(entry.value) : "—"}
-                    </Td>
-                    <Td className="py-2 font-mono text-zinc-600">
-                      {entry?.linear != null ? entry.linear.toFixed(4) : "—"}
-                    </Td>
-                    <Td className="py-2 font-mono text-zinc-600">
-                      {entry?.sigmoid != null ? entry.sigmoid.toFixed(4) : "—"}
-                    </Td>
-                    <Td className="py-2">
-                      {entry?.passes != null ? (
-                        <Badge variant={entry.passes ? "pass" : "fail"}>
-                          {entry.passes ? "pass" : "fail"}
-                        </Badge>
-                      ) : (
-                        <Badge variant="neutral">n/a</Badge>
-                      )}
-                    </Td>
-                  </Tr>
-                );
-              })}
-            </tbody>
-            {scoreData && (
-              <tfoot>
-                <tr className="border-t border-zinc-200 bg-zinc-50 font-semibold">
-                  <td className="px-3 py-2 text-zinc-700" colSpan={2}>
-                    Aggregate F(x)
-                  </td>
-                  <td className="px-3 py-2 font-mono text-zinc-700">
-                    {scoreData.aggregate.linear.toFixed(4)}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-zinc-700">
-                    {scoreData.aggregate.sigmoid.toFixed(4)}
-                  </td>
-                  <td />
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </PanelBody>
-      </Panel>
-    </div>
+          {dominantSig && dominantLin && (
+            <div className="flex gap-2.5 rounded-md border-l-2 border-primary bg-primary-soft px-3 py-2.5 text-xs text-fg">
+              <span className="font-mono text-sm text-primary">◆</span>
+              <div>
+                Under <b className="text-primary">sigmoid</b> shaping,{" "}
+                <span className="font-mono">{dominantSig[0]}</span> dominates
+                F(x) (weighted P̂ = {dominantSig[1].toFixed(3)}). Under{" "}
+                <b className="text-secondary">linear</b> shaping,{" "}
+                <span className="font-mono">{dominantLin[0]}</span> dominates
+                (weighted P̂ = {dominantLin[1].toFixed(3)}). Switching shaping
+                rebalances which constraint the optimizer chases.
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right: per-spec breakdown */}
+        <Panel className="flex min-w-0 flex-col">
+          <PanelHeader
+            title="per-spec breakdown"
+            mute="· F(x) = Σ wᵢ · P̂ᵢ"
+            right={
+              loading && (
+                <span aria-live="polite" className="text-[10px] text-muted">
+                  computing…
+                </span>
+              )
+            }
+          />
+          <div className="min-h-0 flex-1 overflow-auto">
+            <table className="w-full">
+              <Thead>
+                <Th>spec</Th>
+                <Th>current</Th>
+                <Th>sigmoid P̂</Th>
+                <Th>linear P̂</Th>
+                <Th>w</Th>
+              </Thead>
+              <tbody>
+                {enabledSpecs.map((s) => {
+                  const entry = scoreData?.per_spec[s.name];
+                  const passes = entry?.passes;
+                  return (
+                    <Tr key={s.name} highlight={s.name === selectedSpec}>
+                      <Td className="font-mono">
+                        <span className={s.name === selectedSpec ? "font-medium" : ""}>
+                          {s.name}
+                        </span>
+                      </Td>
+                      <Td
+                        className={
+                          "font-mono " +
+                          (passes === true
+                            ? "text-ok"
+                            : passes === false
+                              ? "text-danger"
+                              : "text-fg")
+                        }
+                      >
+                        {entry?.value != null ? formatEng(entry.value) : "—"}
+                      </Td>
+                      <Td className="font-mono">
+                        <PenaltyBar
+                          value={entry?.sigmoid ?? null}
+                          color="bg-primary"
+                        />
+                      </Td>
+                      <Td className="font-mono">
+                        <PenaltyBar
+                          value={entry?.linear ?? null}
+                          color="bg-secondary"
+                        />
+                      </Td>
+                      <Td className="font-mono">{(s.weight ?? 0).toFixed(1)}</Td>
+                    </Tr>
+                  );
+                })}
+              </tbody>
+              {aggregate && (
+                <tfoot>
+                  <tr className="border-t border-border bg-hairline font-medium">
+                    <td className="px-2.5 py-1.5 font-mono text-[11px]" colSpan={2}>
+                      F(x) aggregate
+                    </td>
+                    <td className="px-2.5 py-1.5 font-mono text-[11px] text-primary">
+                      {aggregate.sigmoid.toFixed(3)}
+                    </td>
+                    <td className="px-2.5 py-1.5 font-mono text-[11px] text-secondary">
+                      {aggregate.linear.toFixed(3)}
+                    </td>
+                    <td className="px-2.5 py-1.5 font-mono text-[11px]">
+                      Σ {weightSum.toFixed(1)}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </Panel>
+      </div>
+    </>
+  );
+}
+
+function PenaltyBar({
+  value,
+  color,
+}: {
+  value: number | null;
+  color: string;
+}) {
+  const pct =
+    value == null
+      ? 0
+      : Math.max(0, Math.min(1, value)) * 100;
+  return (
+    <span className="inline-flex items-center">
+      <span className="relative mr-1.5 inline-block h-1 w-9 rounded-sm bg-hairline align-middle">
+        <span
+          className={`absolute left-0 top-0 h-full rounded-sm ${color}`}
+          style={{ width: `${pct}%` }}
+        />
+      </span>
+      {value != null ? value.toFixed(2) : "—"}
+    </span>
   );
 }

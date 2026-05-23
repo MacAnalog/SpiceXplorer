@@ -1,96 +1,69 @@
 "use client";
 import { useEffect, useState } from "react";
-import { BarChart3, CircleDot, Play, SlidersHorizontal, Zap } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { useProjectStore } from "@/stores/projectStore";
-import { useRunStore } from "@/stores/runStore";
+import { useExplorerStore } from "@/stores/explorerStore";
 import { api } from "@/lib/api";
 import { SetupTab } from "@/components/tabs/SetupTab";
 import { ScoreShapingTab } from "@/components/tabs/ScoreShapingTab";
 import { OptimizeTab } from "@/components/tabs/OptimizeTab";
 import { ExplorerTab } from "@/components/tabs/ExplorerTab";
+import { HealthTab } from "@/components/tabs/HealthTab";
+import { Topbar, type TabId } from "@/components/shell/Topbar";
+import { LeftRail } from "@/components/shell/LeftRail";
 import type { AppConfig } from "@/types/api";
-
-type TabId = "setup" | "shaping" | "optimize" | "explorer";
-
-const TABS: Array<{ id: TabId; label: string; icon: typeof Zap }> = [
-  { id: "setup", label: "Setup", icon: Zap },
-  { id: "shaping", label: "Score Shaping", icon: SlidersHorizontal },
-  { id: "optimize", label: "Optimize", icon: Play },
-  { id: "explorer", label: "Explorer", icon: BarChart3 },
-];
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<TabId>("setup");
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const { isApplied } = useProjectStore();
-  const { isRunning } = useRunStore();
+  const { setAvailableCheckpoints } = useExplorerStore();
 
   useEffect(() => {
     api.config().then(setAppConfig).catch(() => null);
-  }, []);
+    api.listCheckpoints().then(setAvailableCheckpoints).catch(() => null);
+  }, [setAvailableCheckpoints]);
+
+  // Keyboard shortcuts: 1/2/3/4
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // ignore typing in inputs / editor
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      if (target?.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const map: Record<string, TabId> = {
+        "1": "setup",
+        "2": "optimize",
+        "3": "explorer",
+        "4": "shaping",
+        "5": "health",
+      };
+      const tab = map[e.key];
+      if (!tab) return;
+      if (!isApplied && tab !== "setup" && tab !== "explorer" && tab !== "health") return;
+      setActiveTab(tab);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [isApplied]);
 
   return (
-    <main className="min-h-screen bg-zinc-50">
-      <header className="border-b border-zinc-200 bg-white px-4 py-3">
-        <div className="mx-auto flex max-w-7xl items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <Zap className="h-5 w-5 text-indigo-600" />
-            <span className="text-lg font-semibold text-zinc-900">SpiceXplorer</span>
-            <span className="hidden rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] text-zinc-400 sm:inline">
-              v0.1
-            </span>
-          </div>
-          {isRunning && (
-            <div className="flex items-center gap-1.5 rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
-              <CircleDot className="h-3 w-3 animate-pulse text-indigo-600" />
-              Running
-            </div>
-          )}
-        </div>
-      </header>
-
-      <div className="mx-auto max-w-7xl px-4 py-4">
-        {/* Tab nav */}
-        <nav role="tablist" aria-label="Main navigation" className="mb-4 flex gap-0 border-b border-zinc-200">
-          {TABS.map((tab) => {
-            const Icon = tab.icon;
-            const disabled = !isApplied && tab.id !== "setup" && tab.id !== "explorer";
-            return (
-              <button
-                key={tab.id}
-                id={`${tab.id}-tab`}
-                role="tab"
-                aria-selected={activeTab === tab.id}
-                aria-controls={`${tab.id}-panel`}
-                onClick={() => !disabled && setActiveTab(tab.id)}
-                disabled={disabled}
-                className={cn(
-                  "inline-flex items-center gap-1.5 border-b-2 px-4 pb-3 pt-1 text-sm font-medium transition -mb-px",
-                  activeTab === tab.id
-                    ? "border-indigo-600 text-indigo-700"
-                    : disabled
-                      ? "cursor-not-allowed border-transparent text-zinc-300"
-                      : "border-transparent text-zinc-600 hover:border-zinc-300 hover:text-zinc-800",
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {tab.label}
-              </button>
-            );
-          })}
-        </nav>
-
-        {/* Tab content */}
+    <main className="flex h-screen flex-col bg-bg text-fg">
+      <Topbar activeTab={activeTab} onTabChange={setActiveTab} />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <LeftRail activeTab={activeTab} onTabChange={setActiveTab} />
         <section
           id={`${activeTab}-panel`}
           role="tabpanel"
           aria-labelledby={`${activeTab}-tab`}
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
         >
           {activeTab === "setup" && <SetupTab appConfig={appConfig} />}
           {activeTab === "shaping" && <ScoreShapingTab />}
           {activeTab === "optimize" && <OptimizeTab appConfig={appConfig} />}
           {activeTab === "explorer" && <ExplorerTab />}
+          {activeTab === "health" && <HealthTab />}
         </section>
       </div>
     </main>

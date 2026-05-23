@@ -15,23 +15,35 @@ interface Props {
   height?: number;
 }
 
-export function MetricHistogramChart({ runs, metric, target, nbins = 40, height = 220 }: Props) {
-  const traces: Plotly.Data[] = runs.map((run) => ({
+export function MetricHistogramChart({
+  runs,
+  metric,
+  target,
+  nbins = 40,
+  height = 220,
+}: Props) {
+  // A: indigo 70%, B: cyan 55%
+  const opacities = [0.7, 0.55];
+  const traces: Plotly.Data[] = runs.map((run, i) => ({
     x: run.values.filter((v): v is number => v !== null),
     type: "histogram",
     name: run.label,
     nbinsx: nbins,
-    opacity: 0.65,
-    marker: { color: run.color },
+    opacity: opacities[i] ?? 0.55,
+    marker: { color: run.color, line: { width: 0 } },
   }));
 
   const shapes: Partial<Plotly.Shape>[] = [];
   if (target != null) {
     shapes.push({
       type: "line",
-      x0: target, x1: target, xref: "x",
-      y0: 0, y1: 1, yref: "paper",
-      line: { color: COLORS.amber, width: 1.5, dash: "dash" },
+      x0: target,
+      x1: target,
+      xref: "x",
+      y0: 0,
+      y1: 1,
+      yref: "paper",
+      line: { color: COLORS.danger, width: 1, dash: "dash" },
     });
   }
 
@@ -40,10 +52,10 @@ export function MetricHistogramChart({ runs, metric, target, nbins = 40, height 
       data={traces}
       height={height}
       layout={{
-        title: { text: `${metric} — all designs`, font: { size: 12 } },
         xaxis: { title: { text: metric } },
-        yaxis: { title: { text: "Count" } },
+        yaxis: { title: { text: "count" } },
         barmode: "overlay",
+        bargap: 0.02,
         shapes,
       }}
     />

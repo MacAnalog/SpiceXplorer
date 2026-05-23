@@ -1,8 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { ArrowLeft, ArrowRight, Save, RotateCcw } from "lucide-react";
-import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
+import { Panel, PanelHeader } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
@@ -15,6 +14,7 @@ import { TestbenchesStep } from "./steps/TestbenchesStep";
 import { TargetSpecsStep } from "./steps/TargetSpecsStep";
 import { OptimizerStep } from "./steps/OptimizerStep";
 import { TextInput } from "./wizard-controls";
+import { cn } from "@/lib/utils";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
@@ -30,14 +30,12 @@ export function WizardShell({ onSaved }: Props) {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
-  // Default save path tracks ws_root
   useEffect(() => {
     if (!savePath && form.project.ws_root) {
       setSavePath(`${form.project.ws_root.replace(/\/$/, "")}/project_setup.yaml`);
     }
   }, [form.project.ws_root, savePath]);
 
-  // Debounced live YAML preview
   useEffect(() => {
     const t = setTimeout(async () => {
       try {
@@ -54,13 +52,20 @@ export function WizardShell({ onSaved }: Props) {
 
   const StepBody = useMemo(() => {
     switch (WIZARD_STEPS[stepIdx]) {
-      case "basic": return <BasicInfoStep />;
-      case "pdk": return <PDKRulesStep />;
-      case "dut": return <DutParamsStep />;
-      case "pvt": return <PVTStep />;
-      case "testbenches": return <TestbenchesStep />;
-      case "specs": return <TargetSpecsStep />;
-      case "optimizer": return <OptimizerStep />;
+      case "basic":
+        return <BasicInfoStep />;
+      case "pdk":
+        return <PDKRulesStep />;
+      case "dut":
+        return <DutParamsStep />;
+      case "pvt":
+        return <PVTStep />;
+      case "testbenches":
+        return <TestbenchesStep />;
+      case "specs":
+        return <TargetSpecsStep />;
+      case "optimizer":
+        return <OptimizerStep />;
     }
   }, [stepIdx]);
 
@@ -86,109 +91,134 @@ export function WizardShell({ onSaved }: Props) {
   };
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-      {/* Left: step navigator + step body */}
-      <div className="space-y-3">
-        {/* Step pills */}
-        <div className="flex flex-wrap gap-2">
-          {WIZARD_STEPS.map((id, i) => {
-            const active = i === stepIdx;
-            return (
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      {/* Stepper bar — full width */}
+      <div className="flex flex-wrap items-center gap-x-0.5 gap-y-1">
+        {WIZARD_STEPS.map((id, i) => {
+          const active = i === stepIdx;
+          const done = i < stepIdx;
+          return (
+            <div key={id} className="flex items-center">
               <button
-                key={id}
                 type="button"
                 onClick={() => setStep(i)}
-                className={
-                  "rounded-full border px-3 py-1 text-xs transition " +
-                  (active
-                    ? "border-indigo-500 bg-indigo-50 font-semibold text-indigo-700"
-                    : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50")
-                }
+                className={cn(
+                  "flex items-center gap-1.5 rounded px-2.5 py-1 text-xs transition",
+                  active && "bg-primary-soft text-primary",
+                  done && !active && "text-ok",
+                  !active && !done && "text-muted hover:text-fg",
+                )}
               >
-                {i + 1}. {STEP_LABELS[id]}
+                <span
+                  className={cn(
+                    "inline-flex h-4 w-4 items-center justify-center rounded-full font-mono text-[10px]",
+                    active && "bg-primary text-white",
+                    done && !active && "bg-ok text-white",
+                    !active && !done && "bg-hairline",
+                  )}
+                >
+                  {done ? "✓" : i + 1}
+                </span>
+                {STEP_LABELS[id]}
               </button>
-            );
-          })}
-        </div>
-
-        {/* Progress bar */}
-        <div className="h-1 w-full overflow-hidden rounded-full bg-zinc-100">
-          <div
-            className="h-full bg-indigo-500 transition-all"
-            style={{ width: `${((stepIdx + 1) / WIZARD_STEPS.length) * 100}%` }}
-          />
-        </div>
-
-        <Panel>{StepBody}</Panel>
-
-        <div className="flex items-center justify-between">
-          <Button variant="ghost" onClick={reset} className="!h-8 !px-2 !text-xs">
-            <RotateCcw className="h-3 w-3" /> Reset wizard
-          </Button>
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={back} disabled={stepIdx === 0}>
-              <ArrowLeft className="h-3.5 w-3.5" /> Back
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={next}
-              disabled={stepIdx === WIZARD_STEPS.length - 1}
-            >
-              Next <ArrowRight className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </div>
+              {i < WIZARD_STEPS.length - 1 && (
+                <span className="px-0.5 text-faint">›</span>
+              )}
+            </div>
+          );
+        })}
       </div>
 
-      {/* Right: live YAML preview + save controls */}
-      <Panel>
-        <PanelHeader>
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            Live YAML preview
-            {yamlErrors.length === 0 && yamlText
-              ? <Badge variant="pass">valid</Badge>
-              : yamlErrors.length > 0 && <Badge variant="fail">invalid</Badge>}
-          </div>
-        </PanelHeader>
-        <PanelBody className="p-0">
-          <MonacoEditor
-            height="480px"
-            language="yaml"
-            value={yamlText}
-            options={{
-              minimap: { enabled: false },
-              fontSize: 12,
-              lineNumbers: "on",
-              readOnly: true,
-              scrollBeyondLastLine: false,
-              wordWrap: "on",
-              fontFamily: "ui-monospace, monospace",
-            }}
-            loading={<div className="flex h-60 items-center justify-center text-sm text-zinc-400">Rendering…</div>}
-          />
-        </PanelBody>
-        {yamlErrors.length > 0 && (
-          <div className="border-t border-zinc-100 px-3 py-2 text-xs text-red-600">
-            {yamlErrors.map((e, i) => <div key={i}>• {e}</div>)}
-          </div>
-        )}
-        <div className="border-t border-zinc-100 p-3">
-          <div className="flex items-end gap-2">
-            <label className="flex flex-1 flex-col gap-1">
-              <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">Save path</span>
-              <TextInput
-                value={savePath}
-                onChange={(e) => setSavePath(e.target.value)}
-                placeholder="/absolute/path/to/project_setup.yaml"
-              />
-            </label>
-            <Button onClick={handleSave} disabled={saving || !yamlText}>
-              <Save className="h-3.5 w-3.5" /> {saving ? "Saving…" : "Save YAML"}
+      {/* Two-column body: form on the left, live YAML preview on the right */}
+      <div className="grid min-h-0 flex-1 gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        {/* LEFT column: step form + navigation */}
+        <div className="flex min-h-0 min-w-0 flex-col gap-3 overflow-auto">
+          <Panel>{StepBody}</Panel>
+          <div className="flex items-center justify-between">
+            <Button variant="ghost" onClick={reset}>
+              Reset wizard
             </Button>
+            <div className="flex gap-1.5">
+              <Button variant="default" onClick={back} disabled={stepIdx === 0}>
+                ← Back
+              </Button>
+              <Button
+                variant="primary"
+                onClick={next}
+                disabled={stepIdx === WIZARD_STEPS.length - 1}
+              >
+                Next →
+              </Button>
+            </div>
           </div>
-          {saveMsg && <div className="mt-2 text-xs text-zinc-600">{saveMsg}</div>}
         </div>
-      </Panel>
+
+        {/* RIGHT column: live YAML preview + save controls */}
+        <Panel className="flex min-h-0 min-w-0 flex-col">
+          <PanelHeader
+            title="live YAML preview"
+            right={
+              yamlErrors.length === 0 && yamlText ? (
+                <Badge variant="ok" dot>
+                  valid
+                </Badge>
+              ) : yamlErrors.length > 0 ? (
+                <Badge variant="fail" dot>
+                  invalid
+                </Badge>
+              ) : null
+            }
+          />
+          <div className="min-h-0 flex-1">
+            <MonacoEditor
+              height="100%"
+              language="yaml"
+              value={yamlText}
+              theme="vs-dark"
+              options={{
+                minimap: { enabled: false },
+                fontSize: 11.5,
+                lineNumbers: "on",
+                readOnly: true,
+                scrollBeyondLastLine: false,
+                wordWrap: "on",
+                fontFamily: "JetBrains Mono, ui-monospace, monospace",
+                renderLineHighlight: "none",
+              }}
+              loading={
+                <div className="flex h-40 items-center justify-center text-xs text-faint">
+                  Rendering…
+                </div>
+              }
+            />
+          </div>
+          {yamlErrors.length > 0 && (
+            <div className="border-t border-border bg-danger-soft px-3 py-2 font-mono text-[11px] text-danger">
+              {yamlErrors.map((e, i) => (
+                <div key={i}>• {e}</div>
+              ))}
+            </div>
+          )}
+          <div className="border-t border-border px-3 py-2.5">
+            <div className="flex items-end gap-2">
+              <label className="flex flex-1 flex-col gap-1">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted">
+                  Save path
+                </span>
+                <TextInput
+                  value={savePath}
+                  onChange={(e) => setSavePath(e.target.value)}
+                  placeholder="/absolute/path/to/project_setup.yaml"
+                />
+              </label>
+              <Button variant="primary" onClick={handleSave} disabled={saving || !yamlText}>
+                {saving ? "Saving…" : "Save YAML"}
+              </Button>
+            </div>
+            {saveMsg && <div className="mt-2 text-[11px] text-muted">{saveMsg}</div>}
+          </div>
+        </Panel>
+      </div>
     </div>
   );
 }

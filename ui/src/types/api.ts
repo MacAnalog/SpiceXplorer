@@ -128,6 +128,8 @@ export interface CheckpointMeta {
   type: "csv" | "json";
   score_fn: string;
   n_iters?: number | null;
+  /** "preset" (config-defined, read-only) or "autosave" (deletable). */
+  source?: "preset" | "autosave";
 }
 
 export interface CheckpointData {

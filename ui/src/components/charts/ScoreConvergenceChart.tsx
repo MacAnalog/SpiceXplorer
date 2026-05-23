@@ -1,11 +1,13 @@
 "use client";
-import { PlotlyChart, COLORS } from "./PlotlyChart";
+import { PlotlyChart, COLORS, STROKE } from "./PlotlyChart";
 
 interface RunSeries {
   label: string;
   scores: (number | null)[];
   best_scores: (number | null)[];
   color: string;
+  /** If false, hide the raw per-iteration line (used in comparison view). */
+  showRaw?: boolean;
 }
 
 interface Props {
@@ -13,27 +15,30 @@ interface Props {
   height?: number;
 }
 
-export function ScoreConvergenceChart({ runs, height = 260 }: Props) {
+export function ScoreConvergenceChart({ runs, height = 240 }: Props) {
   const traces: Plotly.Data[] = [];
 
   for (const run of runs) {
     const x = run.scores.map((_, i) => i);
-    traces.push({
-      x,
-      y: run.scores,
-      type: "scatter",
-      mode: "lines",
-      name: `${run.label} (raw)`,
-      line: { color: run.color, width: 1, dash: "dot" },
-      opacity: 0.45,
-    });
+    if (run.showRaw !== false) {
+      traces.push({
+        x,
+        y: run.scores,
+        type: "scatter",
+        mode: "lines",
+        name: `${run.label} (raw)`,
+        line: { color: COLORS.muted, width: STROKE.raw },
+        opacity: 0.55,
+        hoverinfo: "skip",
+      });
+    }
     traces.push({
       x,
       y: run.best_scores,
       type: "scatter",
       mode: "lines",
       name: `${run.label} (best)`,
-      line: { color: run.color, width: 2 },
+      line: { color: run.color, width: STROKE.primary },
     });
   }
 
@@ -42,15 +47,19 @@ export function ScoreConvergenceChart({ runs, height = 260 }: Props) {
       data={traces}
       height={height}
       layout={{
-        title: { text: "Score vs. Iteration", font: { size: 12 } },
-        xaxis: { title: { text: "Iteration" } },
-        yaxis: { title: { text: "Score" } },
+        xaxis: { title: { text: "iteration" } },
+        yaxis: { title: { text: "F(x)" } },
         shapes: [
+          // emerald dashed zero line
           {
             type: "line",
-            x0: 0, x1: 1, xref: "paper",
-            y0: 0, y1: 0, yref: "y",
-            line: { color: COLORS.emerald, width: 1.5, dash: "dash" },
+            x0: 0,
+            x1: 1,
+            xref: "paper",
+            y0: 0,
+            y1: 0,
+            yref: "y",
+            line: { color: COLORS.ok, width: 1, dash: "dash" },
           },
         ],
       }}

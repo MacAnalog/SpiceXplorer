@@ -90,6 +90,11 @@ export const api = {
   loadCheckpoint: (id: string, limit = 0) =>
     req<CheckpointData>(`/api/checkpoint/${id}?limit=${limit}`),
 
+  deleteCheckpoint: (id: string) =>
+    req<{ ok: boolean; deleted: string[] }>(`/api/checkpoint/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+
   envelope: (id: string, yaml_path?: string) =>
     req<{ envelope: EnvelopeEntry[] }>(
       `/api/checkpoint/${id}/envelope${yaml_path ? `?yaml_path=${encodeURIComponent(yaml_path)}` : ""}`,

@@ -1,20 +1,21 @@
 "use client";
 import { useCallback, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { CheckCircle, AlertCircle, Upload, Zap } from "lucide-react";
 import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useProjectStore } from "@/stores/projectStore";
+import { useWizardStore } from "@/stores/wizardStore";
 import { api } from "@/lib/api";
-import { formatEng, cn } from "@/lib/utils";
+import { formatEng } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { selectCn } from "@/components/ui/select";
 import { Thead, Th, Tr, Td } from "@/components/ui/table";
+import { Segmented } from "@/components/ui/segmented";
+import { Toolbar, ToolbarSpacer } from "@/components/shell/Toolbar";
+import { Separator } from "@/components/ui/separator";
 import type { AppConfig } from "@/types/api";
 import { WizardShell } from "@/components/wizard/WizardShell";
-import { useWizardStore } from "@/stores/wizardStore";
-import { Pencil } from "lucide-react";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
@@ -24,33 +25,48 @@ interface Props {
 
 type SetupMode = "load" | "wizard";
 
+function goalSym(g: string): string {
+  return g === "exceed" ? ">" : g === "minimize" ? "<" : "≈";
+}
+
 export function SetupTab({ appConfig }: Props) {
-  const { yaml, yamlPath, summary, validationErrors, isApplied, setYaml, setValidationErrors, apply } =
-    useProjectStore();
+  const {
+    yaml,
+    yamlPath,
+    summary,
+    validationErrors,
+    isApplied,
+    setYaml,
+    setValidationErrors,
+    apply,
+  } = useProjectStore();
   const [loading, setLoading] = useState(false);
   const [validating, setValidating] = useState(false);
   const [mode, setMode] = useState<SetupMode>("load");
+  const [hydrateError, setHydrateError] = useState<string | null>(null);
+  const [showSummary, setShowSummary] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { setForm } = useWizardStore();
 
-  const loadDemoYaml = useCallback(async (path: string) => {
-    setLoading(true);
-    try {
-      // Read via backend project/load then display YAML
-      const result = await api.loadProject(path);
-      if (result.ok) {
-        apply(result.summary, path);
-        // Load raw text via a simple fetch from our Next.js API proxy
-        const rawRes = await fetch(`/api/yaml-text?path=${encodeURIComponent(path)}`);
-        if (rawRes.ok) {
-          setYaml(await rawRes.text());
+  const loadDemoYaml = useCallback(
+    async (path: string) => {
+      setLoading(true);
+      try {
+        const result = await api.loadProject(path);
+        if (result.ok) {
+          apply(result.summary, path);
+          const rawRes = await fetch(
+            `/api/yaml-text?path=${encodeURIComponent(path)}`,
+          );
+          if (rawRes.ok) setYaml(await rawRes.text());
         }
+      } finally {
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
-    }
-  }, [apply, setYaml]);
+    },
+    [apply, setYaml],
+  );
 
-  // Debounced live validation
   const handleEditorChange = useCallback(
     (value: string | undefined) => {
       const v = value ?? "";
@@ -103,13 +119,6 @@ export function SetupTab({ appConfig }: Props) {
     reader.readAsText(file);
   };
 
-  const handleWizardSaved = useCallback(async (path: string) => {
-    setMode("load");
-    await loadDemoYaml(path);
-  }, [loadDemoYaml]);
-
-  const { setForm } = useWizardStore();
-  const [hydrateError, setHydrateError] = useState<string | null>(null);
   const editInWizard = useCallback(async () => {
     setHydrateError(null);
     if (!yaml.trim() && !yamlPath) {
@@ -127,255 +136,315 @@ export function SetupTab({ appConfig }: Props) {
     }
   }, [yaml, yamlPath, setForm]);
 
-  return (
-    <div className="space-y-4">
-      {/* Mode switcher + always-visible demo loader */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-1 rounded-md border border-zinc-200 bg-white p-1 text-xs">
-          {(["load", "wizard"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              className={cn(
-                "rounded-md px-3 py-1.5 transition",
-                mode === m
-                  ? "bg-indigo-50 font-semibold text-indigo-700"
-                  : "text-zinc-600 hover:bg-zinc-50",
-              )}
-            >
-              {m === "load" ? "Load / Edit YAML" : "Create Wizard"}
-            </button>
-          ))}
-        </div>
-        {appConfig && (
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">
-              Demo DSL
-            </span>
-            <select
-              className={selectCn("sm")}
-              value=""
-              onChange={(e) => {
-                if (!e.target.value) return;
-                setMode("load");
-                loadDemoYaml(e.target.value);
-              }}
-            >
-              <option value="">Load example…</option>
-              <option value={appConfig.default_yaml}>OTA Cascode (default)</option>
-            </select>
-          </div>
-        )}
-      </div>
+  const handleWizardSaved = useCallback(
+    async (path: string) => {
+      setMode("load");
+      await loadDemoYaml(path);
+    },
+    [loadDemoYaml],
+  );
 
-      {mode === "wizard" ? (
-        <WizardShell onSaved={handleWizardSaved} />
-      ) : (
-    <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
-      {/* Left: YAML editor */}
-      <Panel>
-        <PanelHeader>
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <Zap className="h-4 w-4 text-indigo-500" />
-            Project YAML
-          </div>
-          <div className="flex items-center gap-2">
+  const lineCount = yaml.split("\n").length;
+  const isValid = validationErrors.length === 0 && !!yaml.trim();
+
+  return (
+    <>
+      <Toolbar>
+        <Segmented
+          value={mode}
+          onChange={(m) => setMode(m as SetupMode)}
+          options={[
+            { value: "load", label: "Load / Edit YAML" },
+            { value: "wizard", label: "Create Wizard" },
+          ]}
+        />
+        <Separator />
+        {mode === "load" ? (
+          <>
             {appConfig && (
               <select
-                className={selectCn("xs")}
+                className={selectCn("sm")}
                 value=""
-                onChange={(e) => { if (e.target.value) loadDemoYaml(e.target.value); }}
+                onChange={(e) => {
+                  if (e.target.value) loadDemoYaml(e.target.value);
+                }}
               >
-                <option value="">Load example...</option>
-                <option value={appConfig.default_yaml}>OTA Cascode (default)</option>
+                <option value="">Load example…</option>
+                <option value={appConfig.default_yaml}>
+                  OTA Cascode (default)
+                </option>
               </select>
             )}
             <label className="cursor-pointer" aria-label="Upload YAML file">
-              <input type="file" accept=".yaml,.yml" className="hidden" onChange={handleUpload} />
-              <span className="inline-flex items-center gap-1 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-50">
-                <Upload className="h-3 w-3" /> Upload
+              <input
+                type="file"
+                accept=".yaml,.yml"
+                className="hidden"
+                onChange={handleUpload}
+              />
+              <span className="inline-flex h-[26px] cursor-pointer items-center rounded border border-border bg-panel px-2.5 text-[11px] font-medium hover:bg-hairline">
+                Upload .yaml
               </span>
             </label>
-            <Button variant="secondary" onClick={handleValidate} disabled={validating || !yaml}>
+            <Button variant="default" onClick={editInWizard} disabled={!yaml && !yamlPath}>
+              Edit in wizard
+            </Button>
+          </>
+        ) : null}
+        <ToolbarSpacer />
+        <Button
+          variant={showSummary ? "primary" : "default"}
+          onClick={() => setShowSummary((v) => !v)}
+          disabled={!summary}
+          title={
+            summary
+              ? showSummary
+                ? "Hide project summary panels"
+                : "Show project summary, target specs, and schematic"
+              : "Apply a project first"
+          }
+        >
+          {showSummary ? "Hide summary" : "Show summary"}
+        </Button>
+        {mode === "load" && (
+          <>
+            <Button
+              variant="default"
+              onClick={handleValidate}
+              disabled={validating || !yaml}
+            >
               {validating ? "Checking…" : "Validate"}
             </Button>
-            <Button variant="secondary" onClick={editInWizard} disabled={!yaml && !yamlPath}>
-              <Pencil className="h-3 w-3" /> Edit in Wizard
+            <Button
+              variant="primary"
+              onClick={handleApply}
+              disabled={loading || !yamlPath}
+            >
+              {loading ? "Loading…" : "Apply →"}
             </Button>
-            <Button onClick={handleApply} disabled={loading || !yamlPath}>
-              {loading ? "Loading…" : "Apply"}
-            </Button>
-          </div>
-        </PanelHeader>
-        <PanelBody className="p-0">
-          <MonacoEditor
-            height="460px"
-            language="yaml"
-            value={yaml}
-            onChange={handleEditorChange}
-            options={{
-              minimap: { enabled: false },
-              fontSize: 12,
-              lineNumbers: "on",
-              scrollBeyondLastLine: false,
-              wordWrap: "on",
-              fontFamily: "ui-monospace, monospace",
-            }}
-            loading={<div className="flex h-60 items-center justify-center text-sm text-zinc-400">Loading editor…</div>}
-          />
-        </PanelBody>
-        {/* Validation status */}
-        <div className="border-t border-zinc-100 p-3">
-          {validationErrors.length === 0 && yaml ? (
-            <div className="flex items-center gap-2 text-xs text-emerald-600">
-              <CheckCircle className="h-3.5 w-3.5" /> Valid schema
-            </div>
-          ) : validationErrors.length > 0 ? (
-            <div role="alert" className="space-y-1">
-              {validationErrors.map((e, i) => (
-                <div key={i} className="flex items-start gap-2 text-xs text-red-600">
-                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {e}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-xs text-zinc-400">No YAML loaded yet — select an example or upload a file.</div>
-          )}
-          {hydrateError && (
-            <div className="mt-2 flex items-start gap-2 text-xs text-red-600">
-              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {hydrateError}
-            </div>
-          )}
-        </div>
-      </Panel>
+          </>
+        )}
+      </Toolbar>
 
-      {/* Right: Parsed summary */}
-      <div className="space-y-4">
-        {!summary ? (
-          <Panel>
-            <PanelBody>
-              <EmptyState>Apply a project to see the parsed summary.</EmptyState>
-            </PanelBody>
+      <div
+        className="grid min-h-0 flex-1 gap-3 overflow-auto p-3"
+        style={{
+          // Summary panels appear on the right only when the user toggles
+          // them on (and a project is loaded).
+          gridTemplateColumns: showSummary && summary ? "1fr 1fr" : "1fr",
+        }}
+      >
+        {/* LEFT: Monaco editor or Wizard */}
+        {mode === "load" ? (
+          <Panel className="flex min-h-0 flex-col">
+            <PanelHeader
+              title="project_setup.yaml"
+              mute={yamlPath ? `· ${yamlPath}` : ""}
+              right={
+                <>
+                  <span className="font-mono text-[10px] text-muted">
+                    UTF-8 · {lineCount} lines
+                  </span>
+                  {yaml.trim() && (
+                    <Badge variant={isValid ? "ok" : "fail"} dot>
+                      {isValid ? "valid" : "invalid"}
+                    </Badge>
+                  )}
+                </>
+              }
+            />
+            <div className="min-h-0 flex-1">
+              <MonacoEditor
+                height="100%"
+                language="yaml"
+                value={yaml}
+                onChange={handleEditorChange}
+                theme="vs-dark"
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 11.5,
+                  lineNumbers: "on",
+                  scrollBeyondLastLine: false,
+                  wordWrap: "on",
+                  fontFamily: "JetBrains Mono, ui-monospace, monospace",
+                  renderLineHighlight: "none",
+                }}
+                loading={
+                  <div className="flex h-60 items-center justify-center text-xs text-faint">
+                    Loading editor…
+                  </div>
+                }
+              />
+            </div>
+            {(validationErrors.length > 0 || hydrateError) && (
+              <div className="border-t border-border bg-danger-soft px-3 py-2">
+                {validationErrors.map((e, i) => (
+                  <div key={i} className="font-mono text-[11px] text-danger">
+                    • {e}
+                  </div>
+                ))}
+                {hydrateError && (
+                  <div className="font-mono text-[11px] text-danger">
+                    • {hydrateError}
+                  </div>
+                )}
+              </div>
+            )}
           </Panel>
         ) : (
-          <>
-            {/* Project meta */}
+          <div className="flex min-h-0 min-w-0 flex-col">
+            <WizardShell onSaved={handleWizardSaved} />
+          </div>
+        )}
+
+        {/* RIGHT: stacked summary panels — toggled via the Show summary button */}
+        {showSummary && summary && (
+        <div className="flex min-w-0 flex-col gap-2.5">
+          {!summary ? (
             <Panel>
-              <PanelHeader>
-                <span className="text-sm font-semibold">Project</span>
-                {isApplied && <Badge variant="pass">Applied</Badge>}
-              </PanelHeader>
               <PanelBody>
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <MetaItem label="Name" value={summary.name} />
-                  <MetaItem label="Simulator" value={summary.simulator} />
-                  <MetaItem label="Technology" value={summary.tech.name} />
-                  <MetaItem label="Budget" value={String(summary.optimizer.budget)} />
-                  <MetaItem label="Algorithm" value={summary.optimizer.name} />
-                  <MetaItem label="PVT Corners" value={String(summary.pvt_corners.length)} />
-                </div>
+                <EmptyState minHeight="min-h-32">
+                  Apply a project to see the parsed summary.
+                </EmptyState>
               </PanelBody>
             </Panel>
-
-            {/* Testbenches */}
-            <Panel>
-              <PanelHeader>
-                <span className="text-sm font-semibold">Testbenches ({summary.testbenches.length})</span>
-              </PanelHeader>
-              <PanelBody>
-                <div className="space-y-1.5">
-                  {summary.testbenches.map((tb) => (
-                    <div key={tb.name} className="flex items-center justify-between rounded-md border border-zinc-100 bg-zinc-50 px-3 py-2 text-xs">
-                      <span className="font-medium text-zinc-800">{tb.name}</span>
-                      <div className="flex items-center gap-2">
-                        {tb.description && <span className="text-zinc-400">{tb.description}</span>}
-                        <Badge variant={tb.enable ? "pass" : "neutral"}>{tb.enable ? "enabled" : "disabled"}</Badge>
-                      </div>
+          ) : (
+            <>
+              <Panel>
+                <PanelHeader
+                  title="project summary"
+                  mute="· live preview"
+                  right={
+                    <span className="font-mono text-[10px] text-muted">
+                      {summary.name}
+                    </span>
+                  }
+                />
+                <PanelBody>
+                  <dl
+                    className="grid gap-y-1 gap-x-3 text-xs"
+                    style={{ gridTemplateColumns: "100px 1fr" }}
+                  >
+                    <dt className="text-muted">name</dt>
+                    <dd className="m-0 font-mono text-[11px]">{summary.name}</dd>
+                    <dt className="text-muted">simulator</dt>
+                    <dd className="m-0 font-mono text-[11px]">
+                      {summary.simulator}
+                    </dd>
+                    <dt className="text-muted">technology</dt>
+                    <dd className="m-0 font-mono text-[11px]">
+                      {summary.tech.name || "—"}
+                    </dd>
+                    <dt className="text-muted">workspace</dt>
+                    <dd className="m-0 font-mono text-[11px]">
+                      {summary.ws_root || "—"}
+                    </dd>
+                    <dt className="text-muted">params</dt>
+                    <dd className="m-0 font-mono text-[11px]">
+                      {summary.dut_params.length} ·{" "}
+                      {summary.dut_params.filter((p) => p.log_scale).length} log ·{" "}
+                      {summary.dut_params.filter((p) => p.is_integer).length} int ·{" "}
+                      {summary.dut_params.filter((p) => p.freeze).length} frozen
+                    </dd>
+                    <dt className="text-muted">pvt corners</dt>
+                    <dd className="m-0 font-mono text-[11px]">
+                      {summary.pvt_corners.length}
+                    </dd>
+                    <dt className="text-muted">testbenches</dt>
+                    <dd className="m-0 font-mono text-[11px]">
+                      {summary.testbenches.length} ·{" "}
+                      {summary.testbenches.filter((t) => t.enable).length} enabled
+                    </dd>
+                    <dt className="text-muted">specs</dt>
+                    <dd className="m-0 font-mono text-[11px]">
+                      {summary.target_specs.length} · weight Σ ={" "}
+                      {summary.target_specs
+                        .reduce((a, s) => a + (s.weight ?? 0), 0)
+                        .toFixed(1)}
+                    </dd>
+                    <dt className="text-muted">optimizer</dt>
+                    <dd className="m-0 font-mono text-[11px]">
+                      {summary.optimizer.name} · budget{" "}
+                      {summary.optimizer.budget}
+                    </dd>
+                  </dl>
+                  {isApplied && (
+                    <div className="mt-2.5">
+                      <Badge variant="ok" dot>
+                        applied
+                      </Badge>
                     </div>
-                  ))}
-                </div>
-              </PanelBody>
-            </Panel>
+                  )}
+                </PanelBody>
+              </Panel>
 
-            {/* DUT Params table */}
-            <Panel>
-              <PanelHeader>
-                <span className="text-sm font-semibold">DUT Parameters ({summary.dut_params.length})</span>
-              </PanelHeader>
-              <PanelBody className="p-0">
-                <div className="overflow-auto">
-                  <table className="w-full text-xs">
-                    <Thead>
-                      <Th>Name</Th>
-                      <Th>Min</Th>
-                      <Th>Max</Th>
-                      <Th>Flags</Th>
-                    </Thead>
-                    <tbody>
-                      {summary.dut_params.map((p) => (
-                        <Tr key={p.name}>
-                          <Td className="font-mono text-zinc-800">{p.name}</Td>
-                          <Td className="font-mono text-zinc-600">{formatEng(p.min_val)}</Td>
-                          <Td className="font-mono text-zinc-600">{formatEng(p.max_val)}</Td>
-                          <Td>
-                            <div className="flex gap-1">
-                              {p.is_integer && <Badge variant="indigo">int</Badge>}
-                              {p.log_scale && <Badge variant="neutral">log</Badge>}
-                            </div>
-                          </Td>
-                        </Tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </PanelBody>
-            </Panel>
-
-            {/* Target Specs */}
-            <Panel>
-              <PanelHeader>
-                <span className="text-sm font-semibold">Target Specs ({summary.target_specs.length})</span>
-              </PanelHeader>
-              <PanelBody className="p-0">
-                <table className="w-full text-xs">
+              <Panel>
+                <PanelHeader
+                  title="target specs"
+                  mute={`· ${summary.target_specs.length}`}
+                />
+                <table className="w-full">
                   <Thead>
-                    <Th>Name</Th>
-                    <Th>Goal</Th>
-                    <Th>Target</Th>
-                    <Th>TB</Th>
+                    <Th>name</Th>
+                    <Th>goal</Th>
+                    <Th>target</Th>
+                    <Th>tol</Th>
+                    <Th>weight</Th>
                   </Thead>
                   <tbody>
                     {summary.target_specs.map((s) => (
                       <Tr key={s.name}>
-                        <Td className="font-mono text-zinc-800">{s.name}</Td>
-                        <Td>
-                          <Badge variant={s.goal === "exceed" ? "indigo" : s.goal === "minimize" ? "warning" : "neutral"}>
-                            {s.goal}
-                          </Badge>
+                        <Td className="font-mono">{s.name}</Td>
+                        <Td className="font-mono">{goalSym(s.goal)}</Td>
+                        <Td className="font-mono">{formatEng(s.target)}</Td>
+                        <Td className="font-mono">
+                          {s.tolerance != null ? `±${formatEng(s.tolerance)}` : "—"}
                         </Td>
-                        <Td className="font-mono text-zinc-600">{formatEng(s.target)}</Td>
-                        <Td className="text-zinc-500">{s.testbench}</Td>
+                        <Td className="font-mono">{(s.weight ?? 0).toFixed(1)}</Td>
                       </Tr>
                     ))}
                   </tbody>
                 </table>
-              </PanelBody>
-            </Panel>
-          </>
+              </Panel>
+
+              <Panel>
+                <PanelHeader
+                  title="device under test"
+                  mute="· schematic"
+                  right={
+                    <span className="font-mono text-[10px] text-muted">
+                      {summary.netlist || "—"}
+                    </span>
+                  }
+                />
+                <div className="bg-hairline/40 p-1.5">
+                  <SchematicImg />
+                </div>
+              </Panel>
+            </>
+          )}
+        </div>
         )}
       </div>
-    </div>
-      )}
-    </div>
+    </>
   );
 }
 
-function MetaItem({ label, value }: { label: string; value: string }) {
+function SchematicImg() {
+  const [errored, setErrored] = useState(false);
+  if (errored) {
+    return (
+      <div className="flex h-32 items-center justify-center text-[11px] text-faint">
+        No schematic available.
+      </div>
+    );
+  }
   return (
-    <div className="rounded-md border border-zinc-100 bg-zinc-50 p-2.5">
-      <div className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">{label}</div>
-      <div className="mt-0.5 text-xs font-semibold text-zinc-800">{value}</div>
-    </div>
+    <img
+      src={api.schematicUrl()}
+      alt="DUT schematic"
+      className="max-h-[220px] w-full object-contain"
+      onError={() => setErrored(true)}
+    />
   );
 }

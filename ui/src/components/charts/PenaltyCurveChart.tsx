@@ -1,5 +1,5 @@
 "use client";
-import { PlotlyChart, COLORS } from "./PlotlyChart";
+import { PlotlyChart, COLORS, STROKE } from "./PlotlyChart";
 import type { ScoreCurve } from "@/types/api";
 
 interface Props {
@@ -10,52 +10,59 @@ interface Props {
 
 export function PenaltyCurveChart({ curve, currentValue, height = 280 }: Props) {
   const shapes: Partial<Plotly.Shape>[] = [
+    // emerald dashed = target
     {
       type: "line",
-      x0: curve.target, x1: curve.target, xref: "x",
-      y0: 0, y1: 1, yref: "paper",
-      line: { color: COLORS.emerald, width: 1.5, dash: "dot" },
+      x0: curve.target,
+      x1: curve.target,
+      xref: "x",
+      y0: 0,
+      y1: 1,
+      yref: "paper",
+      line: { color: COLORS.ok, width: 1, dash: "dash" },
     },
   ];
   if (currentValue !== null && currentValue !== undefined) {
+    // orange solid = current
     shapes.push({
       type: "line",
-      x0: currentValue, x1: currentValue, xref: "x",
-      y0: 0, y1: 1, yref: "paper",
-      line: { color: COLORS.indigo, width: 2, dash: "dash" },
+      x0: currentValue,
+      x1: currentValue,
+      xref: "x",
+      y0: 0,
+      y1: 1,
+      yref: "paper",
+      line: { color: COLORS.tertiary, width: 1.2 },
     });
   }
 
   return (
     <PlotlyChart
       data={[
+        // linear (cyan dashed)
         {
-          x: curve.values, y: curve.linear,
-          type: "scatter", mode: "lines",
+          x: curve.values,
+          y: curve.linear,
+          type: "scatter",
+          mode: "lines",
           name: "Linear P̂",
-          line: { color: COLORS.red, width: 2 },
+          line: { color: COLORS.secondary, width: STROKE.primary, dash: "dash" },
         },
+        // sigmoid (indigo solid)
         {
-          x: curve.values, y: curve.sigmoid,
-          type: "scatter", mode: "lines",
+          x: curve.values,
+          y: curve.sigmoid,
+          type: "scatter",
+          mode: "lines",
           name: "Sigmoid P̂",
-          line: { color: COLORS.indigo, width: 2.5 },
+          line: { color: COLORS.primary, width: STROKE.primary },
         },
       ]}
       height={height}
       layout={{
-        title: { text: "Normalized Penalty P̂(m)", font: { size: 12 } },
-        xaxis: { title: { text: "Metric value m" } },
-        yaxis: { title: { text: "Penalty P̂" }, rangemode: "tozero" },
+        xaxis: { title: { text: "metric m" } },
+        yaxis: { title: { text: "P̂" }, rangemode: "tozero" },
         shapes,
-        annotations: [
-          {
-            x: curve.target, y: 0, xref: "x", yref: "y",
-            text: "target", showarrow: false,
-            font: { size: 10, color: COLORS.emerald },
-            yshift: -14,
-          },
-        ],
       }}
     />
   );

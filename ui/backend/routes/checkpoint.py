@@ -33,6 +33,7 @@ def _list_autosave_checkpoints() -> list[dict[str, Any]]:
                 "type": "json",
                 "score_fn": _infer_score_fn(p),
                 "n_iters": None,
+                "source": "autosave",
             })
     return results
 
@@ -48,6 +49,7 @@ def list_checkpoints():
                 "path": str(path),
                 "type": "csv" if path.suffix == ".csv" else "json",
                 "score_fn": _infer_score_fn(path),
+                "source": "preset",
             })
     items += _list_autosave_checkpoints()
     return {"checkpoints": items}
@@ -74,6 +76,40 @@ def load_checkpoint(checkpoint_id: str, limit: int = Query(default=0)):
     data["type"] = "csv" if path.suffix == ".csv" else "json"
     data["score_fn"] = _infer_score_fn(path)
     return data
+
+
+@router.delete("/checkpoint/{checkpoint_id}")
+def delete_checkpoint(checkpoint_id: str):
+    """Delete an autosave checkpoint. Preset checkpoints are protected."""
+    presets = preset_checkpoint_paths()
+    if checkpoint_id in presets:
+        raise HTTPException(
+            403,
+            f"Checkpoint '{checkpoint_id}' is a preset and cannot be deleted from the UI.",
+        )
+
+    autosave_root = REPO_ROOT / "auto_save"
+    if not autosave_root.exists():
+        raise HTTPException(404, "No autosave directory.")
+
+    # Match any file whose stem starts with the checkpoint_id under auto_save/
+    candidates = [
+        p for p in autosave_root.rglob("*")
+        if p.is_file() and p.stem == checkpoint_id
+    ]
+    if not candidates:
+        raise HTTPException(404, f"Checkpoint '{checkpoint_id}' not found in auto_save.")
+
+    # Defence-in-depth: confirm every candidate really lives under auto_save/
+    resolved_root = autosave_root.resolve()
+    for path in candidates:
+        if resolved_root not in path.resolve().parents:
+            raise HTTPException(403, f"Refusing to delete file outside auto_save: {path}")
+
+    for path in candidates:
+        path.unlink()
+
+    return {"ok": True, "deleted": [str(p) for p in candidates]}
 
 
 @router.get("/checkpoint/{checkpoint_id}/envelope")

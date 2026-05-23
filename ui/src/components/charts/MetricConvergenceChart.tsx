@@ -1,5 +1,5 @@
 "use client";
-import { PlotlyChart, COLORS } from "./PlotlyChart";
+import { PlotlyChart, COLORS, STROKE } from "./PlotlyChart";
 
 interface RunMetric {
   label: string;
@@ -12,6 +12,7 @@ interface Props {
   runs: RunMetric[];
   target?: number | null;
   goal?: string;
+  unit?: string;
   height?: number;
 }
 
@@ -19,34 +20,63 @@ function bestSoFar(values: (number | null)[], goal: string): (number | null)[] {
   let best: number | null = null;
   return values.map((v) => {
     if (v === null) return best;
-    if (best === null) { best = v; return best; }
+    if (best === null) {
+      best = v;
+      return best;
+    }
     if (goal === "minimize") best = Math.min(best, v);
     else best = Math.max(best, v);
     return best;
   });
 }
 
-export function MetricConvergenceChart({ metric, runs, target, goal = "exceed", height = 220 }: Props) {
+export function MetricConvergenceChart({
+  metric,
+  runs,
+  target,
+  goal = "exceed",
+  unit = "",
+  height = 240,
+}: Props) {
   const traces: Plotly.Data[] = [];
 
   for (const run of runs) {
     const bsf = bestSoFar(run.values, goal);
     const x = run.values.map((_, i) => i);
     traces.push({
-      x, y: bsf,
-      type: "scatter", mode: "lines",
+      x,
+      y: bsf,
+      type: "scatter",
+      mode: "lines",
       name: run.label,
-      line: { color: run.color, width: 2 },
+      line: { color: run.color, width: STROKE.primary },
     });
   }
 
   const shapes: Partial<Plotly.Shape>[] = [];
+  const annotations: Partial<Plotly.Annotations>[] = [];
   if (target !== null && target !== undefined) {
     shapes.push({
       type: "line",
-      x0: 0, x1: 1, xref: "paper",
-      y0: target, y1: target, yref: "y",
-      line: { color: COLORS.amber, width: 1.5, dash: "dash" },
+      x0: 0,
+      x1: 1,
+      xref: "paper",
+      y0: target,
+      y1: target,
+      yref: "y",
+      line: { color: COLORS.danger, width: 1, dash: "dash" },
+    });
+    annotations.push({
+      x: 1,
+      xref: "paper",
+      y: target,
+      yref: "y",
+      text: `target ${target}${unit}`,
+      showarrow: false,
+      xanchor: "right",
+      yanchor: "bottom",
+      font: { color: COLORS.danger, size: 10, family: "JetBrains Mono, ui-monospace, monospace" },
+      yshift: 2,
     });
   }
 
@@ -55,10 +85,10 @@ export function MetricConvergenceChart({ metric, runs, target, goal = "exceed", 
       data={traces}
       height={height}
       layout={{
-        title: { text: `${metric} — best so far`, font: { size: 12 } },
-        xaxis: { title: { text: "Iteration" } },
+        xaxis: { title: { text: "iteration" } },
         yaxis: { title: { text: metric } },
         shapes,
+        annotations,
       }}
     />
   );
