@@ -30,6 +30,11 @@ dependencies = [
 ax = [
     "ax-platform>=1.2.4; python_version >= '3.11'",
 ]
+ui = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "python-multipart>=0.0.12",
+]
 
 # [project.scripts]
 # run-symbolix = "spicexplorer.symbolic_solver.main:main"
