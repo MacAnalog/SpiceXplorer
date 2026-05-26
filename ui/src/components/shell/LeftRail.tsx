@@ -41,6 +41,9 @@ export function LeftRail({ activeTab, onTabChange }: Props) {
   const healthMeta = TAB_META.health;
   const HealthIcon = healthMeta.icon;
   const healthActive = activeTab === "health";
+  const schematicMeta = TAB_META.schematic;
+  const SchematicIcon = schematicMeta.icon;
+  const schematicActive = activeTab === "schematic";
 
   const refreshCheckpoints = async () => {
     setRefreshing(true);
@@ -151,8 +154,22 @@ export function LeftRail({ activeTab, onTabChange }: Props) {
         </div>
       </div>
 
-      {/* Pinned bottom region: Health link + status badges + version */}
+      {/* Pinned bottom region: Schematic + Health links + status badges + version */}
       <div className="shrink-0 border-t border-border p-3 space-y-2">
+        <button
+          type="button"
+          onClick={() => onTabChange("schematic")}
+          aria-current={schematicActive ? "page" : undefined}
+          className={cn(
+            "flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-[12px] transition",
+            schematicActive
+              ? "bg-primary-soft font-medium text-primary"
+              : "text-fg hover:bg-hairline",
+          )}
+        >
+          <SchematicIcon className="h-3.5 w-3.5" aria-hidden />
+          {schematicMeta.label}
+        </button>
         <button
           type="button"
           onClick={() => onTabChange("health")}

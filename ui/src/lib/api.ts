@@ -140,4 +140,22 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(args),
     }),
+
+  // Xschem viewer
+  xschemFile: (path: string) =>
+    req<{ path: string; content: string }>(
+      `/api/xschem/file?path=${encodeURIComponent(path)}`,
+    ),
+
+  xschemResolve: (ref: string, base?: string) => {
+    const q = `ref=${encodeURIComponent(ref)}${base ? `&base=${encodeURIComponent(base)}` : ""}`;
+    return req<{ path: string; content: string; resolved_from: string }>(
+      `/api/xschem/resolve?${q}`,
+    );
+  },
+
+  xschemProject: (yaml_path: string) =>
+    req<{ xschem_dir: string | null; files: { path: string; name: string }[] }>(
+      `/api/xschem/project?yaml_path=${encodeURIComponent(yaml_path)}`,
+    ),
 };

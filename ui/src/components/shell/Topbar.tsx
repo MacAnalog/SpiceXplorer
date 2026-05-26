@@ -5,6 +5,7 @@ import {
   Compass,
   SlidersHorizontal,
   Activity,
+  CircuitBoard,
   type LucideIcon,
 } from "lucide-react";
 import { useProjectStore } from "@/stores/projectStore";
@@ -12,11 +13,18 @@ import { cn } from "@/lib/utils";
 
 // Health lives on the left rail now, but the type still includes it so
 // page.tsx can route to it via the rail click.
-export type TabId = "setup" | "optimize" | "explorer" | "shaping" | "health";
+export type TabId =
+  | "setup"
+  | "schematic"
+  | "optimize"
+  | "explorer"
+  | "shaping"
+  | "health";
 
 /** Tab metadata for both the top tab bar and the left rail's "Health" entry. */
 export const TAB_META: Record<TabId, { label: string; icon: LucideIcon }> = {
   setup: { label: "Setup", icon: Wrench },
+  schematic: { label: "Schematic", icon: CircuitBoard },
   optimize: { label: "Optimize", icon: Zap },
   explorer: { label: "Explorer", icon: Compass },
   shaping: { label: "Score Shaping", icon: SlidersHorizontal },
@@ -61,8 +69,7 @@ export function Topbar({ activeTab, onTabChange }: Props) {
       >
         {TOPBAR_TABS.map((id) => {
           const meta = TAB_META[id];
-          const disabled =
-            !isApplied && id !== "setup" && id !== "explorer";
+          const disabled = !isApplied && id !== "setup" && id !== "explorer";
           const active = activeTab === id;
           const Icon = meta.icon;
           return (

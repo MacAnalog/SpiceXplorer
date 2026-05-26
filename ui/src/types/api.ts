@@ -49,6 +49,8 @@ export interface ProjectSummary {
   simulator: string;
   ws_root: string;
   netlist: string;
+  /** Optional pointer to the design's .sch (relative to `ws_root`). */
+  schematic?: string | null;
   tech: { name: string; constraints: Record<string, number> };
   pvt_corners: PVTCorner[];
   dut_params: DutParam[];

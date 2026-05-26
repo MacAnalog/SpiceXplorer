@@ -603,16 +603,19 @@ class Project_Setup:
     ws_root :   Path | str
     netlist:    Path | str
     outdir :    Path | str
-    
+
     # Custom Data types
     tech_spec: TechSpec
     pvt_corners: List[PVT]
     dut_params: List[Param]
     testbenches: List[TestbenchParams]
     optimizer_config: OptimizerConfig
-    
+
     save_sim:  bool = False
     parallel_sim: bool = True
+    # Optional pointer to the design's xschem schematic, relative to `ws_root`.
+    # Consumed by the UI's Schematic viewer to pre-select the main `.sch`.
+    schematic: Path | str | None = None
 
     def __post_init__(self):
         # correct path types
@@ -622,11 +625,15 @@ class Project_Setup:
             self.netlist = Path(self.netlist)
         if isinstance(self.outdir, str):
             self.outdir = Path(self.outdir)
+        if isinstance(self.schematic, str):
+            self.schematic = Path(self.schematic)
         # Log basic info
         logger.info(f"Project '{self.name}' initialized with simulator '{self.simulator}'")
         logger.info(f"\tWorkspace root: {self.ws_root}")
         logger.info(f"\tNetlist path: {self.netlist}")
         logger.info(f"\tOutput directory: {self.outdir}")
+        if self.schematic is not None:
+            logger.info(f"\tSchematic path: {self.schematic}")
 
     # ------------------ Class Methods ------------------
 

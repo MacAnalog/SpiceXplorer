@@ -83,6 +83,7 @@ def _summarise(project: Project_Setup) -> dict[str, Any]:
         "simulator": project.simulator,
         "ws_root": str(project.ws_root),
         "netlist": str(project.netlist),
+        "schematic": str(project.schematic) if project.schematic is not None else None,
         "tech": {
             "name": project.tech_spec.name,
             "constraints": {k: float(v) for k, v in project.tech_spec.constraints.items()},

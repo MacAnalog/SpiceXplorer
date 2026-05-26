@@ -175,7 +175,7 @@ export function OptimizeTab({ appConfig }: Props) {
           className={selectCn("sm") + " w-[72px]"}
         />
         <ToolbarLabel>score</ToolbarLabel>
-        <Segmented
+        <Segmented<ScoreFn>
           value={scoreFn}
           onChange={setScoreFn}
           options={[

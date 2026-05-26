@@ -4,6 +4,7 @@ import { useProjectStore } from "@/stores/projectStore";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { api } from "@/lib/api";
 import { SetupTab } from "@/components/tabs/SetupTab";
+import { SchematicTab } from "@/components/tabs/SchematicTab";
 import { ScoreShapingTab } from "@/components/tabs/ScoreShapingTab";
 import { OptimizeTab } from "@/components/tabs/OptimizeTab";
 import { ExplorerTab } from "@/components/tabs/ExplorerTab";
@@ -37,11 +38,19 @@ export default function Home() {
         "2": "optimize",
         "3": "explorer",
         "4": "shaping",
-        "5": "health",
+        "5": "schematic",
+        "6": "health",
       };
       const tab = map[e.key];
       if (!tab) return;
-      if (!isApplied && tab !== "setup" && tab !== "explorer" && tab !== "health") return;
+      if (
+        !isApplied &&
+        tab !== "setup" &&
+        tab !== "schematic" &&
+        tab !== "explorer" &&
+        tab !== "health"
+      )
+        return;
       setActiveTab(tab);
     };
     document.addEventListener("keydown", onKey);
@@ -60,6 +69,7 @@ export default function Home() {
           className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
         >
           {activeTab === "setup" && <SetupTab appConfig={appConfig} />}
+          {activeTab === "schematic" && <SchematicTab />}
           {activeTab === "shaping" && <ScoreShapingTab />}
           {activeTab === "optimize" && <OptimizeTab appConfig={appConfig} />}
           {activeTab === "explorer" && <ExplorerTab />}

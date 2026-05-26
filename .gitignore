@@ -44,14 +44,16 @@ examples/tunable-tia/docs/ECE748 Final Project.pdf
 # checkpoints/**
 
 *.html
-*raw
-*json
+*.raw
+*.json
 
 **/temp_spice_out*/**
 
 # NEWCAS demo UI
 !ui/package.json
 !ui/package-lock.json
+!ui/tsconfig.json
+!ui/app_config.json
 ui/node_modules/
 ui/.next/
 ui/*.tsbuildinfo

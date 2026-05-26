@@ -183,6 +183,7 @@ def build_project_dict(form: Dict[str, Any]) -> Dict[str, Any]:
         "ws_root": project.get("ws_root", ""),
         "netlist": project.get("netlist", ""),
         "outdir": project.get("outdir", "spice/temp_spice_out"),
+        **({"schematic": project["schematic"]} if project.get("schematic") else {}),
         "tech_spec": _build_tech_spec(form),
         "pvt_corners": _build_pvt(form),
         "dut_params": [_build_dut_param(p) for p in form.get("dut_params", []) if p.get("name")],
@@ -316,6 +317,7 @@ def project_dict_to_form(data: Dict[str, Any]) -> Dict[str, Any]:
             "ws_root": _str_or_blank(p.get("ws_root")),
             "netlist": _str_or_blank(p.get("netlist")),
             "outdir": _str_or_blank(p.get("outdir")) or "spice/temp_spice_out",
+            "schematic": _str_or_blank(p.get("schematic")),
         },
         "tech": {
             "name": _str_or_blank(tech.get("name")),
