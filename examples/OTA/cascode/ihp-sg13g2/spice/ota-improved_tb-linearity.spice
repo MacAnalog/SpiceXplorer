@@ -1,4 +1,4 @@
-** sch_path: /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved_tb-linearity.sch
+** sch_path: /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved_tb-linearity.sch
 **.subckt ota-improved_tb-linearity
 Vdd v_dd GND VDD
 xota v_dd v_out v_cm net1 net2 v_ena v_ss ota-improved

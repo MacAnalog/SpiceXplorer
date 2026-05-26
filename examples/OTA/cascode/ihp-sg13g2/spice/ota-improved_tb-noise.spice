@@ -1,4 +1,4 @@
-** sch_path: /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved_tb-noise.sch
+** sch_path: /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved_tb-noise.sch
 **.subckt ota-improved_tb-noise
 *----------------------------------------------------------*
 * Testbench
@@ -134,8 +134,8 @@ Vin v_cm net1 dc 0 ac 1
 * Subcircuit Definition
 *----------------------------------------------------------*
 * expanding   symbol:  ota-improved.sym # of pins=7
-** sym_path: /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sym
-** sch_path: /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sch
+** sym_path: /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sym
+** sch_path: /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sch
 .subckt ota-improved vdd vout vinp vinn ibias_5u d_ena vss
 *.ipin ibias_5u
 *.iopin vdd
