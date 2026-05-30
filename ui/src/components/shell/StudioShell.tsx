@@ -10,6 +10,7 @@ import { TabStrip } from "./TabStrip";
 import { RightRail } from "./RightRail";
 import { BottomPanel } from "./BottomPanel";
 import { StatusBar } from "./StatusBar";
+import { CommandPalette } from "@/components/overlays/CommandPalette";
 
 /**
  * Studio shell — composition root rendered by the `(studio)` route-group layout.
@@ -52,6 +53,7 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
         <RightRail />
       </div>
       <StatusBar />
+      <CommandPalette />
     </div>
   );
 }

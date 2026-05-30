@@ -1,13 +1,14 @@
 "use client";
 import { Command } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useUIStore } from "@/stores/uiStore";
 
 /**
- * Top title bar: brand + (placeholder) ⌘K command trigger. The run/PDK status
- * lives in the StatusBar; the command palette and Run popover are wired in
- * later phases — the ⌘K affordance is shown disabled so the layout is final.
+ * Top title bar: brand + ⌘K command-palette trigger. The run/PDK status lives in
+ * the StatusBar. The ⌘K button opens the same palette the global ⌘K shortcut does
+ * (see CommandPalette).
  */
 export function StudioTitleBar() {
+  const openCommand = useUIStore((s) => s.openCommand);
   return (
     <header className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-panel px-3">
       <div className="flex items-baseline gap-2">
@@ -32,12 +33,10 @@ export function StudioTitleBar() {
 
       <button
         type="button"
-        disabled
-        title="Command palette (coming soon)"
-        className={cn(
-          "flex items-center gap-1.5 rounded-md border border-border bg-hairline px-2 py-1 text-[11px] text-faint",
-          "cursor-not-allowed",
-        )}
+        onClick={openCommand}
+        title="Command palette (⌘K)"
+        aria-label="Open command palette"
+        className="flex items-center gap-1.5 rounded-md border border-border bg-hairline px-2 py-1 text-[11px] text-muted transition hover:border-primary/40 hover:text-fg"
       >
         <Command className="h-3 w-3" aria-hidden />
         <span className="font-mono">K</span>

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
 import { useProjectStore } from "@/stores/projectStore";
+import { useUIStore } from "@/stores/uiStore";
 import { api } from "@/lib/api";
 import { formatEng } from "@/lib/utils";
 import type { ScoreResponse, TargetSpec } from "@/types/api";
@@ -21,6 +22,8 @@ function goalSym(g: string): string {
 
 export function ScoreShapingTab() {
   const { summary, yamlPath, isApplied } = useProjectStore();
+  // Deep-link target set by the ⌘K palette ("Jump to spec").
+  const uiSelectedSpec = useUIStore((s) => s.selectedSpec);
   const [selectedSpec, setSelectedSpec] = useState<string>("");
   const [metricValue, setMetricValue] = useState<number>(0);
   const [scoreData, setScoreData] = useState<ScoreResponse | null>(null);
@@ -40,6 +43,16 @@ export function ScoreShapingTab() {
       setMetricValue(first.target);
     }
   }, [summary, enabledSpecs, selectedSpec]);
+
+  // Honor a ⌘K deep-link: focus the requested spec + reset the try-value.
+  useEffect(() => {
+    if (!uiSelectedSpec) return;
+    const match = enabledSpecs.find((s) => s.name === uiSelectedSpec);
+    if (match && match.name !== selectedSpec) {
+      setSelectedSpec(match.name);
+      setMetricValue(match.target);
+    }
+  }, [uiSelectedSpec, enabledSpecs, selectedSpec]);
 
   const handleSpecChange = (specName: string) => {
     setSelectedSpec(specName);
