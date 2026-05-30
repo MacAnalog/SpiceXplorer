@@ -57,3 +57,8 @@ examples/tunable-tia/docs/ECE748 Final Project.pdf
 ui/node_modules/
 ui/.next/
 ui/*.tsbuildinfo
+.tmp_shots/
+
+# Python bytecode
+__pycache__/
+*.pyc
