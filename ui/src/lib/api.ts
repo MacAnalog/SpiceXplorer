@@ -7,6 +7,7 @@ import type {
   RunStartResponse,
   CheckpointData,
   CheckpointMeta,
+  EnvInfo,
   EnvelopeEntry,
   ScatterPoint,
   SanityCheckResponse,
@@ -34,6 +35,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   // Config
   config: () => req<AppConfig>("/api/config"),
+
+  // Environment — ngspice + IHP PDK probe for graceful degradation (no live runs without PDK)
+  env: () => req<EnvInfo>("/api/env"),
 
   // Project
   loadProject: (yaml_path: string) =>

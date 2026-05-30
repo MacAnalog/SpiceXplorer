@@ -194,6 +194,23 @@ export interface SanityCheckResponse {
   elapsed_ms_load: number | null;
   elapsed_ms_optimizer_init: number | null;
   ngspice_path: string | null;
+  /** Whether the IHP PDK device models resolved (false on a PDK-less machine). */
+  pdk_ok: boolean | null;
+  /** Human-readable PDK verdict for the diagnostics panel. */
+  pdk_detail: string | null;
+}
+
+// Environment probe — simulator + PDK availability (GET /api/env)
+
+export interface EnvInfo {
+  ngspice_path: string | null;
+  ngspice_ok: boolean;
+  pdk_root: string | null;
+  pdk_ok: boolean;
+  pdk_detail: string;
+  tech: string;
+  /** True only when both ngspice and the PDK are present; gates live optimization. */
+  live_runs_enabled: boolean;
 }
 
 // Config

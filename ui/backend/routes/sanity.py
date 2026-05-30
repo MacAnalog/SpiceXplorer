@@ -49,6 +49,9 @@ class SanityResponse(BaseModel):
     elapsed_ms_load: float | None = None
     elapsed_ms_optimizer_init: float | None = None
     ngspice_path: str | None = None
+    # PDK verdict (cheap probe folded in so a sanity run confirms the static /api/env check).
+    pdk_ok: bool | None = None
+    pdk_detail: str | None = None
 
 
 def _tail_log(path_str: str | Path | None) -> tuple[str | None, int | None]:
@@ -78,9 +81,14 @@ def _run_sanity(yaml_path: str) -> dict[str, Any]:
     from spicexplorer.core.domains import Project_Setup
     from spicexplorer.spice_engine import NGSpice_Wrapper, Sim_Execution_Type
     from spicexplorer.optimization.stochastic.nevergrad import Nevergrad_Spice_Single_Objective
+    from ui.backend.services.env_probe import probe_pdk
 
     t_start = time.perf_counter()
     t_load_start = t_start
+    # Cheap PDK verdict folded into every return path so the UI can explain a sim
+    # failure as "PDK missing" rather than a generic error (this Mac has ngspice but
+    # no IHP PDK; on the server both are present).
+    pdk = probe_pdk()
     try:
         project = Project_Setup.from_yaml(yaml_path)
     except Exception as e:
@@ -88,6 +96,8 @@ def _run_sanity(yaml_path: str) -> dict[str, Any]:
             "ok": False, "testbenches": [], "trial": None,
             "error": f"Failed to load project: {e}",
             "elapsed_ms_total": (time.perf_counter() - t_start) * 1000,
+            "pdk_ok": pdk["pdk_ok"],
+            "pdk_detail": pdk["pdk_detail"],
         }
     elapsed_ms_load = (time.perf_counter() - t_load_start) * 1000
 
@@ -146,6 +156,8 @@ def _run_sanity(yaml_path: str) -> dict[str, Any]:
             "elapsed_ms_total": (time.perf_counter() - t_start) * 1000,
             "elapsed_ms_load": elapsed_ms_load,
             "ngspice_path": str(path_to_simulator),
+            "pdk_ok": pdk["pdk_ok"],
+            "pdk_detail": pdk["pdk_detail"],
         }
 
     # One trial optimization step to validate the full pipeline
@@ -205,6 +217,8 @@ def _run_sanity(yaml_path: str) -> dict[str, Any]:
             "elapsed_ms_load": elapsed_ms_load,
             "elapsed_ms_optimizer_init": elapsed_ms_optimizer_init,
             "ngspice_path": str(path_to_simulator),
+            "pdk_ok": pdk["pdk_ok"],
+            "pdk_detail": pdk["pdk_detail"],
         }
 
     return {
@@ -216,6 +230,8 @@ def _run_sanity(yaml_path: str) -> dict[str, Any]:
         "elapsed_ms_load": elapsed_ms_load,
         "elapsed_ms_optimizer_init": elapsed_ms_optimizer_init,
         "ngspice_path": str(path_to_simulator),
+        "pdk_ok": pdk["pdk_ok"],
+        "pdk_detail": pdk["pdk_detail"],
     }
 
 
