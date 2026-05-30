@@ -7,6 +7,8 @@ import { StudioTitleBar } from "./StudioTitleBar";
 import { ActivityBar } from "./ActivityBar";
 import { StudioLeftRail } from "./StudioLeftRail";
 import { TabStrip } from "./TabStrip";
+import { RightRail } from "./RightRail";
+import { BottomPanel } from "./BottomPanel";
 import { StatusBar } from "./StatusBar";
 
 /**
@@ -45,7 +47,9 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             {children}
           </div>
+          <BottomPanel />
         </section>
+        <RightRail />
       </div>
       <StatusBar />
     </div>

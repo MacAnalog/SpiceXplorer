@@ -1,5 +1,6 @@
 "use client";
 import { usePathname } from "next/navigation";
+import { PanelBottom, PanelRight } from "lucide-react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useRunStore } from "@/stores/runStore";
 import { useUIStore } from "@/stores/uiStore";
@@ -22,6 +23,7 @@ export function StatusBar() {
   const { summary, isApplied } = useProjectStore();
   const { isRunning, isReplay, currentIter, budget } = useRunStore();
   const env = useUIStore((s) => s.env);
+  const { rightOpen, bottomOpen, toggleRight, toggleBottom } = useUIStore();
 
   // Environment pill
   let envDot = "bg-faint";
@@ -66,6 +68,32 @@ export function StatusBar() {
 
       <div className="flex-1" />
 
+      <button
+        type="button"
+        onClick={toggleBottom}
+        aria-label="Toggle optimizer log panel"
+        title={bottomOpen ? "Hide optimizer log" : "Show optimizer log"}
+        className={cn(
+          "rounded p-0.5 hover:bg-hairline hover:text-fg",
+          bottomOpen ? "text-primary" : "text-faint",
+        )}
+      >
+        <PanelBottom className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={toggleRight}
+        aria-label="Toggle run rail"
+        title={rightOpen ? "Hide run rail" : "Show run rail"}
+        className={cn(
+          "rounded p-0.5 hover:bg-hairline hover:text-fg",
+          rightOpen ? "text-primary" : "text-faint",
+        )}
+      >
+        <PanelRight className="h-3.5 w-3.5" />
+      </button>
+
+      <span className="text-faint">·</span>
       <span
         className="flex items-center gap-1.5"
         title={env?.pdk_detail ?? "Probing simulator + PDK availability…"}

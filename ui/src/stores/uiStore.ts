@@ -19,6 +19,11 @@ interface UIStore {
   compareRunA: string | null;
   compareRunB: string | null;
 
+  // Panels (always-on shell surfaces)
+  rightOpen: boolean;
+  bottomOpen: boolean;
+  bottomTab: "log";
+
   // Overlays (⌘K palette, etc. — UI lands in a later phase)
   commandOpen: boolean;
 
@@ -27,6 +32,9 @@ interface UIStore {
   setSelectedSpec: (name: string | null) => void;
   setSelectedRunId: (id: string | null) => void;
   setCompare: (a: string | null, b: string | null) => void;
+  toggleRight: () => void;
+  toggleBottom: () => void;
+  setBottomTab: (tab: "log") => void;
   openCommand: () => void;
   closeCommand: () => void;
 }
@@ -38,6 +46,9 @@ export const useUIStore = create<UIStore>((set) => ({
   selectedRunId: null,
   compareRunA: null,
   compareRunB: null,
+  rightOpen: true,
+  bottomOpen: false,
+  bottomTab: "log",
   commandOpen: false,
 
   setAppConfig: (appConfig) => set({ appConfig }),
@@ -45,6 +56,9 @@ export const useUIStore = create<UIStore>((set) => ({
   setSelectedSpec: (selectedSpec) => set({ selectedSpec }),
   setSelectedRunId: (selectedRunId) => set({ selectedRunId }),
   setCompare: (compareRunA, compareRunB) => set({ compareRunA, compareRunB }),
+  toggleRight: () => set((s) => ({ rightOpen: !s.rightOpen })),
+  toggleBottom: () => set((s) => ({ bottomOpen: !s.bottomOpen })),
+  setBottomTab: (bottomTab) => set({ bottomTab }),
   openCommand: () => set({ commandOpen: true }),
   closeCommand: () => set({ commandOpen: false }),
 }));
