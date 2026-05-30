@@ -1,10 +1,13 @@
 "use client";
 import { useState } from "react";
-import { RefreshCw, X } from "lucide-react";
+import { RefreshCw, X, Trash2 } from "lucide-react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useExplorerStore } from "@/stores/explorerStore";
+import { useRunStore } from "@/stores/runStore";
+import { useUIStore } from "@/stores/uiStore";
 import { api } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, formatEng } from "@/lib/utils";
+import { Sparkline } from "@/components/ui/sparkline";
 
 /**
  * Left rail (Phase 1): project summary + the checkpoint list (salvaged from the
@@ -30,6 +33,8 @@ function RailHeading({
 export function StudioLeftRail() {
   const { summary, isApplied } = useProjectStore();
   const { availableCheckpoints, setAvailableCheckpoints } = useExplorerStore();
+  const { history, rerun, clearHistory, runId, isRunning } = useRunStore();
+  const { selectedRunId, openRun } = useUIStore();
   const [refreshing, setRefreshing] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +77,61 @@ export function StudioLeftRail() {
             {isApplied ? "active" : "draft"}
           </span>
         </div>
+
+        <RailHeading
+          right={
+            history.length > 0 ? (
+              <button
+                type="button"
+                onClick={clearHistory}
+                aria-label="Clear run history"
+                title="Clear run history"
+                className="rounded p-0.5 text-muted normal-case tracking-normal hover:bg-hairline hover:text-fg"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            ) : undefined
+          }
+        >
+          Runs
+        </RailHeading>
+        {history.length === 0 ? (
+          <div className="px-1.5 py-1 text-[11px] text-faint">
+            No runs yet. Replay a checkpoint on Optimize.
+          </div>
+        ) : (
+          history.map((r) => {
+            const active = selectedRunId === r.id || (isRunning && runId === r.id);
+            return (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => {
+                  openRun(r.id);
+                  if (r.kind === "replay") void rerun(r);
+                }}
+                title={r.kind === "replay" ? "Click to replay this run" : "Live run (view-only)"}
+                className={cn(
+                  "group flex w-full items-center gap-2 rounded px-1.5 py-1 text-left transition",
+                  active ? "bg-primary-soft" : "hover:bg-hairline",
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="truncate text-[11px]">{r.label}</span>
+                    <span className="font-mono text-[10px] text-muted">
+                      {r.bestScore != null ? formatEng(r.bestScore) : "—"}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 font-mono text-[9px] text-faint">
+                    {r.kind} · {r.finalIter} it
+                  </div>
+                </div>
+                <Sparkline values={r.sparkline} width={56} height={18} />
+              </button>
+            );
+          })
+        )}
 
         <RailHeading
           right={

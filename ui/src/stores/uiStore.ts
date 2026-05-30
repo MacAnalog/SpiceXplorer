@@ -31,6 +31,8 @@ interface UIStore {
   setEnv: (env: EnvInfo | null) => void;
   setSelectedSpec: (name: string | null) => void;
   setSelectedRunId: (id: string | null) => void;
+  /** Deep-link: focus a run in the history/convergence surfaces. */
+  openRun: (id: string) => void;
   setCompare: (a: string | null, b: string | null) => void;
   toggleRight: () => void;
   toggleBottom: () => void;
@@ -55,6 +57,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setEnv: (env) => set({ env }),
   setSelectedSpec: (selectedSpec) => set({ selectedSpec }),
   setSelectedRunId: (selectedRunId) => set({ selectedRunId }),
+  openRun: (id) => set({ selectedRunId: id }),
   setCompare: (compareRunA, compareRunB) => set({ compareRunA, compareRunB }),
   toggleRight: () => set((s) => ({ rightOpen: !s.rightOpen })),
   toggleBottom: () => set((s) => ({ bottomOpen: !s.bottomOpen })),

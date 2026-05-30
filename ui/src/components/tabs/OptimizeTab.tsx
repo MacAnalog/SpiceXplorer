@@ -64,8 +64,13 @@ export function OptimizeTab({ appConfig }: Props) {
       const res = replayCheckpoint
         ? await api.startRun({ replay: true, checkpoint_id: replayCheckpoint })
         : await api.startRun({ yaml_path: yamlPath, budget: runBudget });
+      const ckptLabel = appConfig?.preset_checkpoints.find((c) => c.id === replayCheckpoint)?.label;
       // startRun resets run state and opens the SSE stream (handled in the store).
-      startRun(res.run_id, res.replay, runBudget);
+      startRun(res.run_id, res.replay, runBudget, {
+        kind: res.replay ? "replay" : "live",
+        label: res.replay ? `Replay · ${ckptLabel ?? replayCheckpoint}` : `Live · ${algorithm}`,
+        checkpointId: res.replay ? replayCheckpoint : undefined,
+      });
     } catch (err) {
       setStartError(err instanceof Error ? err.message : "Failed to start run");
     }
