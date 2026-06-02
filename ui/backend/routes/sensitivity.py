@@ -141,9 +141,13 @@ def _run_sensitivity(
 
     sweep = [by_name[n] for n in only] if only else list(project.dut_params)
 
-    # Baseline = per-param nominal, with explicit operating-point overrides applied.
+    # Baseline = per-param nominal, with explicit operating-point overrides
+    # applied (clamped into each param's resolved range so a hand-crafted ?at=
+    # can't push the baseline design outside its bounds).
     baseline = {p.name: _nominal(p) for p in project.dut_params}
-    baseline.update(overrides)
+    for name, v in overrides.items():
+        bp = by_name[name]
+        baseline[name] = min(max(v, float(bp.min_val)), float(bp.max_val))
 
     wrappers = _build_spicelib_wrappers(project)
     opt = Nevergrad_Spice_Single_Objective(setup_obj=project, spicelib_wrappers=wrappers)
@@ -169,10 +173,12 @@ def _run_sensitivity(
             delta = rel_delta * (hi - lo)
 
         pert = nominal + delta
-        if pert > hi:  # near the upper bound → backward difference
+        if pert > hi:  # near the upper bound → step downward instead
             pert = nominal - delta
-            delta = -delta
         pert = min(max(pert, lo), hi)
+        # Recompute delta from the *actual* step taken so the slope below matches
+        # the perturbation applied even when the value was clamped to a bound.
+        delta = pert - nominal
 
         device, kind = _parse_device_kind(p.name)
         entry: dict[str, Any] = {
@@ -180,6 +186,11 @@ def _run_sensitivity(
             "nominal": nominal, "delta": delta, "perturbed_value": pert,
             "baseline_metric": base_metric,
         }
+        if delta == 0:  # range too small to perturb without leaving bounds
+            entry["ok"] = False
+            entry["note"] = "parameter range too small to perturb"
+            results.append(entry)
+            continue
         try:
             perturbed = dict(baseline)
             perturbed[p.name] = pert

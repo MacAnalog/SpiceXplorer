@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useUIStore } from "@/stores/uiStore";
 import { api } from "@/lib/api";
@@ -63,6 +63,21 @@ export function DeviceInspector() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Reset all inspector state when the applied project changes — otherwise the
+  // selected spec/device and the `at` operating-point overrides keep keys from
+  // the previous project, which the backend would reject as unknown params.
+  const projectSig = useMemo(
+    () => (summary ? `${summary.name}|${dutParams.map((p) => p.name).join(",")}` : ""),
+    [summary, dutParams],
+  );
+  useEffect(() => {
+    setSpec("");
+    setDevice("");
+    setAt({});
+    setResult(null);
+    setError(null);
+  }, [projectSig]);
+
   // Default selections once the project is known.
   const effSpec = spec || specs[0]?.name || "";
   const effDevice = device || deviceIds[0] || "";
@@ -76,11 +91,19 @@ export function DeviceInspector() {
     setLoading(true);
     setError(null);
     try {
-      const params = scope === "device" ? deviceParams.map((p) => p.name) : undefined;
+      const deviceNames = deviceParams.map((p) => p.name);
+      const params = scope === "device" ? deviceNames : undefined;
+      // Only send overrides for the params on screen, so the computed baseline
+      // matches the visible sliders (and never leaks stale keys from another
+      // device). "All params" sweeps at the range midpoint, so it sends none.
+      const atPayload =
+        scope === "device"
+          ? Object.fromEntries(deviceNames.filter((n) => n in at).map((n) => [n, at[n]]))
+          : {};
       const res = await api.specSensitivity(effSpec, {
         yaml_path: yamlPath || undefined,
         params,
-        at,
+        at: atPayload,
         rel_delta: 0.05,
       });
       setResult(res);
