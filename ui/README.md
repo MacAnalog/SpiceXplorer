@@ -121,6 +121,7 @@ Navigate views via the activity-bar icons, the tab strip, or **⌘1–⌘7**. Vi
 - **New-project wizard** — 7-step form (Basic Info → PDK Rules → DUT Params w/ netlist upload → PVT → Testbenches → Target Specs → Optimizer) with a live YAML preview; generates + applies a `project_setup.yaml`. Launchable from Setup, the title-bar **+ New project**, or the ⌘K palette. Backed by `POST /api/project/generate`, `POST /api/project/parse-to-form`, `POST /api/netlist/parse`.
 - **Score Shaping view** — Spec selector + slider (range = target ± 3×range), live penalty curve, per-spec breakdown (linear/sigmoid), highest-penalty callout. Honors deep-linked spec selection.
 - **Optimize view** — Algorithm dropdown, budget input, preset checkpoint replay, Start/Stop with SSE streaming, score + metric convergence charts. **Algorithm/budget/seed are honored on live runs** (applied in-memory; YAML not rewritten). Live Start disables + steers to Replay when the PDK is absent.
+- **Run ▾ popover** — title-bar control to set the shared live-run overrides (algorithm/budget/seed) and start a run from any view; collapses to Stop + progress while a run is active, disables + steers to Replay when the PDK is absent. The Optimize toolbar shares the same `runConfig` (uiStore), so the two stay in sync.
 - **Right rail + bottom panel** — Live run progress, spec status chips, best params, and the optimizer log; keep updating across view changes (SSE hoisted into `runStore`).
 - **Run history** — Persisted run list with score sparklines; click a replay run to re-run.
 - **Command palette (⌘K)** — Switch view · jump to spec · jump to run · new project · stop run.
@@ -135,7 +136,6 @@ Navigate views via the activity-bar icons, the tab strip, or **⌘1–⌘7**. Vi
 
 ### Not Yet Implemented ❌
 
-- **Run ▾ overrides popover** — the backend honors algorithm/budget/seed overrides, but the title-bar Run popover UI to set them globally isn't built; overrides currently come from the Optimize toolbar only.
 - **Per-activity left rails** — the left rail is one always-on panel (project + runs + checkpoints); the spec'd per-activity rail variants (file tree, spec list, compare setup, …) are not split out yet.
 - **Schematic device inspector + sensitivity** — W/L sliders and a `GET /api/spec/{name}/sensitivity` endpoint are deferred: they need real finite-difference simulation data, which requires the PDK. Best built on the server.
 - **Apply from editor content** — "Apply" re-reads from disk; unsaved Monaco edits are lost on Apply.

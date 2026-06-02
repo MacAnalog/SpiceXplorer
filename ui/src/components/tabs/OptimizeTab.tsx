@@ -2,8 +2,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useRunStore } from "@/stores/runStore";
-import { useUIStore } from "@/stores/uiStore";
+import { useUIStore, RUN_ALGORITHMS } from "@/stores/uiStore";
 import { api } from "@/lib/api";
+import { launchLiveRun } from "@/lib/launchRun";
 import { COLORS } from "@/components/charts/PlotlyChart";
 import { ScoreConvergenceChart } from "@/components/charts/ScoreConvergenceChart";
 import { MetricConvergenceChart } from "@/components/charts/MetricConvergenceChart";
@@ -32,12 +33,12 @@ type ScoreFn = "sigmoid" | "linear";
  * the Start button is disabled and the user is steered to Replay.
  */
 export function OptimizeTab({ appConfig }: Props) {
-  const { summary, yamlPath, isApplied } = useProjectStore();
+  const { summary, isApplied } = useProjectStore();
   const { isReplay, isRunning, events, startRun, stopRun } = useRunStore();
   const env = useUIStore((s) => s.env);
+  const runConfig = useUIStore((s) => s.runConfig);
+  const setRunConfig = useUIStore((s) => s.setRunConfig);
 
-  const [algorithm, setAlgorithm] = useState("LhsDE");
-  const [runBudget, setRunBudget] = useState(200);
   const [scoreFn, setScoreFn] = useState<ScoreFn>("sigmoid");
   const [replayCheckpoint, setReplayCheckpoint] = useState<string>("");
   const [selectedMetric, setSelectedMetric] = useState<string>("");
@@ -60,20 +61,24 @@ export function OptimizeTab({ appConfig }: Props) {
 
   const handleStart = async () => {
     setStartError(null);
-    try {
-      const res = replayCheckpoint
-        ? await api.startRun({ replay: true, checkpoint_id: replayCheckpoint })
-        : await api.startRun({ yaml_path: yamlPath, budget: runBudget });
-      const ckptLabel = appConfig?.preset_checkpoints.find((c) => c.id === replayCheckpoint)?.label;
-      // startRun resets run state and opens the SSE stream (handled in the store).
-      startRun(res.run_id, res.replay, runBudget, {
-        kind: res.replay ? "replay" : "live",
-        label: res.replay ? `Replay · ${ckptLabel ?? replayCheckpoint}` : `Live · ${algorithm}`,
-        checkpointId: res.replay ? replayCheckpoint : undefined,
-      });
-    } catch (err) {
-      setStartError(err instanceof Error ? err.message : "Failed to start run");
+    // Replay is Optimize-specific (preset checkpoint dropdown); live runs go
+    // through the shared launcher so algorithm/budget/seed overrides are sent.
+    if (replayCheckpoint) {
+      try {
+        const res = await api.startRun({ replay: true, checkpoint_id: replayCheckpoint });
+        const ckptLabel = appConfig?.preset_checkpoints.find((c) => c.id === replayCheckpoint)?.label;
+        startRun(res.run_id, res.replay, runConfig.budget, {
+          kind: "replay",
+          label: `Replay · ${ckptLabel ?? replayCheckpoint}`,
+          checkpointId: replayCheckpoint,
+        });
+      } catch (err) {
+        setStartError(err instanceof Error ? err.message : "Failed to start run");
+      }
+      return;
     }
+    const res = await launchLiveRun();
+    if (!res.ok) setStartError(res.error ?? "Failed to start run");
   };
 
   const scoreRuns = useMemo(
@@ -109,14 +114,16 @@ export function OptimizeTab({ appConfig }: Props) {
         <ToolbarLabel>algorithm</ToolbarLabel>
         <select
           aria-label="Optimization algorithm"
-          value={algorithm}
-          onChange={(e) => setAlgorithm(e.target.value)}
+          value={runConfig.algorithm}
+          onChange={(e) => setRunConfig({ algorithm: e.target.value })}
           disabled={isRunning}
           className={selectCn("sm")}
         >
-          <option value="LhsDE">LhsDE</option>
-          <option value="LHSSearch">LHSSearch</option>
-          <option value="LogBFGSCMAPlus">LogBFGSCMAPlus</option>
+          {RUN_ALGORITHMS.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
         </select>
 
         <ToolbarLabel>budget</ToolbarLabel>
@@ -125,8 +132,8 @@ export function OptimizeTab({ appConfig }: Props) {
           type="number"
           min={10}
           max={5000}
-          value={runBudget}
-          onChange={(e) => setRunBudget(Number(e.target.value))}
+          value={runConfig.budget}
+          onChange={(e) => setRunConfig({ budget: Number(e.target.value) })}
           disabled={isRunning}
           className={selectCn("sm") + " w-[72px]"}
         />

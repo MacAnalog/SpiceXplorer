@@ -2,6 +2,27 @@ import { create } from "zustand";
 import type { AppConfig, EnvInfo } from "@/types/api";
 
 /**
+ * Ephemeral live-run overrides shared by the title-bar Run popover and the
+ * Optimize toolbar. Sent to POST /api/optimize/start and applied in-memory by
+ * the backend (optimizer_runner._apply_overrides) — the YAML on disk is never
+ * rewritten. `seed: null` means "let the optimizer pick" (no override sent).
+ */
+export interface RunConfig {
+  algorithm: string;
+  budget: number;
+  seed: number | null;
+}
+
+export const DEFAULT_RUN_CONFIG: RunConfig = {
+  algorithm: "LhsDE",
+  budget: 200,
+  seed: null,
+};
+
+/** Selectable Nevergrad algorithms (canonical list for the Run config UI). */
+export const RUN_ALGORITHMS = ["LhsDE", "LHSSearch", "LogBFGSCMAPlus"] as const;
+
+/**
  * Studio UI store — owns cross-view *navigation/selection* and shared
  * session data (app config, environment probe). Route (the URL) owns "which
  * view"; this store owns selection that deep-links *into* a view plus overlay
@@ -28,6 +49,9 @@ interface UIStore {
   commandOpen: boolean;
   wizardOpen: boolean;
 
+  // Shared live-run overrides (Run popover ⇄ Optimize toolbar)
+  runConfig: RunConfig;
+
   setAppConfig: (cfg: AppConfig | null) => void;
   setEnv: (env: EnvInfo | null) => void;
   setSelectedSpec: (name: string | null) => void;
@@ -42,6 +66,8 @@ interface UIStore {
   closeCommand: () => void;
   openWizard: () => void;
   closeWizard: () => void;
+  /** Merge a partial into the shared run config (algorithm/budget/seed). */
+  setRunConfig: (patch: Partial<RunConfig>) => void;
 }
 
 export const useUIStore = create<UIStore>((set) => ({
@@ -56,6 +82,7 @@ export const useUIStore = create<UIStore>((set) => ({
   bottomTab: "log",
   commandOpen: false,
   wizardOpen: false,
+  runConfig: DEFAULT_RUN_CONFIG,
 
   setAppConfig: (appConfig) => set({ appConfig }),
   setEnv: (env) => set({ env }),
@@ -70,4 +97,5 @@ export const useUIStore = create<UIStore>((set) => ({
   closeCommand: () => set({ commandOpen: false }),
   openWizard: () => set({ wizardOpen: true, commandOpen: false }),
   closeWizard: () => set({ wizardOpen: false }),
+  setRunConfig: (patch) => set((s) => ({ runConfig: { ...s.runConfig, ...patch } })),
 }));

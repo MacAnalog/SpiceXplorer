@@ -1,6 +1,7 @@
 "use client";
 import { Command, Plus } from "lucide-react";
 import { useUIStore } from "@/stores/uiStore";
+import { RunControl } from "./RunControl";
 
 /**
  * Top title bar: brand + "+ New project" + ⌘K command-palette trigger. The
@@ -32,6 +33,8 @@ export function StudioTitleBar() {
       </div>
 
       <div className="flex-1" />
+
+      <RunControl />
 
       <button
         type="button"
