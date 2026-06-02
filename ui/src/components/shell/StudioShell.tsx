@@ -11,6 +11,7 @@ import { RightRail } from "./RightRail";
 import { BottomPanel } from "./BottomPanel";
 import { StatusBar } from "./StatusBar";
 import { CommandPalette } from "@/components/overlays/CommandPalette";
+import { WizardOverlay } from "@/components/overlays/WizardOverlay";
 
 /**
  * Studio shell — composition root rendered by the `(studio)` route-group layout.
@@ -54,6 +55,7 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
       </div>
       <StatusBar />
       <CommandPalette />
+      <WizardOverlay />
     </div>
   );
 }

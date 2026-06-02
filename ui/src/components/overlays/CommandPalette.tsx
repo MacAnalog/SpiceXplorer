@@ -27,7 +27,8 @@ interface Command {
 export function CommandPalette() {
   const router = useRouter();
   const pathname = usePathname();
-  const { commandOpen, openCommand, closeCommand, setSelectedSpec, openRun } = useUIStore();
+  const { commandOpen, openCommand, closeCommand, setSelectedSpec, openRun, openWizard } =
+    useUIStore();
   const { summary, isApplied } = useProjectStore();
   const { history, isRunning, stopRun } = useRunStore();
 
@@ -87,6 +88,13 @@ export function CommandPalette() {
 
     // Actions
     cmds.push({
+      id: "action:new-project",
+      group: "Actions",
+      label: "New project…",
+      hint: "wizard",
+      run: () => openWizard(),
+    });
+    cmds.push({
       id: "action:stop",
       group: "Actions",
       label: "Stop run",
@@ -96,7 +104,7 @@ export function CommandPalette() {
     });
 
     return cmds;
-  }, [go, summary, isApplied, history, isRunning, setSelectedSpec, openRun, stopRun]);
+  }, [go, summary, isApplied, history, isRunning, setSelectedSpec, openRun, openWizard, stopRun]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

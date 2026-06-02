@@ -1,14 +1,16 @@
 "use client";
-import { Command } from "lucide-react";
+import { Command, Plus } from "lucide-react";
 import { useUIStore } from "@/stores/uiStore";
 
 /**
- * Top title bar: brand + ⌘K command-palette trigger. The run/PDK status lives in
- * the StatusBar. The ⌘K button opens the same palette the global ⌘K shortcut does
- * (see CommandPalette).
+ * Top title bar: brand + "+ New project" + ⌘K command-palette trigger. The
+ * run/PDK status lives in the StatusBar. The ⌘K button opens the same palette
+ * the global ⌘K shortcut does (see CommandPalette); "+ New project" opens the
+ * wizard overlay (also reachable from the palette).
  */
 export function StudioTitleBar() {
   const openCommand = useUIStore((s) => s.openCommand);
+  const openWizard = useUIStore((s) => s.openWizard);
   return (
     <header className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-panel px-3">
       <div className="flex items-baseline gap-2">
@@ -30,6 +32,17 @@ export function StudioTitleBar() {
       </div>
 
       <div className="flex-1" />
+
+      <button
+        type="button"
+        onClick={openWizard}
+        title="Create a new project with the wizard"
+        aria-label="New project"
+        className="flex items-center gap-1.5 rounded-md border border-border bg-panel px-2 py-1 text-[11px] text-fg transition hover:border-primary/40 hover:bg-hairline"
+      >
+        <Plus className="h-3 w-3" aria-hidden />
+        New project
+      </button>
 
       <button
         type="button"

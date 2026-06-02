@@ -24,8 +24,9 @@ interface UIStore {
   bottomOpen: boolean;
   bottomTab: "log";
 
-  // Overlays (⌘K palette, etc. — UI lands in a later phase)
+  // Overlays
   commandOpen: boolean;
+  wizardOpen: boolean;
 
   setAppConfig: (cfg: AppConfig | null) => void;
   setEnv: (env: EnvInfo | null) => void;
@@ -39,6 +40,8 @@ interface UIStore {
   setBottomTab: (tab: "log") => void;
   openCommand: () => void;
   closeCommand: () => void;
+  openWizard: () => void;
+  closeWizard: () => void;
 }
 
 export const useUIStore = create<UIStore>((set) => ({
@@ -52,6 +55,7 @@ export const useUIStore = create<UIStore>((set) => ({
   bottomOpen: false,
   bottomTab: "log",
   commandOpen: false,
+  wizardOpen: false,
 
   setAppConfig: (appConfig) => set({ appConfig }),
   setEnv: (env) => set({ env }),
@@ -64,4 +68,6 @@ export const useUIStore = create<UIStore>((set) => ({
   setBottomTab: (bottomTab) => set({ bottomTab }),
   openCommand: () => set({ commandOpen: true }),
   closeCommand: () => set({ commandOpen: false }),
+  openWizard: () => set({ wizardOpen: true, commandOpen: false }),
+  closeWizard: () => set({ wizardOpen: false }),
 }));
