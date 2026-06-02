@@ -78,7 +78,14 @@ def _make_streaming_optimizer(project: Project_Setup, state: RunState):
                 raise KeyboardInterrupt("stopped by user")
             result = super().optimization_step()
             params, score, metadata = result
-            fit = metadata.get("fit_summary", {}) if metadata else {}
+            # optimization_step() returns (params, score, fit_summary); the third
+            # element IS the fit_summary dict, keyed by spec name
+            # ({spec: {"curr_val", "score"}}) — not a wrapper with a "fit_summary"
+            # key. Reading metadata.get("fit_summary") always returned {}, so the
+            # right-rail spec status never populated on live runs. (Replay reads
+            # the same shape correctly via checkpoint_reader; sanity.py also
+            # iterates metadata directly.)
+            fit = metadata if isinstance(metadata, dict) else {}
             event = {
                 "iter": len(self.optimization_log),
                 "score": _safe_float(score),
@@ -86,7 +93,11 @@ def _make_streaming_optimizer(project: Project_Setup, state: RunState):
                     self.optimization_log[self.global_best_index].point.score
                     if len(self.optimization_log) > 0 else score
                 ),
-                "metrics": {k: _safe_float(v.get("curr_val")) for k, v in fit.items()},
+                "metrics": {
+                    k: _safe_float(v.get("curr_val"))
+                    for k, v in fit.items()
+                    if isinstance(v, dict)
+                },
                 "best_params": {k: _safe_float(v) for k, v in params.items()},
             }
             asyncio.run_coroutine_threadsafe(state.queue.put(event), state.loop)
