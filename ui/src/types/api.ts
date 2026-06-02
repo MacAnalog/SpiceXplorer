@@ -43,6 +43,38 @@ export interface TargetSpec {
   description: string | null;
 }
 
+export interface ParamSensitivity {
+  name: string;
+  device: string;
+  kind: string; // W | L | NG | bias | other
+  nominal: number;
+  delta: number;
+  perturbed_value: number;
+  baseline_metric: number | null;
+  perturbed_metric: number | null;
+  /** Absolute slope d(metric)/d(param). */
+  sensitivity: number | null;
+  /** Dimensionless elasticity (dmetric/metric)/(dparam/param). */
+  elasticity: number | null;
+  ok: boolean;
+  note: string | null;
+}
+
+export interface SensitivityResponse {
+  ok: boolean;
+  spec: string;
+  testbench: string | null;
+  goal: string | null;
+  target: number | null;
+  baseline_value: number | null;
+  baseline_score: number | null;
+  rel_delta: number;
+  n_sims: number;
+  params: ParamSensitivity[];
+  error: string | null;
+  elapsed_ms: number | null;
+}
+
 export interface ProjectSummary {
   name: string;
   description: string;

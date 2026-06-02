@@ -67,7 +67,7 @@ Overlays: CommandPalette (⌘K) · WizardOverlay (+ New project)
 | Path | Role |
 |---|---|
 | `ui/backend/main.py` | FastAPI app entry, CORS, logging setup |
-| `ui/backend/routes/` | One file per API group (config, project, score, optimize, checkpoint, schematic, sanity, netlist, env, xschem) |
+| `ui/backend/routes/` | One file per API group (config, project, score, optimize, checkpoint, schematic, sanity, netlist, env, xschem, sensitivity) |
 | `ui/backend/services/optimizer_runner.py` | Background thread + SSE queue for live/replay runs; `_apply_overrides` for ephemeral run config |
 | `ui/backend/services/env_probe.py` | Cheap ngspice + IHP PDK detection (no simulation) → `GET /api/env` |
 | `ui/backend/services/checkpoint_reader.py` | Unified CSV + JSON checkpoint loader |
@@ -126,7 +126,7 @@ Navigate views via the activity-bar icons, the tab strip, or **⌘1–⌘7**. Vi
 - **Run history** — Persisted run list with score sparklines; click a replay run to re-run.
 - **Command palette (⌘K)** — Switch view · jump to spec · jump to run · new project · stop run.
 - **Explore view** — Run A/B checkpoint selectors, overlaid convergence, metric scatter (X/Y), performance envelope, metric histogram, best design params, spec summary.
-- **Schematic view** — Xschem `.sch` hierarchy browser with symbol resolution.
+- **Schematic view** — Xschem `.sch` hierarchy browser with symbol resolution, plus a **device inspector**: pick a spec + device, set W/L (and bias/NG) operating points with sliders, and compute finite-difference sensitivity (`d(metric)/d(param)` + dimensionless elasticity) as a ranked bar chart. Backed by `GET /api/spec/{name}/sensitivity` (live SPICE — needs the PDK).
 - **Pipeline view** — Read-only DAG (Optimizer → DUT params → Testbenches → Specs) with clickable spec nodes that deep-link to Score Shaping.
 - **Health / sanity check** — One sim per testbench + a trial optimizer step; reports ngspice path, PDK verdict, per-testbench log tails.
 - **PDK-aware degradation** — `GET /api/env` drives the status-bar sim/PDK pill and gates live runs.
@@ -137,7 +137,6 @@ Navigate views via the activity-bar icons, the tab strip, or **⌘1–⌘7**. Vi
 ### Not Yet Implemented ❌
 
 - **Per-activity left rails** — the left rail is one always-on panel (project + runs + checkpoints); the spec'd per-activity rail variants (file tree, spec list, compare setup, …) are not split out yet.
-- **Schematic device inspector + sensitivity** — W/L sliders and a `GET /api/spec/{name}/sensitivity` endpoint are deferred: they need real finite-difference simulation data, which requires the PDK. Best built on the server.
 - **Apply from editor content** — "Apply" re-reads from disk; unsaved Monaco edits are lost on Apply.
 - **Score function toggle for live runs** — sigmoid vs linear is fixed by the YAML; no runtime switch.
 
@@ -287,6 +286,7 @@ rm -rf ui/.next
 | POST | `/api/sanity-check` | Health check: one sim per testbench + trial step; includes `pdk_ok`/`pdk_detail` |
 | GET | `/api/schematic` | Serve circuit SVG |
 | GET | `/api/xschem/{file,list,project,resolve}` | Xschem hierarchy browsing for the Schematic view |
+| GET | `/api/spec/{name}/sensitivity` | Finite-difference `d(metric)/d(param)` for one spec; `?params=` scopes the sweep, `?at=name:val,…` overrides the baseline operating point (live SPICE) |
 
 SSE events (`/api/optimize/stream/{id}`):
 

@@ -7,6 +7,7 @@ import { parseXschem } from "@/lib/xschem/parser";
 import { isSubcircuit } from "@/lib/xschem/render";
 import type { XschemFile, Instance } from "@/lib/xschem/types";
 import { SchematicViewer } from "@/components/schematic/SchematicViewer";
+import { DeviceInspector } from "@/components/schematic/DeviceInspector";
 
 interface LoadedSchematic {
   path: string;
@@ -345,36 +346,42 @@ export function SchematicTab() {
         </button>
       </div>
 
-      {/* Body */}
-      <div className="relative flex min-h-0 flex-1">
-        {!current && !loading && (
-          <EmptyHint
-            isApplied={isApplied}
-            projectFiles={projectFiles}
-            projectXschemDir={projectXschemDir}
-          />
-        )}
+      {/* Body: schematic viewer + device inspector */}
+      <div className="flex min-h-0 flex-1">
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+          {!current && !loading && (
+            <EmptyHint
+              isApplied={isApplied}
+              projectFiles={projectFiles}
+              projectXschemDir={projectXschemDir}
+            />
+          )}
 
-        {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-bg/70 text-sm text-muted">
-            Loading schematic…
-          </div>
-        )}
+          {loading && (
+            <div className="absolute inset-0 flex items-center justify-center bg-bg/70 text-sm text-muted">
+              Loading schematic…
+            </div>
+          )}
 
-        {error && (
-          <div className="absolute left-3 top-3 max-w-md rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-            {error}
-          </div>
-        )}
+          {error && (
+            <div className="absolute left-3 top-3 max-w-md rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+              {error}
+            </div>
+          )}
 
-        {current && (
-          <SchematicViewer
-            sch={current.parsed}
-            symbols={symbols}
-            navigableSymrefs={navigableSymrefs}
-            onNavigateInto={handleNavigateInto}
-          />
-        )}
+          {current && (
+            <SchematicViewer
+              sch={current.parsed}
+              symbols={symbols}
+              navigableSymrefs={navigableSymrefs}
+              onNavigateInto={handleNavigateInto}
+            />
+          )}
+        </div>
+
+        <aside className="w-[290px] shrink-0 overflow-hidden border-l border-border bg-panel">
+          <DeviceInspector />
+        </aside>
       </div>
     </div>
   );

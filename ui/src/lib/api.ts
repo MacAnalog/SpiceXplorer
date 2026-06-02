@@ -15,6 +15,7 @@ import type {
   GenerateProjectResponse,
   ParseProjectResponse,
   WizardForm,
+  SensitivityResponse,
 } from "@/types/api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -120,6 +121,30 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ yaml_path }),
     }),
+
+  // Finite-difference sensitivity of one spec to DUT params (live SPICE — needs PDK).
+  // `params` scopes the sweep (e.g. one device's W/L); `at` overrides the baseline
+  // operating point (absolute SI) so the inspector's sliders define the design point.
+  specSensitivity: (
+    spec: string,
+    opts: {
+      yaml_path?: string;
+      params?: string[];
+      at?: Record<string, number>;
+      rel_delta?: number;
+    } = {},
+  ) => {
+    const q = new URLSearchParams();
+    if (opts.yaml_path) q.set("yaml_path", opts.yaml_path);
+    if (opts.params?.length) q.set("params", opts.params.join(","));
+    if (opts.at && Object.keys(opts.at).length)
+      q.set("at", Object.entries(opts.at).map(([k, v]) => `${k}:${v}`).join(","));
+    if (opts.rel_delta != null) q.set("rel_delta", String(opts.rel_delta));
+    const qs = q.toString();
+    return req<SensitivityResponse>(
+      `/api/spec/${encodeURIComponent(spec)}/sensitivity${qs ? `?${qs}` : ""}`,
+    );
+  },
 
   // Wizard
   parseNetlist: async (file: File): Promise<NetlistParseResponse> => {
