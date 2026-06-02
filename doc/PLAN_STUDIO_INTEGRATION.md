@@ -1,6 +1,16 @@
 # SpiceXplorer UI — ★ Studio Integration Plan
 
-> Target: take the SpiceXplorer web UI from its current (already partially refactored) 4‑tab
+> **STATUS (mostly built — this doc is now historical/reference).** Phases 0–5 are implemented and
+> committed on `dev/ui`: env probe + PDK degradation, the App-Router Studio shell, right rail +
+> bottom panel + store-hosted SSE, run history, the ⌘K command palette + wizard launch, and the
+> read-only Pipeline view. A real bug was fixed along the way: live-run algorithm/budget/seed
+> overrides are now honored (`optimizer_runner._apply_overrides`). **Still open** (see §8 / the "Not
+> Yet Implemented" list in `ui/README.md`): the Run ▾ overrides popover UI, per-activity left-rail
+> variants, and the schematic device inspector + sensitivity endpoint (deferred — they need real
+> finite-difference sim data and thus the PDK; build on the server). For current architecture see
+> `CLAUDE.md` and `ui/README.md`; the phased reasoning below is kept for reference.
+>
+> Original target: take the SpiceXplorer web UI from its (then 4‑tab)
 > layout to the **★ Studio · interactive** workspace described in the design handoff.
 > This is a **delta plan**, not a rebuild — most of the shell, all six feature surfaces, the
 > wizard, and most backend routes already exist. The work is *re‑composition* (a persistent

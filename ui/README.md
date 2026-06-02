@@ -1,6 +1,8 @@
 # SpiceXplorer UI
 
-A web interface for the SpiceXplorer circuit optimization library. It provides interactive score shaping, live SPICE-backed optimization runs, and multi-run exploration — currently demonstrated on the cascode OTA case study with the IHP SG13G2 PDK.
+A web interface for the SpiceXplorer circuit optimization library. It is a **Studio workspace** — a persistent VS Code-style shell (activity bar, contextual left rail, tabbed center views, always-on run rail, command palette) — providing a guided project setup wizard, interactive score shaping, live SPICE-backed optimization runs, run history, and multi-run exploration. Demonstrated on the cascode OTA case study with the IHP SG13G2 PDK.
+
+> **Live SPICE needs the PDK.** Live optimization and the sanity check require both `ngspice` and the IHP `ihp-sg13g2` PDK (present on the research-group server). On a machine without the PDK the app detects this (`GET /api/env`), shows a **"PDK missing — replay only"** status pill, and disables live runs — while score shaping, checkpoint replay/compare, the wizard, and the pipeline view all work fully.
 
 ---
 
@@ -37,13 +39,27 @@ cd ui && npm run dev -- -p 4000
 
 ```
 Browser (localhost:4000)
-  └─ Next.js 15 (TypeScript, App Router)
+  └─ Next.js 15 (TypeScript, App Router — Studio shell)
         │ REST + SSE
   FastAPI (localhost:8000)
         │ Python imports
   spicexplorer.core + .optimization + .spice_engine
         │ subprocess
-  ngspice
+  ngspice  (+ IHP sg13g2 PDK, for live runs)
+```
+
+### Shell anatomy
+
+The app is one persistent workspace. `app/page.tsx` redirects to `/setup`; all real views live under the `app/(studio)/` route group. `(studio)/layout.tsx` renders the shell once and only the center segment swaps on navigation, so the rails and the live SSE stream persist across views:
+
+```
+StudioTitleBar          brand · + New project · ⌘K
+ActivityBar | LeftRail | TabStrip + center view        | RightRail
+(icons)     | (project,| (Setup/Scoring/Optimize/      | (live run:
+            |  runs,   |  Explore/Schematic/Pipeline)  |  iteration,
+            |  ckpts)  | BottomPanel (optimizer log)   |  specs, params)
+StudioStatusBar         active view · project · panel toggles · PDK/sim pill
+Overlays: CommandPalette (⌘K) · WizardOverlay (+ New project)
 ```
 
 ### Key files
@@ -51,15 +67,23 @@ Browser (localhost:4000)
 | Path | Role |
 |---|---|
 | `ui/backend/main.py` | FastAPI app entry, CORS, logging setup |
-| `ui/backend/routes/` | One file per API group (config, project, score, optimize, checkpoint, schematic) |
-| `ui/backend/services/optimizer_runner.py` | Background thread + SSE queue for live/replay runs |
+| `ui/backend/routes/` | One file per API group (config, project, score, optimize, checkpoint, schematic, sanity, netlist, env, xschem) |
+| `ui/backend/services/optimizer_runner.py` | Background thread + SSE queue for live/replay runs; `_apply_overrides` for ephemeral run config |
+| `ui/backend/services/env_probe.py` | Cheap ngspice + IHP PDK detection (no simulation) → `GET /api/env` |
 | `ui/backend/services/checkpoint_reader.py` | Unified CSV + JSON checkpoint loader |
+| `ui/backend/services/yaml_generator.py` | Wizard form ⇄ project YAML (generate + parse-to-form) |
 | `ui/app_config.json` | Preset checkpoint paths + default YAML (repo-root-relative) |
-| `ui/src/app/page.tsx` | 4-tab shell, tab navigation, app config fetch |
-| `ui/src/components/tabs/` | SetupTab, ScoreShapingTab, OptimizeTab, ExplorerTab |
+| `ui/src/app/page.tsx` | Redirect → `/setup` |
+| `ui/src/app/(studio)/layout.tsx` | Mounts `StudioShell`; persists across view navigation |
+| `ui/src/app/(studio)/<view>/page.tsx` | One thin segment per view (setup, scoring, optimize, compare, schematic, pipeline, health) |
+| `ui/src/components/shell/` | `StudioShell`, `ActivityBar`, `TabStrip`, `StudioTitleBar`, `StudioLeftRail`, `RightRail`, `BottomPanel`, `StatusBar`, `nav.ts` |
+| `ui/src/components/shell/nav.ts` | **Single source of truth** for the 7 views (id, label, route, icon, shortcut, gating) |
+| `ui/src/components/overlays/` | `CommandPalette` (⌘K), `WizardOverlay` (+ New project) |
+| `ui/src/components/tabs/` | The center views: SetupTab, ScoreShapingTab, OptimizeTab, ExplorerTab, SchematicTab, HealthTab, PipelineView |
+| `ui/src/components/wizard/` | `WizardShell` + 7 step components |
 | `ui/src/components/charts/` | Plotly-backed chart components (all SSR-disabled) |
-| `ui/src/components/ui/` | Shared primitives: Button, Badge, Panel, Select, Table, EmptyState |
-| `ui/src/stores/` | Zustand state: projectStore, runStore, explorerStore |
+| `ui/src/components/ui/` | Shared primitives: Button, Badge, Panel, Select, Table, EmptyState, SpecChip, Stat, Sparkline, … |
+| `ui/src/stores/` | Zustand state: `projectStore`, `runStore` (+ SSE + history), `explorerStore`, `uiStore` (nav/selection/overlays), `wizardStore` |
 | `ui/src/lib/api.ts` | Typed fetch client — all backend calls go through here |
 | `ui/src/types/api.ts` | TypeScript mirrors of all FastAPI response shapes |
 | `ui/.env.local` | `NEXT_PUBLIC_API_URL=http://localhost:8000` |
@@ -68,12 +92,23 @@ Browser (localhost:4000)
 
 ## Workflow
 
-| Tab | What it does |
+Navigate views via the activity-bar icons, the tab strip, or **⌘1–⌘7**. Views that need an applied project (Score Shaping, Optimize, Pipeline) stay disabled until you apply one on Setup.
+
+| View | What it does |
 |---|---|
-| **Setup** | Load a project YAML (example dropdown or file upload), edit in Monaco, validate, apply. Displays project metadata, testbenches, DUT params, and target specs. |
-| **Score Shaping** | Select a spec, drag a slider to explore metric values. Compares linear vs sigmoid penalty curves and shows per-spec breakdown. |
-| **Optimize** | Select algorithm and budget, then either start a live SPICE run or replay a preset checkpoint. Streams score and metric convergence in real time with live spec status chips. |
-| **Explorer** | Load two checkpoints (Run A / Run B), overlay convergence, plot metric scatter, inspect the performance envelope table and best design parameters. |
+| **Setup** | Load a project YAML (example dropdown or file upload) or **build one from scratch** with the 7-step wizard; edit in Monaco, validate, apply. Shows project metadata, testbenches, DUT params, target specs. |
+| **Score Shaping** | Select a spec, drag a slider to explore metric values. Compares linear vs sigmoid penalty curves with a per-spec breakdown. Deep-linkable from the ⌘K palette and the Pipeline view. |
+| **Optimize** | Select algorithm/budget, then start a live SPICE run or replay a preset checkpoint. Streams score + metric convergence; live run progress, spec status, and best params appear in the always-on right rail. Live Start is disabled (steered to Replay) when the PDK is absent. |
+| **Explore** | Load two checkpoints (Run A / Run B), overlay convergence, plot metric scatter, inspect the performance envelope and best design params. |
+| **Schematic** | Browse the project's Xschem `.sch` hierarchy with symbol resolution. |
+| **Pipeline** | Read-only DAG of the problem: Optimizer → DUT params → Testbenches → Target specs. Clicking a spec node deep-links into Score Shaping; spec nodes tint pass/fail live during a run. |
+| **Health** (gear) | On-demand sanity check — runs one simulation per testbench + a trial optimizer step, reporting ngspice path, PDK verdict, and per-testbench log tails. |
+
+### Shell features
+
+- **Run history** — every finished run (live or replay) is recorded in the left rail with a score sparkline, persisted to localStorage (metadata only). Click a replay run to re-run it.
+- **Command palette (⌘K)** — search to switch views, jump to a spec (→ Score Shaping), jump to a run (→ Optimize), start the new-project wizard, or stop a run.
+- **Right rail / bottom panel** — toggle from the status bar; both stay live during a run regardless of the active view (the SSE stream lives in `runStore`).
 
 ---
 
@@ -81,20 +116,30 @@ Browser (localhost:4000)
 
 ### Implemented ✅
 
-- **Setup tab** — Monaco YAML editor (600 ms debounced validation), example project dropdown, Upload, Validate, Apply. Right panel: project meta grid, testbenches, DUT params, target specs.
-- **Score Shaping tab** — Spec selector + slider (range = target ± 3×range), live penalty curve chart, per-spec breakdown table (linear/sigmoid), highest-penalty callout.
-- **Optimize tab** — Algorithm dropdown, budget input, preset checkpoint replay, Start/Stop with SSE streaming, progress bar, score + metric convergence charts, live spec status chips.
-- **Explorer tab** — Run A/B checkpoint selectors, overlaid convergence charts, metric scatter (X/Y selectors), performance envelope table, metric histogram, best design params, spec summary.
-- **UI primitives** — `Button`, `Badge` (5 variants), `Panel`/`PanelHeader`/`PanelBody`, `Select` + `selectCn()`, `Thead`/`Th`/`Tr`/`Td`, `EmptyState`.
-- **Logging** — `setup_loggers(console_level=...)` in the library; backend reads `LOG_LEVEL` env var. Log files written to `logs/SpiceXplorer_<timestamp>.log`.
-- **CORS** — Allows any `localhost:<port>` so the app works regardless of which port Next.js lands on.
+- **Studio shell** — App-Router route group with a persistent layout: activity bar, contextual left rail, tab strip, always-on right rail, collapsible bottom panel, status bar. Views are deep-linkable (`/setup`, `/scoring`, …) and switchable via ⌘1–⌘7.
+- **Setup view** — Monaco YAML editor (debounced validation), example dropdown, Upload, Validate, Apply, plus the **Create Wizard** toggle.
+- **New-project wizard** — 7-step form (Basic Info → PDK Rules → DUT Params w/ netlist upload → PVT → Testbenches → Target Specs → Optimizer) with a live YAML preview; generates + applies a `project_setup.yaml`. Launchable from Setup, the title-bar **+ New project**, or the ⌘K palette. Backed by `POST /api/project/generate`, `POST /api/project/parse-to-form`, `POST /api/netlist/parse`.
+- **Score Shaping view** — Spec selector + slider (range = target ± 3×range), live penalty curve, per-spec breakdown (linear/sigmoid), highest-penalty callout. Honors deep-linked spec selection.
+- **Optimize view** — Algorithm dropdown, budget input, preset checkpoint replay, Start/Stop with SSE streaming, score + metric convergence charts. **Algorithm/budget/seed are honored on live runs** (applied in-memory; YAML not rewritten). Live Start disables + steers to Replay when the PDK is absent.
+- **Right rail + bottom panel** — Live run progress, spec status chips, best params, and the optimizer log; keep updating across view changes (SSE hoisted into `runStore`).
+- **Run history** — Persisted run list with score sparklines; click a replay run to re-run.
+- **Command palette (⌘K)** — Switch view · jump to spec · jump to run · new project · stop run.
+- **Explore view** — Run A/B checkpoint selectors, overlaid convergence, metric scatter (X/Y), performance envelope, metric histogram, best design params, spec summary.
+- **Schematic view** — Xschem `.sch` hierarchy browser with symbol resolution.
+- **Pipeline view** — Read-only DAG (Optimizer → DUT params → Testbenches → Specs) with clickable spec nodes that deep-link to Score Shaping.
+- **Health / sanity check** — One sim per testbench + a trial optimizer step; reports ngspice path, PDK verdict, per-testbench log tails.
+- **PDK-aware degradation** — `GET /api/env` drives the status-bar sim/PDK pill and gates live runs.
+- **UI primitives** — `Button`, `Badge`, `Panel`, `Select` + `selectCn()`, `Table`, `EmptyState`, `SpecChip`, `Stat`, `Sparkline`, `Segmented`, `Slider`.
+- **Logging** — `setup_loggers(console_level=...)`; backend reads `LOG_LEVEL`. Files in `logs/SpiceXplorer_<timestamp>.log`.
+- **CORS** — Allows any `localhost:<port>`.
 
 ### Not Yet Implemented ❌
 
-- **Create Wizard** (highest priority) — Step-by-step form to generate a YAML from scratch: BasicInfo → PDKRules → DUT Params (with netlist upload) → PVT → Testbenches → Target Specs → Optimizer. Requires `POST /api/netlist/parse` and `POST /api/project/generate` backend routes, plus `ui/src/components/wizard/` frontend directory.
-- **Apply from editor content** — Currently "Apply" re-reads from disk; edits made in the Monaco editor that aren't saved to disk are lost on Apply.
-- **Algorithm selection wired to live run** — The algorithm dropdown in OptimizeTab is UI-only; the backend always uses the algorithm from the YAML.
-- **Score function toggle for live runs** — Sigmoid vs linear choice is fixed by YAML; no runtime switch exposed yet.
+- **Run ▾ overrides popover** — the backend honors algorithm/budget/seed overrides, but the title-bar Run popover UI to set them globally isn't built; overrides currently come from the Optimize toolbar only.
+- **Per-activity left rails** — the left rail is one always-on panel (project + runs + checkpoints); the spec'd per-activity rail variants (file tree, spec list, compare setup, …) are not split out yet.
+- **Schematic device inspector + sensitivity** — W/L sliders and a `GET /api/spec/{name}/sensitivity` endpoint are deferred: they need real finite-difference simulation data, which requires the PDK. Best built on the server.
+- **Apply from editor content** — "Apply" re-reads from disk; unsaved Monaco edits are lost on Apply.
+- **Score function toggle for live runs** — sigmoid vs linear is fixed by the YAML; no runtime switch.
 
 ---
 
@@ -224,17 +269,24 @@ rm -rf ui/.next
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/api/config` | App config (preset checkpoints, default YAML path) |
+| GET | `/api/env` | ngspice + IHP PDK probe → `{ngspice_ok, pdk_ok, live_runs_enabled, pdk_detail, …}` |
 | POST | `/api/project/load` | Load + parse a YAML file by path |
 | POST | `/api/project/validate` | Validate YAML text without applying |
+| POST | `/api/project/generate` | Wizard form → validated YAML (optionally save to disk) |
+| POST | `/api/project/parse-to-form` | YAML → wizard form (round-trip for "Edit in wizard") |
+| POST | `/api/netlist/parse` | Extract `.param` rows from an uploaded `.spice` netlist |
 | POST | `/api/score` | Compute sigmoid + linear penalties for given metric values |
-| POST | `/api/optimize/start` | Start live run or replay; returns `run_id` |
+| POST | `/api/optimize/start` | Start live run or replay; accepts `algorithm`/`budget`/`seed` overrides; returns `run_id` |
 | POST | `/api/optimize/stop/{run_id}` | Signal the run to stop |
 | GET | `/api/optimize/stream/{run_id}` | SSE stream of optimization events |
 | GET | `/api/checkpoint` | List all available checkpoints |
 | GET | `/api/checkpoint/{id}` | Load checkpoint data (scores, metrics, params) |
 | GET | `/api/checkpoint/{id}/envelope` | Best-ever per metric with pass/fail |
 | GET | `/api/checkpoint/{id}/scatter` | X/Y scatter points with feasibility |
+| DELETE | `/api/checkpoint/{id}` | Delete an autosaved checkpoint (presets are read-only) |
+| POST | `/api/sanity-check` | Health check: one sim per testbench + trial step; includes `pdk_ok`/`pdk_detail` |
 | GET | `/api/schematic` | Serve circuit SVG |
+| GET | `/api/xschem/{file,list,project,resolve}` | Xschem hierarchy browsing for the Schematic view |
 
 SSE events (`/api/optimize/stream/{id}`):
 

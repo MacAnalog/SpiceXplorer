@@ -69,11 +69,13 @@ Browser (localhost:4000)
   ngspice
 ```
 
-**Backend** (`ui/backend/`): thin adapter — no business logic. Routes mirror the API table in `ui/README.md`. `optimizer_runner.py` runs the optimizer in a background thread and pushes events to an `asyncio.Queue` via `run_coroutine_threadsafe`; the SSE endpoint drains it. Replay mode drip-feeds CSV rows at 50 ms intervals.
+**Backend** (`ui/backend/`): thin adapter — no business logic. Routes mirror the API table in `ui/README.md`. `optimizer_runner.py` runs the optimizer in a background thread and pushes events to an `asyncio.Queue` via `run_coroutine_threadsafe`; the SSE endpoint drains it. Replay mode drip-feeds CSV rows at 50 ms intervals. `services/env_probe.py` cheaply detects ngspice + the IHP PDK (no simulation) so the UI can degrade to replay when the PDK is absent.
 
-**Frontend** (`ui/src/`): three Zustand stores (`projectStore`, `runStore`, `explorerStore`) hold all cross-tab state. `lib/api.ts` is the single typed fetch client — all backend calls go through it. `types/api.ts` mirrors every FastAPI response shape in TypeScript.
+**Frontend** (`ui/src/`): the app is a **Studio shell** — a persistent VS Code-style workspace, not a tab bar. `app/page.tsx` redirects to `/setup`; the real views live under the `app/(studio)/` route group, where `(studio)/layout.tsx` renders `StudioShell` (activity bar + left rail + tab strip + right rail + bottom panel + status bar + overlays) and each `<view>/page.tsx` segment renders one center view. Because a layout doesn't remount across sibling segments, the rails, status bar, and the live SSE stream survive navigation between views.
 
-Charts (`components/charts/`) all use `react-plotly.js` via a shared `PlotlyChart.tsx` base with `dynamic(..., { ssr: false })` — same pattern for the Monaco editor. Both must stay SSR-disabled.
+Five Zustand stores hold cross-view state: `projectStore` (loaded/applied project), `runStore` (the active run **and** the SSE `EventSource`, hoisted out of components so a run keeps streaming across views, plus `history` persisted to localStorage), `explorerStore` (compare A/B), `uiStore` (navigation selection: `selectedSpec`/`selectedRunId`, panel toggles, `commandOpen`/`wizardOpen`), and `wizardStore` (the new-project wizard form). `lib/api.ts` is the single typed fetch client; `types/api.ts` mirrors every FastAPI response shape.
+
+`components/shell/` holds the shell pieces and `nav.ts` (the single source of truth for the 7 views — adding/renaming a view happens there only). `components/overlays/` holds `CommandPalette` (⌘K) and `WizardOverlay`. Charts (`components/charts/`) all use `react-plotly.js` via a shared `PlotlyChart.tsx` base with `dynamic(..., { ssr: false })` — same pattern for the Monaco editor. Both must stay SSR-disabled.
 
 ## Non-Obvious Constraints
 
@@ -85,7 +87,13 @@ Charts (`components/charts/`) all use `react-plotly.js` via a shared `PlotlyChar
 
 **Stale `.next` cache**: Running `npm run build` leaves production chunks that break the dev server. Delete `ui/.next` before restarting after a build.
 
-**`ws_root` in YAML**: The cascode example uses an absolute machine-specific path. It must be updated to the local checkout before running the example.
+**`ws_root` in YAML**: The example `project_setup.yaml` files use an absolute path (`/home/noorizad/...`) pointing at the **research-group server**, which is the primary dev/run target. Leave them as-is for server work. Live SPICE runs and the sanity check only work where ngspice **and** the IHP `ihp-sg13g2` PDK are installed (the server); on a PDK-less machine they fail by design and the UI shows "PDK missing — replay only".
+
+**PDK-aware degradation**: `GET /api/env` reports `{ngspice_ok, pdk_ok, live_runs_enabled, ...}`. When `pdk_ok` is false the status bar shows the replay-only pill and OptimizeTab disables live Start (steering to Replay). Score Shaping, Compare/Explore on cached checkpoints, the wizard, and the Pipeline view all work without the PDK.
+
+**Run-config overrides are ephemeral**: OptimizeTab's algorithm/budget/seed are sent to `POST /api/optimize/start` and applied in-memory to the loaded `Project_Setup` (`optimizer_runner._apply_overrides`) — the YAML on disk is never rewritten.
+
+**App-Router typed routes**: `next.config.mjs` sets `typedRoutes: true`, so `router.push("/foo")` needs `"/foo" as Route` (import `type { Route } from "next"`).
 
 ## Key Files for Common Tasks
 
@@ -95,5 +103,10 @@ Charts (`components/charts/`) all use `react-plotly.js` via a shared `PlotlyChar
 | Add a new API endpoint | `ui/backend/routes/` + `ui/src/lib/api.ts` + `ui/src/types/api.ts` |
 | Change scoring math | `src/spicexplorer/core/utils.py` + `ui/backend/services/score_service.py` |
 | Add a new chart | `ui/src/components/charts/` — extend `PlotlyChart.tsx` |
+| Add / rename a Studio view | `ui/src/components/shell/nav.ts` + new `ui/src/app/(studio)/<view>/page.tsx` |
+| Change the shell layout | `ui/src/components/shell/StudioShell.tsx` (+ ActivityBar/TabStrip/RightRail/BottomPanel/StatusBar) |
+| Command palette / ⌘K | `ui/src/components/overlays/CommandPalette.tsx` |
+| Live-run SSE / run history | `ui/src/stores/runStore.ts` |
 | Demo preset checkpoints | `ui/app_config.json` (repo-root-relative paths) |
 | Reference optimization run | `examples/OTA/cascode/ihp-sg13g2/sizing/nevergrad_single_obj_opt.py` |
+| Full Studio migration plan | `doc/PLAN_STUDIO_INTEGRATION.md` |
