@@ -73,6 +73,9 @@ export const api = {
     replay?: boolean;
     checkpoint_id?: string;
     budget?: number;
+    /** Ephemeral live-run overrides (ignored for replay). */
+    algorithm?: string;
+    seed?: number;
   }) =>
     req<RunStartResponse>("/api/optimize/start", {
       method: "POST",

@@ -36,6 +36,8 @@ class RunState:
     thread: threading.Thread | None = None
     is_replay: bool = False
     checkpoint_id: str | None = None
+    algorithm: str | None = None
+    seed: int | None = None
     done: bool = False
 
 
@@ -94,11 +96,45 @@ def _make_streaming_optimizer(project: Project_Setup, state: RunState):
     return _StreamingOpt(setup_obj=project, spicelib_wrappers=spicelib_wrappers)
 
 
+def _apply_overrides(
+    project: Project_Setup,
+    *,
+    run_id: str,
+    budget: int | None,
+    algorithm: str | None,
+    seed: int | None,
+) -> None:
+    """Apply ephemeral run-config overrides to the in-memory project.
+
+    These mutate the loaded Project_Setup only — the YAML on disk is untouched —
+    so the Run popover's algorithm/budget/seed actually take effect on a live run
+    (previously they were silently ignored; the optimizer always used the YAML's
+    optimizer_config).
+    """
+    cfg = project.optimizer_config
+    if budget and budget > 0 and budget != cfg.budget:
+        logger.info("[run %s] override budget %s -> %s", run_id[:8], cfg.budget, budget)
+        cfg.budget = budget
+    if algorithm and algorithm != cfg.name:
+        logger.info("[run %s] override algorithm %s -> %s", run_id[:8], cfg.name, algorithm)
+        cfg.name = algorithm
+    if seed is not None and seed != cfg.random_seed:
+        logger.info("[run %s] override seed %s -> %s", run_id[:8], cfg.random_seed, seed)
+        cfg.random_seed = seed
+
+
 def _run_live(state: RunState, project_path: str) -> None:
     logger.info("[run %s] starting live run — project: %s", state.run_id[:8], project_path)
     try:
         logger.info("[run %s] loading project YAML", state.run_id[:8])
         project = Project_Setup.from_yaml(project_path)
+        _apply_overrides(
+            project,
+            run_id=state.run_id,
+            budget=state.budget,
+            algorithm=state.algorithm,
+            seed=state.seed,
+        )
         logger.info("[run %s] building optimizer", state.run_id[:8])
         opt = _make_streaming_optimizer(project, state)
         logger.info("[run %s] parameterizing", state.run_id[:8])
@@ -160,6 +196,8 @@ def start_run(
     checkpoint_id: str | None = None,
     checkpoint_path: Path | None = None,
     budget: int = 200,
+    algorithm: str | None = None,
+    seed: int | None = None,
     loop: asyncio.AbstractEventLoop,
 ) -> str:
     run_id = str(uuid.uuid4())
@@ -171,6 +209,8 @@ def start_run(
         budget=budget,
         is_replay=replay,
         checkpoint_id=checkpoint_id,
+        algorithm=algorithm,
+        seed=seed,
     )
     _runs[run_id] = state
 

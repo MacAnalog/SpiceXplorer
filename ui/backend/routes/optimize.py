@@ -20,6 +20,10 @@ class StartRequest(BaseModel):
     replay: bool = False
     checkpoint_id: str | None = None
     budget: int = 200
+    # Ephemeral live-run overrides (applied in-memory to the loaded project; the
+    # YAML on disk is never rewritten). Ignored for replay runs.
+    algorithm: str | None = None
+    seed: int | None = None
 
 
 @router.post("/optimize/start")
@@ -41,6 +45,8 @@ async def start_run(body: StartRequest, request: Request):
         checkpoint_id=body.checkpoint_id,
         checkpoint_path=checkpoint_path,
         budget=body.budget,
+        algorithm=body.algorithm,
+        seed=body.seed,
         loop=loop,
     )
     return {"run_id": run_id, "replay": body.replay}
