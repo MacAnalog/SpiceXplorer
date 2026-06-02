@@ -10,6 +10,7 @@ import {
   Zap,
   Compass,
   CircuitBoard,
+  Workflow,
   Activity,
   type LucideIcon,
 } from "lucide-react";
@@ -20,6 +21,7 @@ export type StudioViewId =
   | "optimize"
   | "compare"
   | "schematic"
+  | "pipeline"
   | "health";
 
 export interface StudioView {
@@ -46,6 +48,7 @@ export const PRIMARY_VIEWS: StudioView[] = [
   { id: "optimize", label: "Optimize", path: "/optimize", icon: Zap, shortcut: "3", requiresProject: true },
   { id: "compare", label: "Explore", path: "/compare", icon: Compass, shortcut: "4" },
   { id: "schematic", label: "Schematic", path: "/schematic", icon: CircuitBoard, shortcut: "5" },
+  { id: "pipeline", label: "Pipeline", path: "/pipeline", icon: Workflow, shortcut: "6", requiresProject: true },
 ];
 
 /** Settings/diagnostics — reached via the ActivityBar gear (the Health check). */
@@ -54,7 +57,7 @@ export const SETTINGS_VIEW: StudioView = {
   label: "Health",
   path: "/health",
   icon: Activity,
-  shortcut: "6",
+  shortcut: "7",
 };
 
 export const ALL_VIEWS: StudioView[] = [...PRIMARY_VIEWS, SETTINGS_VIEW];

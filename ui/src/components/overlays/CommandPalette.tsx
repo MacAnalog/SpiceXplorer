@@ -129,8 +129,8 @@ export function CommandPalette() {
         closeCommand();
         return;
       }
-      // ⌘1..6 switch view — but not while typing in an input/editor.
-      if (mod && /^[1-6]$/.test(e.key)) {
+      // ⌘1..7 switch view — but not while typing in an input/editor.
+      if (mod && /^[1-7]$/.test(e.key)) {
         const target = e.target as HTMLElement | null;
         const tag = target?.tagName?.toLowerCase();
         if (tag === "input" || tag === "textarea" || target?.isContentEditable) return;
