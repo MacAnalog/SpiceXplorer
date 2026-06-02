@@ -4,10 +4,12 @@ import json
 import torch
 import numpy        as np
 import plotly.graph_objects as go
+from itertools import product
+from copy import deepcopy
 
-from    typing      import Dict, List, Tuple, Any, Mapping
+from    typing      import Dict, List, Tuple, Any, Mapping, Optional, Union
 from    tqdm        import tqdm
-from    abc         import ABC, abstractmethod
+from    abc         import ABC, abstractmethod 
 from    pathlib     import Path
 from    spicelib    import RawRead
 from    dacite      import from_dict, Config
@@ -15,7 +17,8 @@ from    dataclasses import asdict
 from    datetime    import datetime
 from    sympy       import Expr
 from    time        import sleep
-
+from    dataclasses import dataclass
+from    collections import defaultdict
 
 from spicelib.sim.run_task   import RunTask   as SpicelibRunTaskClass
 
@@ -85,6 +88,7 @@ class Base_Optimizer(ABC):
     # ----------------------------
     # --- Abstract Methods ---
     # ----------------------------
+    
     @abstractmethod
     def _create_optimizer_obj(self) -> bool:
         """Instantiate the self.optimizer object based on the algorithm used (e.g., Nevergrad, Ax BO, Scikit, Torch Models, etc)."""
@@ -113,7 +117,15 @@ class Base_Optimizer(ABC):
     @abstractmethod
     def plot_solution(self, parameterization: Dict[str, float], **kwargs):
         pass
-
+    # ----------------------------
+    # --- Helper class for PVT
+    # ----------------------------
+    @dataclass
+    class SimulationRun:
+        wrapper_name: str
+        base_testbench: str
+        pvt_name: Optional[str] = None
+        pvt_corner: Optional[str] = None
     # ----------------------------
     # --- Core Methods
     # ----------------------------
@@ -456,34 +468,70 @@ class Spice_Base_Optimizer(Base_Optimizer):
     """ Base class for optimizers that use SPICE simulations."""
     def __init__(self,  
                 setup_obj: Project_Setup,
-                spicelib_wrappers : Dict[str, NGSpice_Wrapper]):
+                spicelib_wrappers : Dict[str, NGSpice_Wrapper],
+                include_pvt = False
+                ):
         super().__init__(setup_obj = setup_obj)
         self.spicelib_wrappers = spicelib_wrappers
-        self.__post_init__()
+        self.__post_init__(include_pvt = include_pvt)
 
-    def __post_init__(self):
+    def __post_init__(self, include_pvt : bool):
         # ----------------------------------------
         # Update the tb parameters
         # ----------------------------------------
-        for tb in self.setup_obj.testbenches:
-            tb_params = {param.name : param.get_val() for param in tb.params if param.has_val()}
-            if tb_params:
-                logger.info(f"updating the parameters for testbench {tb.name} with the following values:")
-                for param_name, param_val in tb_params.items():
-                    logger.info(f"\t{param_name}: {param_val}")
-                logger.info("")
-            self.spicelib_wrappers[tb.name].update_params(parameterization=tb_params)
-            logger.info(f"parameter update is compeleted for testbench {tb.name}")
+        self.runs_by_tb = defaultdict(list)
+        if include_pvt:
+            for tb, corner in product(self.setup_obj.testbenches, self.setup_obj.pvt_corners):
+                if not tb.enable:          # ← add this check
+                    return
+                if not corner.enable: 
+                    return
+                tb_pvt = f"{tb.name}_{corner.name}"
+                self.runs_by_tb[tb.name].append(self.SimulationRun(
+                wrapper_name=tb_pvt,
+                base_testbench=tb.name,
+                pvt_name=corner.name,
+                pvt_corner = corner.corner))
+                self._update_testbench(tb=tb, wrapper_name = tb_pvt, corner = corner)
+            
+        else:
+            for tb in self.setup_obj.testbenches:
+                if not tb.enable:          # ← add this check
+                    return
+                self._update_testbench(tb=tb, wrapper_name = tb.name, corner = None)
         # ----------------------------------------
     
     # --- Helper Methods (only in child class) ---
+    def _update_testbench(self, tb : TestbenchParams, wrapper_name: str, corner = None):
+        
+        tb_params = {param.name : param.get_val() for param in tb.params if param.has_val()}
+        if corner is not None:
+            corner_params = {
+            "temp": corner.temp,
+            "corner": corner.corner,
+            "supply": corner.supply,
+        }
+            all_params = {**tb_params, **corner_params}
+
+        else:
+            all_params = tb_params
+
+        if all_params:
+            logger.info(f"updating the parameters for testbench {tb.name} with the following values:")
+            for param_name, param_val in all_params.items():
+                logger.info(f"\t{param_name}: {param_val}")
+            logger.info("")
+        self.spicelib_wrappers[wrapper_name].update_params(parameterization=all_params) #GOTTA EDIT THE UPDATE PARAM LATER
+        logger.info(f"parameter update is compeleted for testbench {wrapper_name}")
+
     def simulate_circuit(self, parameterization: Dict[str, float]) -> Dict[str, RawRead]:
+
         logger.debug("Simulating the circuit with the given parameterization")
         results :  Dict[str, RawRead] = {}
         run_task_lst : Dict[str, SpicelibRunTaskClass] = {}
         tb_idx = 0
-
         for tb, wrapper in self.spicelib_wrappers.items():
+
             tb_idx += 1
             logger.debug(f"\t({tb_idx} / {len(self.setup_obj.testbenches)}) Testbench: {tb}")
             
@@ -658,6 +706,59 @@ class Spice_Base_Optimizer(Base_Optimizer):
         logger.debug("✅ Clean up completed for all SPICE wrappers.")
         logger.debug("")
 
+    ###---- Helper for this class only (for PVT) ----
+    def simulate_circuit_by_selected_tb(self, parameterization: Dict[str, float], testbench_names:List[str]) -> Dict[str, RawRead]:
+
+        logger.debug("Simulating the circuit with the given parameterization")
+        results :  Dict[str, RawRead] = {}
+        run_task_lst : Dict[str, SpicelibRunTaskClass] = {}
+        tb_idx = 0
+        for tb in testbench_names:
+        #for tb, wrapper in self.spicelib_wrappers.items():
+            wrapper = self.spicelib_wrappers[tb]
+            tb_idx += 1
+            logger.debug(f"\t({tb_idx} / {len(self.setup_obj.testbenches)}) Testbench: {tb}")
+            
+            wrapper.update_params(parameterization=parameterization)
+
+            if not self.setup_obj.parallel_sim:
+                logger.debug(f"parallel_sim: FALSE -> Using run_and_wait method")
+                curr_raw, curr_log, task_name = wrapper.run_and_wait(exe_log=True)
+        
+                if curr_raw is None:
+                    logger.critical("Something went wrong during simulation as no RAW file was generated")
+                    raise RuntimeError("Something went wrong during simulation as no RAW file was generated")
+                
+                results[tb] = curr_raw
+
+            else:               
+                logger.debug(f"parallel_sim: TRUE -> Using run_and_pass method")
+                run_task = wrapper.run_and_pass(exe_log=True)
+                run_task_lst[tb] = run_task
+
+        if self.setup_obj.parallel_sim:
+            sims_done_flag : bool = False
+            logger.debug("Waiting for tasks to finish.")
+            while not sims_done_flag:
+                status = [not run_task.is_alive() for run_task in run_task_lst.values()]
+                sims_done_flag = all(status)
+                sleep(0.01)
+                pass # wait so its done
+            logger.debug("All tasks completed.")
+            for tb in testbench_names:
+            #for tb, wrapper in self.spicelib_wrappers.items():
+                wrapper.read_and_save_task_outputs(task=run_task_lst[tb])
+        return results
+    
+    def get_tb_by_corner(self, corners_list: list[str]) -> list[str]:
+        #---- Get the pvt testbench's name that have the require corner for simulation purpose
+        tb_list: list[str] = []
+        for tb, corners in self.runs_by_tb.items():
+            for corner in corners:
+                if corner.pvt_corner in corners_list:
+                    tb_list.append(corner.wrapper_name)
+        return tb_list
+    
 # ------------------------------------------------
 # A.1 [ABSTRACT] Bode Fitter
 # ------------------------------------------------
@@ -728,7 +829,7 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
         logger.debug(f"\tmetric_value = {fitness_score}")
         logger.debug(f"\t\t- mag_loss : {mag_loss}")
         logger.debug(f"\t\t- phase_loss : {phase_loss}")
-
+ 
         self.clean_up(delete_raw_only=True)
 
         return np.float64(fitness_score), fit_summary
@@ -814,13 +915,35 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
             labels=['Target', 'Optimized']
             )
         
+
+class PVT_simulation(Spice_Base_Optimizer):
+    def __init__(self, 
+                 setup_obj: Project_Setup,
+                 spicelib_wrappers: Dict[str, NGSpice_Wrapper],
+                 include_pvt: bool = False):
+        super().__init__(setup_obj = setup_obj)
+        self.spicelib_wrappers = spicelib_wrappers
+        self.target_specs: ListTargetSpec = setup_obj.optimizer_config.target_specs
+        #self.__post_init__(include_pvt = include_pvt)
+    #def __post_init__(self, include_pvt: bool = False):
+    def run_tt_corner(self, include_pvt: bool):
+        if include_pvt:
+            for target in self.target_specs.enabled_targets():
+                run_list = self.runs_by_tb[target.testbench]
+                for corner in run_list:
+                    if run_list[corner.pvt_corner] == 'tt':
+                        print("check", corner.pvt_name)
+
+        
+
 # ------------------------------------------------
-# A.2 [ABSTRACT] Constraint Satisfaction
+# A.2 [ABSTRACT] Constraint Satisfaction with PVT 
 # ------------------------------------------------
 class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
     def __init__(self,
                  setup_obj: Project_Setup,
-                 spicelib_wrappers : Dict[str, NGSpice_Wrapper]):
+                 spicelib_wrappers : Dict[str, NGSpice_Wrapper],
+                 include_pvt : bool = False):
         """ 
         A Concrete implementation of Spice_Base_Optimizer that evaluates a circuit 
         against a list of TargetSpecs.
@@ -830,51 +953,114 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
         2. Extract scalar metrics defined in TargetSpecs.
         3. Calculate a scalar fitness score (Penalty only).
         """
-        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers)
+        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers, include_pvt= include_pvt)
         self.target_specs: ListTargetSpec = setup_obj.optimizer_config.target_specs
         logger.info(f"Initialized the Nevergrad_Spice_Multi_Spec_Optimizer with {len(self.target_specs.targets)} target specs")
-    
+        self.include_pvt = include_pvt
+
+    def all_specs_pass (self, fit_summary: Dict[str, Any]) -> bool:
+        for spec_name, spec_info in fit_summary.items():
+            if spec_info['score'] < 0:
+                return False
+        return True
+
     # --- Overwriting the Abstract Methods ---
     def evaluate(self, parameterization: Dict[str, float], append_to_log: bool = True) ->  Tuple[np.floating, Dict[str, Any]]:
         """
         Evaluate the given parameterization by running a SPICE simulation,
         computing the fitness score, and returning it as np.float64 plus a metadata dictionary.
         """
-        # 1 - Run a SPICE simulation
+        # 1 - Get the Corner run if have PVT 
         # ---------------------------------------------------------------
-        _ = self.simulate_circuit(parameterization=parameterization)
+        tt_corner = ['tt']
+        #self.include_pvt = False
+        stage_check = 0
+        if self.include_pvt:
+            #---- TT CORNER only
+            tt_testbenches = self.get_tb_by_corner(tt_corner)
+
+            _ = self.simulate_circuit_by_selected_tb(parameterization=parameterization, testbench_names= tt_testbenches)
+            fitness_score, fit_summary = self.score_and_summary(parameterization=parameterization)
+            stage_check = 0
+            if not self.all_specs_pass(fit_summary):
+                fitness_score = -500 + fitness_score
+                # --- Log results ---
+                if append_to_log:
+                    self.optimization_log.append(OptimizationLogEntry(
+                        OptimizationPoint(
+                            params=parameterization, 
+                            score=fitness_score, 
+                        ),
+                        fit_summary=fit_summary, 
+                        log_file={wrapper.testbench_name: wrapper.curr_log for wrapper in self.spicelib_wrappers.values() if wrapper.curr_log is not None}
+                        ))
+                    
+                return fitness_score, fit_summary
+            
+            #------- if the design pass the TT corner then go to check SS and FF corner -------------
+            else:
+                ss_ff_testbench = self.get_tb_by_corner(['ss', 'ff'])
+                _ = self.simulate_circuit_by_selected_tb(parameterization=parameterization, testbench_names= tt_testbenches)
+                fitness_score, fit_summary = self.score_and_summary(parameterization=parameterization)
+                stage_check = 1
+                if not self.all_specs_pass(fit_summary):
+                    fitness_score = -50 + fitness_score
+                    # --- Log results ---
+                    if append_to_log:
+                        self.optimization_log.append(OptimizationLogEntry(
+                            OptimizationPoint(
+                                params=parameterization, 
+                                score=fitness_score, 
+                            ),
+                            fit_summary=fit_summary, 
+                            log_file={wrapper.testbench_name: wrapper.curr_log for wrapper in self.spicelib_wrappers.values() if wrapper.curr_log is not None}
+                            ))
+                    return fitness_score, fit_summary
+                else: 
+                    fitness_score = fitness_score + 1000
+                    return fitness_score, fit_summary
+            #---- SS/FF CORNER
+
+            #---- Other CORNER
+    
+        # 1 - Run a SPICE simulation for PVT or not
+        # ---------------------------------------------------------------
+
+        else:
+            _ = self.simulate_circuit(parameterization=parameterization)
+            fit_score, fit_summary = self.score_and_summary(parameterization=parameterization)
+            return fit_score, fit_summary
+
+
+    def score_and_summary(self, parameterization: Dict[str, float], append_to_log: bool = True) -> Tuple[np.floating, Dict[str, Any]]:
 
         # 2 - Extract performance metrics
         # ---------------------------------------------------------------
         # have to make sure to use the correct plot type
         performance_array = {}
+        pvt_summary = {}
         for target in self.target_specs.enabled_targets():
-            performance_array.update(
-                self.spicelib_wrappers[target.testbench].extract_scalar_variable_from_raw(target.name, plot_type=target.get_equivalent_ngspice_plot_type())
-            )
+            run_list = self.runs_by_tb[target.testbench]
+            corner_val = []
+            for corner in run_list:
+                tb_name = self.spicelib_wrappers[corner.wrapper_name]
+                corner_performance = tb_name.extract_scalar_variable_from_raw(target.name, plot_type=target.get_equivalent_ngspice_plot_type())
+                if corner.wrapper_name not in performance_array:
+                    performance_array[corner.wrapper_name] = {}
+                performance_array[corner.wrapper_name].update(corner_performance)
 
-        # 3 - Compute the fitness of the performance metrics
-        # ---------------------------------------------------------------
+            # 3 - Compute the fitness of the performance metrics for each corner
+            # ---------------------------------------------------------------
+        #print("FINAL LIST", performance_array)
         fitness_score, fit_summary = self.compute_fitness(performance_array=performance_array)
 
-        # --- Log results ---
-        if append_to_log:
-            self.optimization_log.append(OptimizationLogEntry(
-                OptimizationPoint(
-                    params=parameterization, 
-                    score=fitness_score, 
-                ),
-                fit_summary=fit_summary, 
-                log_file={wrapper.testbench_name: wrapper.curr_log for wrapper in self.spicelib_wrappers.values() if wrapper.curr_log is not None}
-                ))
 
         logger.debug(f"finished the trial evaluation.... summary")
         logger.debug(f"\tmetric_value = {fitness_score}")
 
         self.clean_up(delete_raw_only=True)
-
+        #print("HIIIII",fitness_score, fit_summary)
         return fitness_score, fit_summary
-
     def compute_fitness(self, performance_array: Dict[str, float | np.float64 | torch.Tensor]) -> Tuple[np.float64, Dict[str, Any]]:
         """ Compute the fitness based on the performance metrics extracted from SPICE simulations and the target specs. """
         # Initialize variables
@@ -882,38 +1068,47 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
         penalty     : np.float64 = np.float64(0.0)
         total_score : np.float64 = np.float64(0.0)
         fit_summary : Dict[str, Any] = {}
-
+        
         # Iterate over each target specification
         # ------------------------------------------------------------------------------
-        for spec in self.target_specs.enabled_targets():
-            spec_fitness: np.float64 = np.float64(0.0)
-            # a - Compute the spec score
-            if spec.name in performance_array and performance_array[spec.name] is not None and not np.isnan(performance_array[spec.name]):
-                spec_fitness = self.compute_fitness_for_spec(curr_val=performance_array[spec.name], target_spec=spec)
-                spec_fitness = np.clip(spec_fitness, -1 * MAX_PENALTY, MAX_REWARD) # cap the score to avoid overflow
-            else:
-                if self.verbose:
-                    logger.debug(f"Target spec name '{spec.name}' not found in performance array keys: {list(performance_array.keys())}")
-                    logger.debug(f"assigning large penalty to the {spec.name} spec")
-                spec_fitness = -1*np.float64(spec.weight) if spec.error_type==Error_Types.RELATIVE_SIGMOID else  -1 * np.float64(MAX_PENALTY) # assign a large score if the spec is not found
-            # b - Log the spec score
-            fit_summary[spec.name] = {
-                "curr_val": performance_array.get(spec.name, np.nan) ,
-                "score": spec_fitness
-            }
-            # c - Update the overall fitness
-            if spec_fitness > 0:    reward  += spec_fitness
-            else:                   penalty += spec_fitness
+        for corner, each_corner_perform_array in performance_array.items():
+            #print("CHECKKK", corner, each_corner_perform_array)
+            for spec in self.target_specs.enabled_targets():
+                spec_fitness: np.float64 = np.float64(0.0)
+                # a - Compute the spec score
+                if spec.name in each_corner_perform_array and each_corner_perform_array[spec.name] is not None and not np.isnan(each_corner_perform_array[spec.name]):
+                    spec_fitness = self.compute_fitness_for_spec(curr_val=each_corner_perform_array[spec.name], target_spec=spec)
+                    spec_fitness = np.clip(spec_fitness, -1 * MAX_PENALTY, MAX_REWARD) # cap the score to avoid overflow
+                else:
+                    if self.verbose:
+                        logger.debug(f"Target spec name '{spec.name}' not found in performance array keys: {list(each_corner_perform_array.keys())}")
+                        logger.debug(f"assigning large penalty to the {spec.name} spec")
+                    spec_fitness = -1*np.float64(spec.weight) if spec.error_type==Error_Types.RELATIVE_SIGMOID else  -1 * np.float64(MAX_PENALTY) # assign a large score if the spec is not found
+                # b - Log the spec score
+                #if corner not in fit_summary:
+                    #fit_summary[corner] = {}
+                fit_summary[f"{spec.name}_{corner}"] = {
+                    "curr_val": each_corner_perform_array.get(spec.name, np.nan) ,
+                    "score": spec_fitness
+                }
+                """"
+                HAVE THE STAGE SCORE HAVE, IF STAGE 1 (TT only) -> penalty += -500 + spec_fitness
+                                              STAGE 2 (FF/SS and TT) -> penalty += -200 + spec_fitness 
+                                              Stage 3 (all other PVT) -> only worst PVT corner score/or all PVT corner
+                """
+                # c - Update the overall fitness
+                if spec_fitness > 0:    reward  += spec_fitness
+                else:                   penalty += spec_fitness
         # ------------------------------------------------------------------------------
         
-        total_score = reward if penalty > -1*EPSILON else penalty
+        total_score = reward if penalty > -1*EPSILON else penalty 
 
         logger.debug(f"Computed fitness: {total_score} for performance array: {performance_array}")
         logger.debug(f"\tReward: {reward}")
         logger.debug(f"\tPenalty: {penalty}")
         return total_score, fit_summary
 
-    def compute_fitness_for_spec(self, curr_val: np.float64 | float, target_spec: TargetSpec) -> np.float64:
+    def compute_fitness_for_spec(self, curr_val: np.ndarray, target_spec: TargetSpec) -> np.float64:
         """Computes the fitness score for current achieved metric given the target spec. Negative values """
         score = np.float64(0.0)
         # (1) Only return the constraint satisfaction score.
@@ -921,17 +1116,19 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
         return score
     
     # --- Helper Methods (only in this child class) ---
-    def compute_constraint_violation_penalty_for_spec(self, curr_val: np.float64 | float, target_spec: TargetSpec) -> np.float64:
+    def compute_constraint_violation_penalty_for_spec(self, curr_val: np.ndarray, target_spec: TargetSpec) -> np.float64:
         """ Compute a non-negative value representing the penalty for constraint violation. If zero is returned, the constraint is satisfied."""
+        #print(curr_val, type(curr_val))
         spec_penalty:           np.float64 = np.float64(0.0)
         spec_penalty_weighted:  np.float64 = np.float64(0.0)
 
-        spec_curr_val: np.float64 = np.float64(curr_val)
+        #spec_curr_val:  np.float64 =  np.float64(curr_val)
         target_val: np.float64 = np.float64(target_spec.target)
         tolerance:  np.float64 = np.float64(target_spec.tolerance)
-
+        for val in curr_val: 
+            spec_curr_val:  np.float64 =  np.float64(val)
         if target_spec.log_scale:
-            spec_curr_val = np.float64(convert_linear_to_log(curr_val))
+            spec_curr_val = np.ndarray(convert_linear_to_log(curr_val))
             target_val    = np.float64(convert_linear_to_log(target_val))
             tolerance     = np.float64(convert_linear_to_log(tolerance))
 
@@ -1038,6 +1235,7 @@ class Spice_Single_Objective(Spice_Constraint_Satisfaction):
         # --------------------------
         
         spec_reward_weighted = spec_reward * np.float64(target_spec.weight)
+        print(f"Computed Reward - Spec '{target_spec.name}': curr_val={curr_val}, target={target_spec.target}, reward={spec_reward}, weighted_reward={spec_reward_weighted} - (goal={target_spec.goal})")
         logger.debug(f"Computed Reward - Spec '{target_spec.name}': curr_val={curr_val}, target={target_spec.target}, reward={spec_reward}, weighted_reward={spec_reward_weighted} - (goal={target_spec.goal})")
         return spec_reward_weighted
     

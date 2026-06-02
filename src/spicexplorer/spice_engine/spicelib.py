@@ -299,24 +299,29 @@ class NGSpice_Wrapper:
         CAP_UNIT = 'p' # pico
         if self.editor is None:
             raise RuntimeError("Editor not initialized")
-
+        
         for key, value in parameterization.items():
-            try: # Validate parameter already exists
-                self.editor.get_parameter(key)
-            except ParameterNotFoundError:
-                logger.error(f"❌ Parameter {key} not found in the netlist... exiting")
-                return False
-
-            if key.startswith("C"):
-                self.editor.set_parameter(key, f"{value}{CAP_UNIT}")
-            elif key.startswith("R"):
-                self.editor.set_parameter(key, f"{value}{RES_UNIT}")
+        
+            if key == "corner": 
+                self.editor.remove_Xinstruction(r"\.lib")
+                self.editor.add_instruction(f".lib cornerMOSlv.lib mos_{value}")
+                logger.debug(f"... Corner is set to {value}")
+            if key == "supply":
+                self.editor.get_parameter("VDD") #<_ change the VDD
+            elif key == "temp":
+                self.editor.add_instruction(f".temp {value}")
             else:
+                try: # Validate parameter already exists
+                    self.editor.get_parameter(key)
+                except ParameterNotFoundError:
+                    logger.error(f"❌ Parameter {key} not found in the netlist... exiting")
+                    return False
+               
                 self.editor.set_parameter(key, f"{value}")
                 logger.debug(f"... Parameter {key} set to {value:.3e}")
         logger.debug(f"✅  All parameters updated successfully")
         return True
-    
+
     def run_sanity_check(self, use_editor: bool = True, sim_execution_t: Sim_Execution_Type = Sim_Execution_Type.RUN_NOW, clean_up_after: bool = True) -> bool:
         logger = self.logger
 
@@ -400,6 +405,7 @@ class NGSpice_Wrapper:
         self._move_to_run_folder(label=self.testbench_name)
 
         # (2) Run the simulation with the parameters already in the editor instance
+        
         task = self.runner.run(
             netlist=self.editor, 
             exe_log=exe_log)
@@ -469,7 +475,7 @@ class NGSpice_Wrapper:
             return
         
         out = self.tasks_outputs[task_name]
-
+        
         if isinstance(out, tuple) and len(out) == 2:
             raw_file, log_file = out
             self.curr_raw = RawRead(raw_filename=raw_file)
@@ -508,10 +514,11 @@ class NGSpice_Wrapper:
             is_real: If True, returns only the real part (or converts complex to real). 
                      If False, returns complex data (if applicable).
         """
-        if self.curr_raw is None:
+        if self.curr_raw is None: 
             self.logger.error("❌ Attempted to extract wave but no simulation data is loaded.")
             raise RuntimeError("Need to run the simulation at least once")
         
+        #print("HELOOO", self.curr_raw)
         # 1. Search for the specific plot object
         target_plot = None
         for p in self.curr_raw.plots:
@@ -529,6 +536,7 @@ class NGSpice_Wrapper:
         # 3. Extract the data from that specific plot
         try:
             wave = target_plot.get_wave(wave_name)
+            print("HELOOO", wave)
         except IndexError as e:
             self.logger.debug(f"❌ Waveform '{wave_name}' not found in plot '{plot_type.value}'.")
             raise e
@@ -541,6 +549,48 @@ class NGSpice_Wrapper:
         if is_real:
             return torch.from_numpy(wave).real.to(dtype=torch.float64)
         return torch.from_numpy(wave)
+    def extract_wave_all_sweep(
+        self,
+        wave_name: str,
+        plot_type: Ngspice_Plot_Type,
+        is_real: bool = False,         # ← new param, default = first plot
+    ) -> torch.Tensor:
+        """
+        sweep_index: which sweep step to extract (0=first, 1=second, ...)
+                    Use extract_wave_all_sweeps() to get all at once.
+        """
+        if self.curr_raw is None:
+            self.logger.error("❌ Attempted to extract wave but no simulation data is loaded.")
+            raise RuntimeError("Need to run the simulation at least once")
+
+        # 1. Collect all matching plots
+        matching_plots = [
+            p for p in self.curr_raw.plots
+            if p.get_plot_name() == plot_type.value
+        ]
+        # 2. Handle case where plot type isn't found
+        if not matching_plots:
+            available = self.get_available_plots()
+            self.logger.critical(f"❌ Plot type '{plot_type.value}' not found in raw file.")
+            self.logger.critical(f"ℹ️ Available plots: {available}")
+            raise ValueError(f"Plot type '{plot_type.value}' not found.")
+    
+        wave_sweep = []
+        # 3. Extract the data from that specific plot
+        try:
+            for target_plot in matching_plots:
+                wave = target_plot.get_wave(wave_name)
+                wave_sweep.append(wave)
+        except IndexError as e:
+            self.logger.debug(f"❌ Waveform '{wave_name}' not found in plot '{plot_type.value}'.")
+            raise e
+        except Exception as e:
+            self.logger.critical(f"❌ Unexpected error while extracting waveform '{wave_name}': {e.__class__.__name__}: {e}")
+            raise e
+        # 4. Convert to Tensor
+        if is_real:
+            return torch.stack([torch.from_numpy(w).real.to(dtype=torch.float64) for w in wave_sweep])
+        return torch.stack([torch.from_numpy(w).to(dtype=torch.complex128) for w in wave_sweep]) #shape of [number_of_sweep, points]
     
     def extract_scalar_variable_from_raw(self, var_name: str | List[str], plot_type: Ngspice_Plot_Type,is_real: bool = True) -> Dict[str, np.float64]:
         """
@@ -554,21 +604,23 @@ class NGSpice_Wrapper:
         for var in var_name:
             try:
                 # pass plot_type down to extract_wave
-                tensor_data = self.extract_wave(var, plot_type=plot_type, is_real=is_real)
+                tensor_data = self.extract_wave_all_sweep(var, plot_type=plot_type, is_real=is_real)
                 
                 # We expect a scalar or an array where we want index 0
                 # Move to CPU/numpy for the dictionary return
                 val = tensor_data.detach().cpu().numpy()
-                
-                if val.size > 0:
-                    outputs[var] = np.float64(val.item(0) if val.ndim > 0 else val.item())
-                else:
-                    outputs[var] = np.float64(np.nan)
+                outputs[var] = []
+                for sweep in val:
+                    if val.size > 0:
+                        outputs[var].append(np.float64(sweep.item(0) if sweep.ndim > 0 else sweep.item()))
+                    else:
+                        outputs[var].append(np.float64(np.nan))
                     
             except (ValueError, IndexError, RuntimeError):
                 self.logger.debug(f"❌ Scalar Variable {var} not found in the raw file for plot {plot_type.value}")
                 outputs[var] = np.float64(np.nan)
-                
+            #outputs = np.array(outputs)
+            #print("HEE", outputs) 
         return outputs
     
     # ----------------------------------------------------

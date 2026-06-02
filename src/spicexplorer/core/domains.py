@@ -130,6 +130,7 @@ def resolve_reference(value: Union[str, float, int], constraints: Dict[str, np.f
         return np.float64(constraints[value])
     return parse_value(value)
 
+
 def safe_from_dict(cls, data: dict, logger: logging.Logger, config: Config = Config(cast=[Enum])):
     try:
         return from_dict(data_class=cls, data=data, config=config)
@@ -162,10 +163,18 @@ class TechSpec:
 
 @dataclass
 class PVT:
+    name: str
     temp:   float
     corner: str
-    supply: float
-
+    supply: Optional[Union[float, np.float64, str]]
+    enable: bool = True
+    def needs_resolution(self) -> bool:
+        return (self.supply is not None and isinstance(self.supply, str))
+    def ressolve_val(self, constraints: Dict[str, np.float64]) -> None:
+        if self.supply is not None:
+            self.supply = resolve_reference(self.supply, constraints)
+            print(self.supply)
+    
 @dataclass
 class Param:
     name: str
@@ -210,9 +219,12 @@ class Param:
         log_min, log_max = np.log(self.min_val), np.log(self.max_val)
         return np.exp(denorm_val * (log_max - log_min) + log_min)
     
-    def get_val(self) -> float:
-        return float(self.val)
-    
+    def get_val(self) -> Union[float, str]:
+        try:
+            return float(self.val)
+        except (ValueError, TypeError):
+            return self.val
+            
     def has_val(self) -> bool:
         return self.val is not None
     

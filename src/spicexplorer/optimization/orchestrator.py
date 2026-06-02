@@ -1,6 +1,7 @@
 """This Module implements the user endpoint for selecting optimizers types based on an input project_setup yaml file and optimization engine type"""
 import logging
 import numpy        as np
+from itertools import product
 
 # Third-party imports
 from    enum        import Enum
@@ -91,31 +92,51 @@ class Circuit_Optimizer_Orchestrator_Base(ABC):
         logger.debug(f"Creating spicelib_wrappers for each testbench...")
         logger.debug("-----------------------------------------------------------------------------")
         spicelib_wrappers : Dict[str, NGSpice_Wrapper] = {}
+        include_pvt = True  # <- specify like this for now
+        if include_pvt:
+            for i, (tb, corner) in enumerate(product(PROJECT_SETUP.testbenches, PROJECT_SETUP.pvt_corners)):
+                if not tb.enable:
+                    logger.info(f"({i+1}) Skipping disabled testbench: {tb.name} - {tb.description}")
+                    continue
 
-        for i, tb in enumerate(PROJECT_SETUP.testbenches):
-            if not tb.enable:
-                logger.info(f"({i+1}) Skipping disabled testbench: {tb.name} - {tb.description}")
-                continue
+                tb_name = f"{tb.name}_{corner.name}"
 
-            logger.debug(f"({i+1}) Creating spicelib_wrapper for testbench: {tb.name} - {tb.description}")
-            logger.debug(f"\tspicelib_wrapper will use the following configs:")
-            logger.debug(f"\t- testbench_name {tb.name}")
-            logger.debug(f"\t- netlist_filename {tb.netlist}")
-
-            wrapper = NGSpice_Wrapper(
-                testbench_name=tb.name,
-                netlist_filename=Path(PROJECT_SETUP.ws_root) / Path(tb.netlist),
-                output_folder=output_folder,
-                sim_execution_t=sim_execution_t,
-                path_to_simulator=path_to_simulator,
-                verbose=self.verbose
+                wrapper = NGSpice_Wrapper(
+                    testbench_name=tb_name,
+                    netlist_filename=Path(PROJECT_SETUP.ws_root) / Path(tb.netlist),
+                    output_folder=output_folder,
+                    sim_execution_t=sim_execution_t,
+                    path_to_simulator=path_to_simulator,
+                    verbose=self.verbose
                 )
 
-            spicelib_wrappers[tb.name] = wrapper
-            logger.debug(f"Created spicelib_wrapper for testbench: {tb.name}")
+                spicelib_wrappers[tb_name] = wrapper
+        else:
+            for i, tb in enumerate(PROJECT_SETUP.testbenches):
+                if not tb.enable:
+                    logger.info(f"({i+1}) Skipping disabled testbench: {tb.name} - {tb.description}")
+                    continue
+            
+                logger.debug(f"({i+1}) Creating spicelib_wrapper for testbench: {tb.name} - {tb.description}")
+                logger.debug(f"\tspicelib_wrapper will use the following configs:")
+                logger.debug(f"\t- testbench_name {tb.name}")
+                logger.debug(f"\t- netlist_filename {tb.netlist}")
+
+                wrapper = NGSpice_Wrapper(
+                    testbench_name=tb.name,
+                    netlist_filename=Path(PROJECT_SETUP.ws_root) / Path(tb.netlist),
+                    output_folder=output_folder,
+                    sim_execution_t=sim_execution_t,
+                    path_to_simulator=path_to_simulator,
+                    verbose=self.verbose
+                )
+
+                spicelib_wrappers[tb.name] = wrapper
+                logger.debug(f"Created spicelib_wrapper for testbench: {tb.name}")
         logger.debug("-----------------------------------------------------------------------------")
         logger.info(f"Created ({len(spicelib_wrappers)}) spicelib_wrappers for project: {PROJECT_SETUP.name}")
         logger.info("=============================================================================")
+
         return spicelib_wrappers
     
     def get_project_setup(self) -> Project_Setup:

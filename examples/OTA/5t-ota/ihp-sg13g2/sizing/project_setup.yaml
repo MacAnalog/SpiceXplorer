@@ -33,7 +33,8 @@ project:
   # PVT Corners: Define the PVT corners for simulations
   # ------------------------
   pvt_corners :
-    - name: typical_25C_1V2
+  #pvt:
+      name: typical_25C_1V2
       temp: 25
       corner: tt
       supply: 1.5

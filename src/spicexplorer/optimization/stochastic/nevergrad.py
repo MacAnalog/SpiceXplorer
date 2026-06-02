@@ -195,8 +195,9 @@ class Nevergrad_Spice_Bode_Optimizer(NevergradMixin, Spice_Bode_Optimizer):
 class Nevergrad_Spice_Constraint_Satisfaction(NevergradMixin, Spice_Constraint_Satisfaction):
     def __init__(self,
                  setup_obj: Project_Setup,
-                 spicelib_wrappers : Dict[TestbenchParams, NGSpice_Wrapper]):
-        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers)
+                 spicelib_wrappers : Dict[TestbenchParams, NGSpice_Wrapper], 
+                 include_pvt: bool = True):
+        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers, include_pvt= include_pvt)
         self.parametrization: ng.p.Dict | None = None
         logger.info(f"started the {__class__} optimizer class")
 # ------------------------------------------------
