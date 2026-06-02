@@ -9,19 +9,10 @@ import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import { selectCn } from "@/components/ui/select";
 import { SensitivityChart } from "@/components/charts/SensitivityChart";
+import { parseDeviceKind } from "@/lib/params";
 import type { DutParam, SensitivityResponse } from "@/types/api";
 
 type Scope = "device" | "all";
-
-/** Parse 'X_DUT_M5_W' -> { device:'M5', kind:'W' } (mirrors the backend parser). */
-function parseDeviceKind(name: string): { device: string; kind: string } {
-  const base = name.startsWith("X_DUT_") ? name.slice(6) : name;
-  if (base.toUpperCase().includes("V_BIAS")) return { device: base, kind: "bias" };
-  for (const [suf, kind] of [["_W", "W"], ["_L", "L"], ["_NG", "NG"]] as const) {
-    if (base.endsWith(suf)) return { device: base.slice(0, -suf.length), kind };
-  }
-  return { device: base, kind: "other" };
-}
 
 /** Range centre used as the default operating point (matches the backend nominal). */
 function midpoint(p: DutParam): number {

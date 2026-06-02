@@ -54,10 +54,12 @@ The app is one persistent workspace. `app/page.tsx` redirects to `/setup`; all r
 
 ```
 StudioTitleBar          brand · + New project · ⌘K
-ActivityBar | LeftRail | TabStrip + center view        | RightRail
-(icons)     | (project,| (Setup/Scoring/Optimize/      | (live run:
-            |  runs,   |  Explore/Schematic/Pipeline)  |  iteration,
-            |  ckpts)  | BottomPanel (optimizer log)   |  specs, params)
+ActivityBar | LeftRail  | TabStrip + center view        | RightRail
+(icons)     | (per-     | (Setup/Scoring/Optimize/      | (live run:
+            |  activity:|  Explore/Schematic/Pipeline)  |  iteration,
+            |  runs /   | BottomPanel (optimizer log)   |  specs, params)
+            |  specs /  |                               |
+            |  outline) |                               |
 StudioStatusBar         active view · project · panel toggles · PDK/sim pill
 Overlays: CommandPalette (⌘K) · WizardOverlay (+ New project)
 ```
@@ -76,8 +78,9 @@ Overlays: CommandPalette (⌘K) · WizardOverlay (+ New project)
 | `ui/src/app/page.tsx` | Redirect → `/setup` |
 | `ui/src/app/(studio)/layout.tsx` | Mounts `StudioShell`; persists across view navigation |
 | `ui/src/app/(studio)/<view>/page.tsx` | One thin segment per view (setup, scoring, optimize, compare, schematic, pipeline, health) |
-| `ui/src/components/shell/` | `StudioShell`, `ActivityBar`, `TabStrip`, `StudioTitleBar`, `StudioLeftRail`, `RightRail`, `BottomPanel`, `StatusBar`, `nav.ts` |
-| `ui/src/components/shell/nav.ts` | **Single source of truth** for the 7 views (id, label, route, icon, shortcut, gating) |
+| `ui/src/components/shell/` | `StudioShell`, `ActivityBar`, `TabStrip`, `StudioTitleBar`, `RunControl`, `StudioLeftRail`, `RightRail`, `BottomPanel`, `StatusBar`, `nav.ts` |
+| `ui/src/components/shell/rails/` | Per-activity left-rail variants: `RunsRail`, `SpecsRail`, `OutlineRail` (+ shared `parts`) |
+| `ui/src/components/shell/nav.ts` | **Single source of truth** for the 7 views (id, label, route, icon, shortcut, gating, `rail`) |
 | `ui/src/components/overlays/` | `CommandPalette` (⌘K), `WizardOverlay` (+ New project) |
 | `ui/src/components/tabs/` | The center views: SetupTab, ScoreShapingTab, OptimizeTab, ExplorerTab, SchematicTab, HealthTab, PipelineView |
 | `ui/src/components/wizard/` | `WizardShell` + 7 step components |
@@ -117,6 +120,7 @@ Navigate views via the activity-bar icons, the tab strip, or **⌘1–⌘7**. Vi
 ### Implemented ✅
 
 - **Studio shell** — App-Router route group with a persistent layout: activity bar, contextual left rail, tab strip, always-on right rail, collapsible bottom panel, status bar. Views are deep-linkable (`/setup`, `/scoring`, …) and switchable via ⌘1–⌘7.
+- **Per-activity left rails** — a persistent frame (project header + version) wrapping a body that swaps per active view (`rail` in `nav.ts`): `runs` (history + checkpoints, for Optimize/Explore), `specs` (clickable target-spec list → Score Shaping, for Score Shaping/Pipeline), `outline` (project structure: testbenches, devices, specs, for Setup/Schematic/Health).
 - **Setup view** — Monaco YAML editor (debounced validation), example dropdown, Upload, Validate, Apply, plus the **Create Wizard** toggle.
 - **New-project wizard** — 7-step form (Basic Info → PDK Rules → DUT Params w/ netlist upload → PVT → Testbenches → Target Specs → Optimizer) with a live YAML preview; generates + applies a `project_setup.yaml`. Launchable from Setup, the title-bar **+ New project**, or the ⌘K palette. Backed by `POST /api/project/generate`, `POST /api/project/parse-to-form`, `POST /api/netlist/parse`.
 - **Score Shaping view** — Spec selector + slider (range = target ± 3×range), live penalty curve, per-spec breakdown (linear/sigmoid), highest-penalty callout. Honors deep-linked spec selection.
@@ -136,7 +140,6 @@ Navigate views via the activity-bar icons, the tab strip, or **⌘1–⌘7**. Vi
 
 ### Not Yet Implemented ❌
 
-- **Per-activity left rails** — the left rail is one always-on panel (project + runs + checkpoints); the spec'd per-activity rail variants (file tree, spec list, compare setup, …) are not split out yet.
 - **Apply from editor content** — "Apply" re-reads from disk; unsaved Monaco edits are lost on Apply.
 - **Score function toggle for live runs** — sigmoid vs linear is fixed by the YAML; no runtime switch.
 
