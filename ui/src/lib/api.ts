@@ -77,6 +77,10 @@ export const api = {
     /** Ephemeral live-run overrides (ignored for replay). */
     algorithm?: string;
     seed?: number;
+    /** Autosave a cumulative checkpoint every N trials (live only). */
+    autosave_every?: number;
+    /** Resume a live run from a saved checkpoint (load + keep_history). */
+    resume_checkpoint_id?: string;
   }) =>
     req<RunStartResponse>("/api/optimize/start", {
       method: "POST",

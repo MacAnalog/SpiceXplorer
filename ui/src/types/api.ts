@@ -140,6 +140,14 @@ export interface ScoreResponse {
 export interface RunStartResponse {
   run_id: string;
   replay: boolean;
+  resumed?: boolean;
+}
+
+/** Emitted when a live run autosaves a (cumulative) checkpoint. */
+export interface CheckpointEvent {
+  id: string | null;
+  index: number;
+  iter: number;
 }
 
 export interface SSEEvent {
@@ -148,6 +156,7 @@ export interface SSEEvent {
   best_score?: number | null;
   metrics?: Record<string, number | null>;
   best_params?: Record<string, number | null>;
+  checkpoint?: CheckpointEvent;
   done?: boolean;
   error?: string;
   heartbeat?: boolean;

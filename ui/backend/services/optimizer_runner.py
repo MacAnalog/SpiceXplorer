@@ -38,6 +38,10 @@ class RunState:
     checkpoint_id: str | None = None
     algorithm: str | None = None
     seed: int | None = None
+    # Checkpointing: autosave cadence (trials) and an optional checkpoint to
+    # resume from (load_checkpoint + optimize(keep_history=True)).
+    autosave_every: int | None = None
+    resume_path: str | None = None
     done: bool = False
 
 
@@ -68,43 +72,121 @@ def _build_spicelib_wrappers(project: Project_Setup):
     return wrappers
 
 
-def _make_streaming_optimizer(project: Project_Setup, state: RunState):
-    """Create a Nevergrad optimizer subclass that emits SSE events per step."""
+def _load_checkpoint_log(path: str):
+    """Rebuild an OptimizationLog from a saved checkpoint JSON.
+
+    The library's Base_Optimizer.load_checkpoint() can't round-trip a real run:
+    save_checkpoint() stringifies each entry's ``log_file`` (a Dict[str, Path])
+    before serializing, but load_checkpoint() feeds it back through dacite, which
+    rejects the string for the Dict-typed field (WrongTypeError). The per-trial
+    ngspice log paths aren't needed to resume — only params/score/fit_summary —
+    so we drop ``log_file`` and rebuild the log here. (Library fix: serialize
+    log_file as a dict, or make load_checkpoint tolerant.)
+    """
+    from dacite import Config, from_dict
+    from spicexplorer.core.domains import OptimizationLog, OptimizationLogEntry
+
+    with open(path) as f:
+        data = json.load(f)
+    entries = []
+    for raw in data.get("optimization_log", []):
+        raw = dict(raw)
+        raw["log_file"] = None
+        entries.append(from_dict(OptimizationLogEntry, raw, Config(strict=False)))
+    return OptimizationLog(entries)
+
+
+def _streaming_optimizer_class(state: RunState):
+    """Build a Nevergrad single-objective optimizer that (a) streams an SSE event
+    per step, (b) emits a ``checkpoint`` event whenever it autosaves, and (c)
+    runs its own ``optimize()`` loop so periodic autosave is actually usable.
+
+    Why override ``optimize()``: the base loop resets ``optimization_log`` after
+    every autosave (a memory-bound chunking strategy) and then indexes the now
+    empty log — harmless at the default frequency of 2500 (a UI run never reaches
+    it) but an IndexError the moment a smaller cadence is configured. Keeping the
+    full log in memory is trivial at UI budgets (≤5000) and makes every
+    checkpoint a *cumulative* snapshot, so a resume restores the whole run rather
+    than a single chunk.
+
+    Streaming counters (absolute iteration, running best) live on the instance
+    rather than being derived from the log, so they stay correct across a resume.
+    """
+    from spicexplorer.core.domains import OptimizationLog
     from spicexplorer.optimization.stochastic.nevergrad import Nevergrad_Spice_Single_Objective
 
+    def _emit(event: dict) -> None:
+        asyncio.run_coroutine_threadsafe(state.queue.put(event), state.loop)
+
     class _StreamingOpt(Nevergrad_Spice_Single_Objective):
+        _abs_iter = 0
+        _best_score: float | None = None
+        _best_params: dict = {}
+        _ckpt_count = 0
+
         def optimization_step(self):
             if state.stop_event.is_set():
                 raise KeyboardInterrupt("stopped by user")
-            result = super().optimization_step()
-            params, score, metadata = result
-            # optimization_step() returns (params, score, fit_summary); the third
-            # element IS the fit_summary dict, keyed by spec name
-            # ({spec: {"curr_val", "score"}}) — not a wrapper with a "fit_summary"
-            # key. Reading metadata.get("fit_summary") always returned {}, so the
-            # right-rail spec status never populated on live runs. (Replay reads
-            # the same shape correctly via checkpoint_reader; sanity.py also
-            # iterates metadata directly.)
+            params, score, metadata = super().optimization_step()
+            self._abs_iter += 1
+            sval = _safe_float(score)
+            # metadata IS the fit_summary dict, keyed by spec name
+            # ({spec: {"curr_val", "score"}}). Track the running best on the
+            # instance so iter/best survive autosave and resume.
             fit = metadata if isinstance(metadata, dict) else {}
-            event = {
-                "iter": len(self.optimization_log),
-                "score": _safe_float(score),
-                "best_score": _safe_float(
-                    self.optimization_log[self.global_best_index].point.score
-                    if len(self.optimization_log) > 0 else score
-                ),
+            if sval is not None and (self._best_score is None or sval > self._best_score):
+                self._best_score = sval
+                self._best_params = {k: _safe_float(v) for k, v in params.items()}
+                self.global_best_index = len(self.optimization_log) - 1
+            _emit({
+                "iter": self._abs_iter,
+                "score": sval,
+                "best_score": self._best_score,
                 "metrics": {
                     k: _safe_float(v.get("curr_val"))
                     for k, v in fit.items()
                     if isinstance(v, dict)
                 },
-                "best_params": {k: _safe_float(v) for k, v in params.items()},
-            }
-            asyncio.run_coroutine_threadsafe(state.queue.put(event), state.loop)
-            return result
+                "best_params": self._best_params,
+            })
+            return params, score, metadata
 
-    spicelib_wrappers = _build_spicelib_wrappers(project)
-    return _StreamingOpt(setup_obj=project, spicelib_wrappers=spicelib_wrappers)
+        def save_checkpoint(self, name):
+            super().save_checkpoint(name)
+            # Surface the autosave so the UI shows checkpoints accumulating live.
+            try:
+                files = sorted(
+                    self.autosave_checkpoint_dir.glob("*.json"),
+                    key=lambda p: p.stat().st_mtime,
+                )
+                latest = files[-1].stem if files else None
+            except OSError:
+                latest = None
+            self._ckpt_count += 1
+            _emit({"checkpoint": {"id": latest, "index": self._ckpt_count, "iter": self._abs_iter}})
+
+        def optimize(self, render_optimization_trace: bool = False, keep_history: bool = False):
+            self._create_optimizer_obj()
+            if self.optimizer is None:
+                _emit({"error": "optimizer object was not created"})
+                return self.optimization_log
+            if not keep_history:
+                self.optimization_log = OptimizationLog()
+            trial = -1
+            try:
+                for trial in range(self.optimizer_config.budget):
+                    self.optimization_step()
+                    if (not self.disable_autosave) and self.autosave_checkpoint_freqeucny \
+                            and ((trial + 1) % self.autosave_checkpoint_freqeucny == 0):
+                        self.save_checkpoint(name=self.get_auto_save_name(append_txt=f"trial{self._abs_iter}"))
+            except KeyboardInterrupt:
+                logger.info("[run %s] interrupted at trial %d", state.run_id[:8], trial + 1)
+            # Always leave a FINAL checkpoint (end-of-run or stop) to resume from.
+            if (not self.disable_autosave) and (not self.optimization_log.is_empty()):
+                self.save_checkpoint(name=self.get_auto_save_name(append_txt=f"trial{self._abs_iter}_FINAL"))
+            return self.optimization_log
+
+    return _StreamingOpt
 
 
 def _apply_overrides(
@@ -135,7 +217,8 @@ def _apply_overrides(
 
 
 def _run_live(state: RunState, project_path: str) -> None:
-    logger.info("[run %s] starting live run — project: %s", state.run_id[:8], project_path)
+    kind = "resumed" if state.resume_path else "live"
+    logger.info("[run %s] starting %s run — project: %s", state.run_id[:8], kind, project_path)
     try:
         logger.info("[run %s] loading project YAML", state.run_id[:8])
         project = Project_Setup.from_yaml(project_path)
@@ -146,12 +229,39 @@ def _run_live(state: RunState, project_path: str) -> None:
             algorithm=state.algorithm,
             seed=state.seed,
         )
-        logger.info("[run %s] building optimizer", state.run_id[:8])
-        opt = _make_streaming_optimizer(project, state)
+        wrappers = _build_spicelib_wrappers(project)
+        stream_cls = _streaming_optimizer_class(state)
+        if state.resume_path:
+            logger.info("[run %s] resuming from checkpoint %s", state.run_id[:8], state.resume_path)
+            opt = stream_cls(setup_obj=project, spicelib_wrappers=wrappers)
+            opt.optimization_log = _load_checkpoint_log(state.resume_path)
+            logger.info("[run %s] restored %d prior trials", state.run_id[:8], len(opt.optimization_log))
+            keep_history = True
+        else:
+            logger.info("[run %s] building optimizer", state.run_id[:8])
+            opt = stream_cls(setup_obj=project, spicelib_wrappers=wrappers)
+            keep_history = False
+        if state.autosave_every and state.autosave_every > 0:
+            opt.autosave_checkpoint_freqeucny = state.autosave_every
+            logger.info("[run %s] autosave every %d trials", state.run_id[:8], state.autosave_every)
+        # Seed the streaming counters from any restored history so a resume
+        # continues the iteration count and best-so-far rather than restarting.
+        opt._abs_iter = len(opt.optimization_log)
+        opt._ckpt_count = 0
+        best_score: float | None = None
+        best_params: dict = {}
+        for entry in opt.optimization_log:
+            s = _safe_float(entry.point.score)
+            if s is not None and (best_score is None or s > best_score):
+                best_score = s
+                best_params = {k: _safe_float(v) for k, v in entry.point.params.items()}
+        opt._best_score = best_score
+        opt._best_params = best_params
         logger.info("[run %s] parameterizing", state.run_id[:8])
         opt.parameterize()
-        logger.info("[run %s] starting optimize() — budget %d", state.run_id[:8], state.budget)
-        opt.optimize()
+        logger.info("[run %s] starting optimize() — budget %d%s", state.run_id[:8], state.budget,
+                    " (resume)" if keep_history else "")
+        opt.optimize(keep_history=keep_history)
         logger.info("[run %s] optimize() finished", state.run_id[:8])
     except KeyboardInterrupt:
         logger.info("[run %s] stopped by user", state.run_id[:8])
@@ -209,6 +319,8 @@ def start_run(
     budget: int = 200,
     algorithm: str | None = None,
     seed: int | None = None,
+    autosave_every: int | None = None,
+    resume_path: str | None = None,
     loop: asyncio.AbstractEventLoop,
 ) -> str:
     run_id = str(uuid.uuid4())
@@ -222,6 +334,8 @@ def start_run(
         checkpoint_id=checkpoint_id,
         algorithm=algorithm,
         seed=seed,
+        autosave_every=autosave_every,
+        resume_path=resume_path,
     )
     _runs[run_id] = state
 

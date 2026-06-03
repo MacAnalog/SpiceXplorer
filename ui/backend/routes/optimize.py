@@ -24,6 +24,11 @@ class StartRequest(BaseModel):
     # YAML on disk is never rewritten). Ignored for replay runs.
     algorithm: str | None = None
     seed: int | None = None
+    # Checkpointing (live runs only). autosave_every writes a cumulative
+    # checkpoint every N trials; resume_checkpoint_id continues a prior run from
+    # a saved checkpoint (load_checkpoint + optimize(keep_history=True)).
+    autosave_every: int | None = None
+    resume_checkpoint_id: str | None = None
 
 
 @router.post("/optimize/start")
@@ -39,6 +44,16 @@ async def start_run(body: StartRequest, request: Request):
         if checkpoint_path is None or not checkpoint_path.exists():
             raise HTTPException(404, f"Checkpoint '{body.checkpoint_id}' not found")
 
+    # Resume: resolve the checkpoint to continue a live run from (presets or autosaves).
+    resume_path: str | None = None
+    if body.resume_checkpoint_id and not body.replay:
+        from ui.backend.routes.checkpoint import _resolve_checkpoint_path
+
+        resolved = _resolve_checkpoint_path(body.resume_checkpoint_id)
+        if resolved is None:
+            raise HTTPException(404, f"Resume checkpoint '{body.resume_checkpoint_id}' not found")
+        resume_path = str(resolved)
+
     run_id = runner.start_run(
         project_path=yaml_path if not body.replay else None,
         replay=body.replay,
@@ -47,9 +62,11 @@ async def start_run(body: StartRequest, request: Request):
         budget=body.budget,
         algorithm=body.algorithm,
         seed=body.seed,
+        autosave_every=body.autosave_every,
+        resume_path=resume_path,
         loop=loop,
     )
-    return {"run_id": run_id, "replay": body.replay}
+    return {"run_id": run_id, "replay": body.replay, "resumed": resume_path is not None}
 
 
 @router.post("/optimize/stop/{run_id}")

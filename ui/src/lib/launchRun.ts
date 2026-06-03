@@ -13,12 +13,14 @@ export interface LaunchResult {
 }
 
 /**
- * Start a live SPICE run using the shared run config (algorithm/budget/seed).
- * Validates that a project is applied and the PDK is present, sends the
- * overrides to the backend, and opens the SSE stream via runStore. Returns a
- * result instead of throwing so callers can surface the error inline.
+ * Start a live SPICE run using the shared run config (algorithm/budget/seed/
+ * autosave). Validates that a project is applied and the PDK is present, sends
+ * the overrides to the backend, and opens the SSE stream via runStore. When
+ * `resumeCheckpointId` is given the backend continues that checkpoint's run
+ * (load + keep_history). Returns a result instead of throwing so callers can
+ * surface the error inline.
  */
-export async function launchLiveRun(): Promise<LaunchResult> {
+async function startLive(resumeCheckpointId?: string): Promise<LaunchResult> {
   const { yamlPath, isApplied } = useProjectStore.getState();
   const { env, runConfig } = useUIStore.getState();
   const { startRun } = useRunStore.getState();
@@ -39,13 +41,22 @@ export async function launchLiveRun(): Promise<LaunchResult> {
       budget: runConfig.budget,
       algorithm: runConfig.algorithm,
       seed: runConfig.seed ?? undefined,
+      autosave_every: runConfig.autosaveEvery ?? undefined,
+      resume_checkpoint_id: resumeCheckpointId,
     });
     startRun(res.run_id, res.replay, runConfig.budget, {
       kind: "live",
-      label: `Live · ${runConfig.algorithm}`,
+      label: `${resumeCheckpointId ? "Resume" : "Live"} · ${runConfig.algorithm}`,
     });
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Failed to start run" };
   }
 }
+
+/** Start a fresh live run from the current run config. */
+export const launchLiveRun = (): Promise<LaunchResult> => startLive();
+
+/** Resume a live run from a saved checkpoint, continuing its history. */
+export const resumeLiveRun = (checkpointId: string): Promise<LaunchResult> =>
+  startLive(checkpointId);

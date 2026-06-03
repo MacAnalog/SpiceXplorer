@@ -1,10 +1,14 @@
 "use client";
 import { useState } from "react";
-import { RefreshCw, X, Trash2 } from "lucide-react";
+import type { Route } from "next";
+import { useRouter } from "next/navigation";
+import { RefreshCw, X, Trash2, Play } from "lucide-react";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { useRunStore } from "@/stores/runStore";
 import { useUIStore } from "@/stores/uiStore";
+import { useProjectStore } from "@/stores/projectStore";
 import { api } from "@/lib/api";
+import { resumeLiveRun } from "@/lib/launchRun";
 import { cn, formatEng } from "@/lib/utils";
 import { Sparkline } from "@/components/ui/sparkline";
 import { RailHeading, RailHint } from "./parts";
@@ -15,12 +19,25 @@ import { RailHeading, RailHint } from "./parts";
  * pre-split single rail — this is the most relevant context next to a run.
  */
 export function RunsRail() {
+  const router = useRouter();
   const { availableCheckpoints, setAvailableCheckpoints } = useExplorerStore();
   const { history, rerun, clearHistory, runId, isRunning } = useRunStore();
   const { selectedRunId, openRun } = useUIStore();
+  const env = useUIStore((s) => s.env);
+  const isApplied = useProjectStore((s) => s.isApplied);
   const [refreshing, setRefreshing] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Resume needs an applied project, the PDK, and no run in flight.
+  const canResume = isApplied && !(env != null && !env.live_runs_enabled) && !isRunning;
+
+  const handleResume = async (id: string) => {
+    setError(null);
+    const res = await resumeLiveRun(id);
+    if (res.ok) router.push("/optimize" as Route);
+    else setError(res.error ?? "Resume failed");
+  };
 
   const refreshCheckpoints = async () => {
     setRefreshing(true);
@@ -143,6 +160,24 @@ export function RunsRail() {
                   {c.score_fn || c.type}
                 </div>
               </div>
+              {deletable && (
+                <button
+                  type="button"
+                  onClick={() => handleResume(c.id)}
+                  disabled={!canResume}
+                  aria-label={`Resume from checkpoint ${c.label}`}
+                  title={
+                    canResume
+                      ? "Resume an optimization from this checkpoint"
+                      : isRunning
+                        ? "A run is already active"
+                        : "Apply a project (and the PDK) to resume"
+                  }
+                  className="rounded p-0.5 text-faint opacity-0 transition-opacity hover:bg-primary-soft hover:text-primary group-hover:opacity-100 disabled:opacity-30"
+                >
+                  <Play className="h-3 w-3" />
+                </button>
+              )}
               {deletable && (
                 <button
                   type="button"

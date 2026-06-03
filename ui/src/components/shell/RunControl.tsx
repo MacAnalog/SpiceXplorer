@@ -165,6 +165,28 @@ export function RunControl() {
                 />
               </label>
             </div>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-muted">
+                autosave every (trials)
+              </span>
+              <input
+                aria-label="Autosave checkpoint every N trials (blank = end only)"
+                type="number"
+                min={1}
+                placeholder="end only"
+                value={runConfig.autosaveEvery ?? ""}
+                onChange={(e) =>
+                  setRunConfig({
+                    autosaveEvery: e.target.value === "" ? null : Number(e.target.value),
+                  })
+                }
+                className={selectCn("sm") + " w-full"}
+              />
+              <span className="text-[10px] leading-snug text-faint">
+                Periodic, resumable checkpoints for long runs.
+              </span>
+            </label>
           </div>
 
           {error && (

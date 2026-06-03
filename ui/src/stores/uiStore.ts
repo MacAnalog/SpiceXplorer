@@ -11,12 +11,15 @@ export interface RunConfig {
   algorithm: string;
   budget: number;
   seed: number | null;
+  /** Autosave a cumulative checkpoint every N trials (null = end-only). */
+  autosaveEvery: number | null;
 }
 
 export const DEFAULT_RUN_CONFIG: RunConfig = {
   algorithm: "LhsDE",
   budget: 200,
   seed: null,
+  autosaveEvery: null,
 };
 
 /** Selectable Nevergrad algorithms (canonical list for the Run config UI). */

@@ -125,7 +125,8 @@ Navigate views via the activity-bar icons, the tab strip, or **⌘1–⌘7**. Vi
 - **New-project wizard** — 7-step form (Basic Info → PDK Rules → DUT Params w/ netlist upload → PVT → Testbenches → Target Specs → Optimizer) with a live YAML preview; generates + applies a `project_setup.yaml`. Launchable from Setup, the title-bar **+ New project**, or the ⌘K palette. Backed by `POST /api/project/generate`, `POST /api/project/parse-to-form`, `POST /api/netlist/parse`.
 - **Score Shaping view** — Spec selector + slider (range = target ± 3×range), live penalty curve, per-spec breakdown (linear/sigmoid), highest-penalty callout. Honors deep-linked spec selection.
 - **Optimize view** — Algorithm dropdown, budget input, preset checkpoint replay, Start/Stop with SSE streaming, score + metric convergence charts. **Algorithm/budget/seed are honored on live runs** (applied in-memory; YAML not rewritten). Live Start disables + steers to Replay when the PDK is absent.
-- **Run ▾ popover** — title-bar control to set the shared live-run overrides (algorithm/budget/seed) and start a run from any view; collapses to Stop + progress while a run is active, disables + steers to Replay when the PDK is absent. The Optimize toolbar shares the same `runConfig` (uiStore), so the two stay in sync.
+- **Run ▾ popover** — title-bar control to set the shared live-run overrides (algorithm/budget/seed/**autosave-every**) and start a run from any view; collapses to Stop + progress while a run is active, disables + steers to Replay when the PDK is absent. The Optimize toolbar shares the same `runConfig` (uiStore), so the two stay in sync.
+- **Checkpointing for long runs** — set "autosave every N trials" to write periodic, *cumulative* checkpoints during a live run; each one streams a `checkpoint` SSE event so the left-rail checkpoint list (and the right-rail "N checkpoints saved" counter) update live. Any autosave checkpoint has a **Resume** action (▶ in the rail) that continues that optimization from where it left off (`load_checkpoint` + `optimize(keep_history=True)`), seeding the iteration count and best-so-far from the restored history. A run also writes a `_FINAL` checkpoint on completion **and on Stop**, so an interrupted run is always resumable.
 - **Right rail + bottom panel** — Live run progress, spec status chips, best params, and the optimizer log; keep updating across view changes (SSE hoisted into `runStore`).
 - **Run history** — Persisted run list with score sparklines; click a replay run to re-run.
 - **Command palette (⌘K)** — Switch view · jump to spec · jump to run · new project · stop run.
@@ -278,7 +279,7 @@ rm -rf ui/.next
 | POST | `/api/project/parse-to-form` | YAML → wizard form (round-trip for "Edit in wizard") |
 | POST | `/api/netlist/parse` | Extract `.param` rows from an uploaded `.spice` netlist |
 | POST | `/api/score` | Compute sigmoid + linear penalties for given metric values |
-| POST | `/api/optimize/start` | Start live run or replay; accepts `algorithm`/`budget`/`seed` overrides; returns `run_id` |
+| POST | `/api/optimize/start` | Start live run or replay; accepts `algorithm`/`budget`/`seed` overrides, `autosave_every` (periodic cumulative checkpoints), and `resume_checkpoint_id` (continue a saved run); returns `run_id` |
 | POST | `/api/optimize/stop/{run_id}` | Signal the run to stop |
 | GET | `/api/optimize/stream/{run_id}` | SSE stream of optimization events |
 | GET | `/api/checkpoint` | List all available checkpoints |
@@ -295,6 +296,7 @@ SSE events (`/api/optimize/stream/{id}`):
 
 ```json
 { "iter": 42, "score": 0.31, "best_score": 0.18, "metrics": {"ugf": 1.9e8}, "best_params": {"X_DUT_M1M2_W": 2e-6} }
+{ "checkpoint": {"id": "CASCODE-OTA_LhsDE_..._trial40", "index": 1, "iter": 40} }
 { "heartbeat": true }
 { "done": true }
 { "error": "ngspice exited with code 1: ..." }

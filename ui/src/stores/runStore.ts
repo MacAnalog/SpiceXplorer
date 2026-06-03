@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
-import type { SSEEvent } from "@/types/api";
+import { useExplorerStore } from "@/stores/explorerStore";
+import type { SSEEvent, CheckpointEvent } from "@/types/api";
 
 /**
  * The live SSE connection is held in a module-level variable, NOT in React
@@ -80,11 +81,15 @@ interface RunStore {
   bestMetrics: Record<string, number>;
   bestParams: Record<string, number>;
   currentIter: number;
+  /** Checkpoints autosaved during the active run (live, cumulative). */
+  checkpoints: CheckpointEvent[];
   history: RunRecord[];
 
   /** Begin a run: reset state, capture meta, open the SSE stream for `id`. */
   startRun: (id: string, replay: boolean, budget: number, meta?: Partial<ActiveMeta>) => void;
   pushEvent: (e: SSEEvent) => void;
+  /** Record an autosaved checkpoint + refresh the on-disk checkpoint list. */
+  pushCheckpoint: (c: CheckpointEvent) => void;
   /** Stream ended on its own (done/error) — record to history, close locally. */
   finishRun: () => void;
   /** User pressed Stop — best-effort tell the backend, record, then close. */
@@ -106,6 +111,7 @@ const INITIAL = {
   bestMetrics: {} as Record<string, number>,
   bestParams: {} as Record<string, number>,
   currentIter: 0,
+  checkpoints: [] as CheckpointEvent[],
 };
 
 export const useRunStore = create<RunStore>((set, get) => ({
@@ -128,6 +134,7 @@ export const useRunStore = create<RunStore>((set, get) => ({
       bestMetrics: {},
       bestParams: {},
       currentIter: 0,
+      checkpoints: [],
     });
 
     es = new EventSource(api.streamUrl(id));
@@ -139,6 +146,10 @@ export const useRunStore = create<RunStore>((set, get) => ({
           return;
         }
         if (data.heartbeat) return;
+        if (data.checkpoint) {
+          get().pushCheckpoint(data.checkpoint);
+          return;
+        }
         get().pushEvent(data);
       } catch {
         /* ignore malformed keepalive lines */
@@ -170,6 +181,16 @@ export const useRunStore = create<RunStore>((set, get) => ({
         : state.bestParams;
       return { events, bestMetrics, bestParams, currentIter: e.iter ?? state.currentIter };
     }),
+
+  pushCheckpoint: (c) => {
+    set((state) => ({ checkpoints: [...state.checkpoints, c] }));
+    // Refresh the on-disk checkpoint list so the new file appears in the rail
+    // (and becomes available to Resume / Explore) while the run is still going.
+    api
+      .listCheckpoints()
+      .then(useExplorerStore.getState().setAvailableCheckpoints)
+      .catch(() => {});
+  },
 
   finishRun: () => {
     closeStream();

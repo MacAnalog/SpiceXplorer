@@ -18,7 +18,7 @@ export function RightRail() {
   const rightOpen = useUIStore((s) => s.rightOpen);
   const toggleRight = useUIStore((s) => s.toggleRight);
   const summary = useProjectStore((s) => s.summary);
-  const { isRunning, isReplay, events, bestMetrics, bestParams, currentIter, budget } =
+  const { isRunning, isReplay, events, bestMetrics, bestParams, currentIter, budget, checkpoints } =
     useRunStore();
 
   const bestScore = useMemo(() => {
@@ -84,6 +84,12 @@ export function RightRail() {
               className="h-full bg-primary transition-all"
               style={{ width: `${Math.min(100, (currentIter / budget) * 100)}%` }}
             />
+          </div>
+        )}
+        {checkpoints.length > 0 && (
+          <div className="text-[10px] text-faint">
+            {checkpoints.length} checkpoint{checkpoints.length === 1 ? "" : "s"} saved
+            <span className="ml-1 font-mono">@{checkpoints[checkpoints.length - 1].iter}</span>
           </div>
         )}
 
