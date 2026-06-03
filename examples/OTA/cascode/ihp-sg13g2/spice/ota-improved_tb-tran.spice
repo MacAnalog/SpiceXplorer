@@ -1,4 +1,4 @@
-** sch_path: /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved_tb-tran.sch
+** sch_path: /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved_tb-tran.sch
 **.subckt ota-improved_tb-tran
 Vdd v_dd GND VDD
 xota v_dd v_out v_in v_out net1 v_ena v_ss ota-improved
@@ -92,8 +92,8 @@ Venable v_ena v_ss dc 0 pwl(0 0 1u 0 1.1u VDD)
 **.ends
 
 * expanding   symbol:  ota-improved.sym # of pins=7
-** sym_path: /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sym
-** sch_path: /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sch
+** sym_path: /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sym
+** sch_path: /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sch
 .subckt ota-improved vdd vout vinp vinn ibias_5u d_ena vss
 *.ipin ibias_5u
 *.iopin vdd

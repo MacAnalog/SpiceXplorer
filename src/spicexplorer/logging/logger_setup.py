@@ -8,12 +8,25 @@ import logging
 import os
 from datetime import datetime
 
-def setup_loggers(out_logname="SpiceXplorer", parent_folder:Path=Path(".")) -> logging.Logger:
+def setup_loggers(
+    out_logname: str = "SpiceXplorer",
+    parent_folder: Path = Path("."),
+    console_level: int = logging.INFO,
+) -> logging.Logger:
+    """Configure the ``spicexplorer`` logger hierarchy.
 
+    Args:
+        out_logname:    Base name for the timestamped log file.
+        parent_folder:  Directory that will contain the ``logs/`` sub-folder.
+        console_level:  Minimum level printed to the console
+                        (``logging.DEBUG``, ``logging.INFO``, ``logging.WARNING``,
+                        ``logging.ERROR``, or ``logging.CRITICAL``).
+                        The log *file* always captures everything at DEBUG level.
+    """
     # --- Create timestamped log filename ---
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    out_logname = Path(f"{parent_folder}/logs/{out_logname}_{timestamp}.log")
-    os.makedirs(out_logname.parent, exist_ok=True)
+    log_path = Path(f"{parent_folder}/logs/{out_logname}_{timestamp}.log")
+    os.makedirs(log_path.parent, exist_ok=True)
 
     # --- The wrapper logger ---
     logger = logging.getLogger("spicexplorer")
@@ -25,31 +38,28 @@ def setup_loggers(out_logname="SpiceXplorer", parent_folder:Path=Path(".")) -> l
         datefmt="%H:%M:%S"
     )
 
-    # Always clear old handlers to avoid duplicates
+    # Always clear old handlers to avoid duplicates on re-init
     logger.handlers.clear()
 
-    # --- Console Handler ---
+    # --- Console Handler (user-configurable level) ---
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(console_level)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    # --- File Handler ---
-    file_handler = logging.FileHandler(out_logname, mode="a")
+    # --- File Handler (always DEBUG so nothing is lost) ---
+    file_handler = logging.FileHandler(log_path, mode="a")
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
     logger.info("🚀 Logger initialized and ready!")
-    logger.info(f"📄 Log file: {os.path.abspath(out_logname)}")
+    logger.info(f"📄 Log file: {os.path.abspath(log_path)}")
+    logger.info(f"🖥️  Console level: {logging.getLevelName(console_level)}")
 
-
-
-    # --- Configure logging for spicelib ---
-    # spicelib_logger = setup_spicelib_logging(file_handler)
+    # --- Configure logging for spicelib (file only, suppress console noise) ---
     spicelib_logger = logging.getLogger("spicelib")
     spicelib_logger.setLevel(logging.CRITICAL)
-    
     logger.info(f"🔧 spicelib logger set to {spicelib_logger.getEffectiveLevel()}")
 
     return logger

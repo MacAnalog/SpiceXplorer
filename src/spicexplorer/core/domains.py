@@ -603,16 +603,19 @@ class Project_Setup:
     ws_root :   Path | str
     netlist:    Path | str
     outdir :    Path | str
-    
+
     # Custom Data types
     tech_spec: TechSpec
     pvt_corners: List[PVT]
     dut_params: List[Param]
     testbenches: List[TestbenchParams]
     optimizer_config: OptimizerConfig
-    
+
     save_sim:  bool = False
     parallel_sim: bool = True
+    # Optional pointer to the design's xschem schematic, relative to `ws_root`.
+    # Consumed by the UI's Schematic viewer to pre-select the main `.sch`.
+    schematic: Path | str | None = None
 
     def __post_init__(self):
         # correct path types
@@ -622,11 +625,15 @@ class Project_Setup:
             self.netlist = Path(self.netlist)
         if isinstance(self.outdir, str):
             self.outdir = Path(self.outdir)
+        if isinstance(self.schematic, str):
+            self.schematic = Path(self.schematic)
         # Log basic info
         logger.info(f"Project '{self.name}' initialized with simulator '{self.simulator}'")
         logger.info(f"\tWorkspace root: {self.ws_root}")
         logger.info(f"\tNetlist path: {self.netlist}")
         logger.info(f"\tOutput directory: {self.outdir}")
+        if self.schematic is not None:
+            logger.info(f"\tSchematic path: {self.schematic}")
 
     # ------------------ Class Methods ------------------
 
@@ -639,7 +646,23 @@ class Project_Setup:
                 data = yaml.safe_load(f)
             logger.debug(f"YAML content successfully loaded: {list(data.keys())}")
 
-            project = safe_from_dict(cls, data['project'], logger, config=DECITE_CONFIG)
+            # Resolve `ws_root` so committed example projects are portable across
+            # machines (see CLAUDE.md "ws_root in YAML"):
+            #   • absolute path             → used as-is (e.g. an out-of-repo workspace)
+            #   • relative path (e.g. "..") → resolved against THIS YAML file's directory
+            #   • omitted / empty           → defaults to the YAML file's own directory
+            # A leading "~" is expanded. The examples ship `ws_root: ..`, which works on
+            # any fresh clone without per-user path editing because the netlists are
+            # committed inside the repo alongside the YAML.
+            proj = data['project']
+            yaml_dir = Path(yaml_path).resolve().parent
+            ws = Path(str(proj.get('ws_root') or '.')).expanduser()
+            if not ws.is_absolute():
+                ws = yaml_dir / ws
+            proj['ws_root'] = str(ws.resolve())
+            logger.debug(f"Resolved ws_root → {proj['ws_root']}")
+
+            project = safe_from_dict(cls, proj, logger, config=DECITE_CONFIG)
             
             # Resolve constraints in tech_spec
             project.resolve_all_parameter_ranges()

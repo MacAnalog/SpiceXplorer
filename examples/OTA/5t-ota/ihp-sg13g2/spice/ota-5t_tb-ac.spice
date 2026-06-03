@@ -82,7 +82,7 @@ Venable v_ena v_ss VDD
 .endc
 
 
-.include /home/noorizad/code/SpiceXplorer/examples/OTA/5t-ota/ihp-sg13g2/xschem/ota-5t_tb-ac.save
+.include /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/5t-ota/ihp-sg13g2/xschem/ota-5t_tb-ac.save
 
 
 *----------------------------------------------------------*
@@ -116,8 +116,8 @@ Venable v_ena v_ss VDD
 * Subcircuit Definition
 *----------------------------------------------------------*
 * expanding   symbol:  ota-5t.sym # of pins=7
-** sym_path: /home/noorizad/code/SpiceXplorer/examples/OTA/5t-ota/ihp-sg13g2/xschem/ota-5t.sym
-** sch_path: /home/noorizad/code/SpiceXplorer/examples/OTA/5t-ota/ihp-sg13g2/xschem/ota-5t.sch
+** sym_path: /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/5t-ota/ihp-sg13g2/xschem/ota-5t.sym
+** sch_path: /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/5t-ota/ihp-sg13g2/xschem/ota-5t.sch
 .subckt ota-5t vdd vout vinp vinn ibias_20u d_ena vss
 *.ipin ibias_20u
 *.iopin vdd

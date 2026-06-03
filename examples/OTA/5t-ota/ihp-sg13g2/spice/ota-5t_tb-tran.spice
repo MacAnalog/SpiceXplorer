@@ -92,8 +92,8 @@ Venable v_ena v_ss dc 0 pwl(0 0 1u 0 1.1u 1.5)
 * Subcircuit Definition
 *----------------------------------------------------------*
 * expanding   symbol:  ota-5t.sym # of pins=7
-** sym_path: /home/noorizad/code/SpiceXplorer/examples/OTA/5t-ota/ihp-sg13g2/xschem/ota-5t.sym
-** sch_path: /home/noorizad/code/SpiceXplorer/examples/OTA/5t-ota/ihp-sg13g2/xschem/ota-5t.sch
+** sym_path: /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/5t-ota/ihp-sg13g2/xschem/ota-5t.sym
+** sch_path: /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/5t-ota/ihp-sg13g2/xschem/ota-5t.sch
 .subckt ota-5t vdd vout vinp vinn ibias_20u d_ena vss
 *.ipin ibias_20u
 *.iopin vdd

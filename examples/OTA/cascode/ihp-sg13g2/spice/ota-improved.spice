@@ -1,4 +1,4 @@
-** sch_path: /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sch
+** sch_path: /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sch
 **.subckt ota-improved vdd vout vinp vinn ibias_5u d_ena vss
 *.ipin ibias_5u
 *.iopin vdd

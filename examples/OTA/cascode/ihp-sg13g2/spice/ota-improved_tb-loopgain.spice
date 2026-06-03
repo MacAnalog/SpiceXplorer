@@ -1,4 +1,4 @@
-** sch_path: /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved_tb-loopgain.sch
+** sch_path: /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved_tb-loopgain.sch
 **.subckt ota-improved_tb-loopgain
 *----------------------------------------------------------*
 * Testbench
@@ -170,8 +170,8 @@ x4 v_dd net8 v_in vmeas2 net9 v_ena v_ss ota-improved
 **.ends
 
 * expanding   symbol:  ota-improved.sym # of pins=7
-** sym_path: /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sym
-** sch_path: /home/noorizad/code/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sch
+** sym_path: /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sym
+** sch_path: /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/xschem/ota-improved.sch
 .subckt ota-improved vdd vout vinp vinn ibias_5u d_ena vss
 *.ipin ibias_5u
 *.iopin vdd
