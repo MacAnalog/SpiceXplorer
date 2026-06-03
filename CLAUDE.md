@@ -87,7 +87,7 @@ Five Zustand stores hold cross-view state: `projectStore` (loaded/applied projec
 
 **Stale `.next` cache**: Running `npm run build` leaves production chunks that break the dev server. Delete `ui/.next` before restarting after a build.
 
-**`ws_root` in YAML**: The example `project_setup.yaml` files use an absolute path (`/home/noorizad/...`) pointing at the **research-group server**, which is the primary dev/run target. Leave them as-is for server work. Live SPICE runs and the sanity check only work where ngspice **and** the IHP `ihp-sg13g2` PDK are installed (the server); on a PDK-less machine they fail by design and the UI shows "PDK missing — replay only".
+**`ws_root` in YAML**: `Project_Setup.from_yaml()` resolves `ws_root` so the committed examples are portable across machines. A **relative** path (the examples ship `ws_root: ..`) is resolved against the YAML file's own directory; an **absolute** path is used as-is (point it at an out-of-repo workspace); an **omitted/empty** value defaults to the YAML's directory. A leading `~` is expanded. The example netlists are committed inside the repo alongside the YAML, so a fresh clone runs without editing any paths. This is **independent of PDK availability**: live SPICE runs and the sanity check only work where ngspice **and** the IHP `ihp-sg13g2` PDK are installed (the server); on a PDK-less machine they fail by design and the UI shows "PDK missing — replay only".
 
 **PDK-aware degradation**: `GET /api/env` reports `{ngspice_ok, pdk_ok, live_runs_enabled, ...}`. When `pdk_ok` is false the status bar shows the replay-only pill and OptimizeTab disables live Start (steering to Replay). Score Shaping, Compare/Explore on cached checkpoints, the wizard, and the Pipeline view all work without the PDK.
 

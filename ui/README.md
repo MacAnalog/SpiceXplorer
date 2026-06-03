@@ -1,6 +1,6 @@
 # SpiceXplorer UI
 
-A web interface for the SpiceXplorer circuit optimization library. It is a **Studio workspace** — a persistent VS Code-style shell (activity bar, contextual left rail, tabbed center views, always-on run rail, command palette) — providing a guided project setup wizard, interactive score shaping, live SPICE-backed optimization runs, run history, and multi-run exploration. Demonstrated on the cascode OTA case study with the IHP SG13G2 PDK.
+The optional web front-end for the [SpiceXplorer](../README.md) circuit-optimization library — the same `project_setup.yaml` and optimization engine you can also drive directly from Python. It is a **Studio workspace** — a persistent VS Code-style shell (activity bar, contextual left rail, tabbed center views, always-on run rail, command palette) — providing a guided project setup wizard, interactive score shaping, live SPICE-backed optimization runs, run history, and multi-run exploration. The bundled cascode OTA on the IHP `ihp-sg13g2` PDK serves as the reference case study; nothing here is specific to it.
 
 > **Live SPICE needs the PDK.** Live optimization and the sanity check require both `ngspice` and the IHP `ihp-sg13g2` PDK (present on the research-group server). On a machine without the PDK the app detects this (`GET /api/env`), shows a **"PDK missing — replay only"** status pill, and disables live runs — while score shaping, checkpoint replay/compare, the wizard, and the pipeline view all work fully.
 
@@ -78,7 +78,7 @@ Overlays: CommandPalette (⌘K) · WizardOverlay (+ New project)
 | `ui/src/app/page.tsx` | Redirect → `/setup` |
 | `ui/src/app/(studio)/layout.tsx` | Mounts `StudioShell`; persists across view navigation |
 | `ui/src/app/(studio)/<view>/page.tsx` | One thin segment per view (setup, scoring, optimize, compare, schematic, pipeline, health) |
-| `ui/src/components/shell/` | `StudioShell`, `ActivityBar`, `TabStrip`, `StudioTitleBar`, `RunControl`, `StudioLeftRail`, `RightRail`, `BottomPanel`, `StatusBar`, `nav.ts` |
+| `ui/src/components/shell/` | `StudioShell`, `ActivityBar`, `TabStrip`, `StudioTitleBar`, `RunControl`, `Toolbar`, `StudioLeftRail`, `RightRail`, `BottomPanel`, `StatusBar`, `nav.ts` |
 | `ui/src/components/shell/rails/` | Per-activity left-rail variants: `RunsRail`, `SpecsRail`, `OutlineRail` (+ shared `parts`) |
 | `ui/src/components/shell/nav.ts` | **Single source of truth** for the 7 views (id, label, route, icon, shortcut, gating, `rail`) |
 | `ui/src/components/overlays/` | `CommandPalette` (⌘K), `WizardOverlay` (+ New project) |
@@ -124,14 +124,14 @@ Navigate views via the activity-bar icons, the tab strip, or **⌘1–⌘7**. Vi
 - **Setup view** — Monaco YAML editor (debounced validation), example dropdown, Upload, Validate, Apply, plus the **Create Wizard** toggle.
 - **New-project wizard** — 7-step form (Basic Info → PDK Rules → DUT Params w/ netlist upload → PVT → Testbenches → Target Specs → Optimizer) with a live YAML preview; generates + applies a `project_setup.yaml`. Launchable from Setup, the title-bar **+ New project**, or the ⌘K palette. Backed by `POST /api/project/generate`, `POST /api/project/parse-to-form`, `POST /api/netlist/parse`.
 - **Score Shaping view** — Spec selector + slider (range = target ± 3×range), live penalty curve, per-spec breakdown (linear/sigmoid), highest-penalty callout. Honors deep-linked spec selection.
-- **Optimize view** — Algorithm dropdown, budget input, preset checkpoint replay, Start/Stop with SSE streaming, score + metric convergence charts. **Algorithm/budget/seed are honored on live runs** (applied in-memory; YAML not rewritten). Live Start disables + steers to Replay when the PDK is absent.
-- **Run ▾ popover** — title-bar control to set the shared live-run overrides (algorithm/budget/seed/**autosave-every**) and start a run from any view; collapses to Stop + progress while a run is active, disables + steers to Replay when the PDK is absent. The Optimize toolbar shares the same `runConfig` (uiStore), so the two stay in sync.
+- **Optimize view** — Algorithm dropdown, budget input, preset checkpoint replay, Start/Stop with SSE streaming, score + metric convergence charts. **Algorithm and budget overrides are honored on live runs** (applied in-memory; YAML not rewritten); seed and autosave-every are set via the Run ▾ popover. Live Start disables + steers to Replay when the PDK is absent.
+- **Run ▾ popover** — title-bar control to set the shared live-run overrides (algorithm/budget/seed/**autosave-every**) and start a run from any view; collapses to Stop + progress while a run is active, disables + steers to Replay when the PDK is absent. The Optimize toolbar shares the same `runConfig` (uiStore) for **algorithm and budget**, so those stay in sync; seed and autosave-every are editable only in the popover.
 - **Checkpointing for long runs** — set "autosave every N trials" to write periodic, *cumulative* checkpoints during a live run; each one streams a `checkpoint` SSE event so the left-rail checkpoint list (and the right-rail "N checkpoints saved" counter) update live. Any autosave checkpoint has a **Resume** action (▶ in the rail) that continues that optimization from where it left off (`load_checkpoint` + `optimize(keep_history=True)`), seeding the iteration count and best-so-far from the restored history. A run also writes a `_FINAL` checkpoint on completion **and on Stop**, so an interrupted run is always resumable.
 - **Right rail + bottom panel** — Live run progress, spec status chips, best params, and the optimizer log; keep updating across view changes (SSE hoisted into `runStore`).
 - **Run history** — Persisted run list with score sparklines; click a replay run to re-run.
 - **Command palette (⌘K)** — Switch view · jump to spec · jump to run · new project · stop run.
 - **Explore view** — Run A/B checkpoint selectors, overlaid convergence, metric scatter (X/Y), performance envelope, metric histogram, best design params, spec summary.
-- **Schematic view** — Xschem `.sch` hierarchy browser with symbol resolution, plus a **device inspector**: pick a spec + device, set W/L (and bias/NG) operating points with sliders, and compute finite-difference sensitivity (`d(metric)/d(param)` + dimensionless elasticity) as a ranked bar chart. Backed by `GET /api/spec/{name}/sensitivity` (live SPICE — needs the PDK).
+- **Schematic view** — Xschem `.sch` hierarchy browser with symbol resolution, plus a **device inspector**: pick a spec + device, set W/L (and bias/NG) operating points with sliders, and compute finite-difference sensitivity (`d(metric)/d(param)` and dimensionless elasticity); the inspector displays **elasticity** as a ranked bar chart. Backed by `GET /api/spec/{name}/sensitivity` (live SPICE — needs the PDK).
 - **Pipeline view** — Read-only DAG (Optimizer → DUT params → Testbenches → Specs) with clickable spec nodes that deep-link to Score Shaping.
 - **Health / sanity check** — One sim per testbench + a trial optimizer step; reports ngspice path, PDK verdict, per-testbench log tails.
 - **PDK-aware degradation** — `GET /api/env` drives the status-bar sim/PDK pill and gates live runs.
@@ -189,21 +189,15 @@ uv run pytest tests/test_smoke_optimization.py -v
 
 ### Test inventory
 
-| Test | Layer | ngspice required | Slow |
+| File | Covers | ngspice | slow |
 |---|---|---|---|
-| `test_ngspice_wrapper_imports` | spice_engine | yes | no |
-| `test_ngspice_wrapper_instantiation` | spice_engine | yes | no |
-| `test_ngspice_sanity_check` | spice_engine | yes | no |
-| `test_ngspice_update_params` | spice_engine | yes | no |
-| `test_ngspice_run_and_wait` | spice_engine | yes | **yes** |
-| `test_project_setup_loads` | optimization | no | no |
-| `test_project_setup_param_bounds` | optimization | no | no |
-| `test_orchestrator_no_autoload` | optimization | no | no |
-| `test_orchestrator_initialize_creates_wrappers` | optimization | yes | no |
-| `test_optimizer_parameterize` | optimization | yes | no |
-| `test_one_optimization_step` | optimization | yes | **yes** |
+| `tests/test_smoke_optimization.py` | `Project_Setup` YAML loading + `ws_root` resolution (relative/absolute/omitted/`~`), DUT param bounds, orchestrator/optimizer wiring, one real optimization step | partial | 1 test |
+| `tests/test_smoke_spice_engine.py` | NGSpice wrapper: imports, instantiation, sanity check, param updates, run-and-wait | yes | 1 test |
+| `tests/test_rl_factory.py` | RL agent factory — DDPG/SAC adapter translation, unknown-agent error | no | no |
+| `tests/test_hyperparameters.py` | RL hyperparameter loading from YAML (DDPG) | no | no |
+| `tests/test_newcas_demo_runner.py` | Case-study demo data bridge: config/trace loading + metric normalization | no | no |
 
-Tests are skipped automatically if `ngspice` is not in `PATH`.
+`ngspice = partial` means only the simulation-backed tests in that file need it. Tests that require `ngspice` are **auto-skipped** when it is not on `PATH`; tests that additionally require the PDK fail by design on a PDK-less machine.
 
 ---
 
