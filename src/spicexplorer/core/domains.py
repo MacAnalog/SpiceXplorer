@@ -646,7 +646,23 @@ class Project_Setup:
                 data = yaml.safe_load(f)
             logger.debug(f"YAML content successfully loaded: {list(data.keys())}")
 
-            project = safe_from_dict(cls, data['project'], logger, config=DECITE_CONFIG)
+            # Resolve `ws_root` so committed example projects are portable across
+            # machines (see CLAUDE.md "ws_root in YAML"):
+            #   • absolute path             → used as-is (e.g. an out-of-repo workspace)
+            #   • relative path (e.g. "..") → resolved against THIS YAML file's directory
+            #   • omitted / empty           → defaults to the YAML file's own directory
+            # A leading "~" is expanded. The examples ship `ws_root: ..`, which works on
+            # any fresh clone without per-user path editing because the netlists are
+            # committed inside the repo alongside the YAML.
+            proj = data['project']
+            yaml_dir = Path(yaml_path).resolve().parent
+            ws = Path(str(proj.get('ws_root') or '.')).expanduser()
+            if not ws.is_absolute():
+                ws = yaml_dir / ws
+            proj['ws_root'] = str(ws.resolve())
+            logger.debug(f"Resolved ws_root → {proj['ws_root']}")
+
+            project = safe_from_dict(cls, proj, logger, config=DECITE_CONFIG)
             
             # Resolve constraints in tech_spec
             project.resolve_all_parameter_ranges()

@@ -6,7 +6,10 @@ project:
   save_sim : False
   parallel_sim : True # Default is True
 
-  ws_root : /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/
+  # Workspace root for this design. A relative path is resolved against THIS file's
+  # directory, so this example works on a fresh clone with no path editing. Use an
+  # absolute path to point at a workspace outside the repo.
+  ws_root : ..
   # The following paths are relative to the ws_root
   netlist : spice/ota-improved.spice
   schematic : xschem/ota-improved.sch  # optional, used by the UI Schematic tab

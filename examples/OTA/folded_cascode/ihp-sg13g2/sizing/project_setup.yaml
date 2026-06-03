@@ -5,7 +5,10 @@ project:
   simulator: ngspice
   save_sim: False
 
-  ws_root : /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/folded_cascode/ihp-sg13g2/
+  # Workspace root for this design. A relative path is resolved against THIS file's
+  # directory, so this example works on a fresh clone with no path editing. Use an
+  # absolute path to point at a workspace outside the repo.
+  ws_root : ..
   # The following paths are relative to the ws_root
   netlist : spice/cora_testbench.spice
   outdir  : spice/temp_spice_out

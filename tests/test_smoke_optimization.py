@@ -10,12 +10,102 @@ Coverage (layered — each layer builds on the previous):
   Layer 3 — ngspice required + slow:
     - One optimization_step() runs a real simulation without crashing
 """
+import re
+from pathlib import Path
+
 import pytest
 
-from conftest import EXAMPLE_YAML, requires_ngspice, slow
+from conftest import EXAMPLE_YAML, REPO_ROOT, requires_ngspice, slow
+
+
+# Example projects whose YAML parses today. folded_cascode is intentionally
+# excluded: its `pvt_map` block is work-in-progress for multi-PVT runs and does
+# not parse yet (unrelated to path handling).
+PORTABLE_EXAMPLE_YAMLS = [
+    "examples/OTA/cascode/ihp-sg13g2/sizing/project_setup.yaml",
+    "examples/OTA/5t-ota/ihp-sg13g2/sizing/project_setup.yaml",
+]
 
 
 # ── Layer 1: no SPICE required ──────────────────────────────────────────────
+
+@pytest.mark.parametrize("rel_yaml", PORTABLE_EXAMPLE_YAMLS)
+def test_ws_root_resolves_relative_to_yaml(rel_yaml):
+    """`ws_root` resolves against the YAML's own directory so the committed
+    examples are portable on a fresh clone — no hardcoded absolute paths.
+
+    Guards the resolution rule in Project_Setup.from_yaml(): the examples ship
+    `ws_root: ..`, which must resolve to the design root (the YAML's grandparent)
+    and contain every referenced netlist.
+    """
+    from spicexplorer.core.domains import Project_Setup
+
+    yaml_path = (REPO_ROOT / rel_yaml).resolve()
+    setup = Project_Setup.from_yaml(yaml_path)
+
+    ws = Path(setup.ws_root)
+    assert ws.is_absolute(), f"ws_root should be absolute, got {ws!r}"
+    assert ws == yaml_path.parent.parent, (
+        f"ws_root should resolve to the design root (yaml/../..); got {ws}"
+    )
+    assert ws.is_dir(), f"resolved ws_root does not exist: {ws}"
+
+    dut_netlist = ws / setup.netlist
+    assert dut_netlist.is_file(), f"DUT netlist not found at resolved path: {dut_netlist}"
+
+    for tb in setup.testbenches:
+        if not tb.enable:
+            continue
+        tb_netlist = ws / tb.netlist
+        assert tb_netlist.is_file(), f"testbench netlist not found: {tb_netlist}"
+
+
+def _example_yaml_with_ws_root(tmp_path, ws_root_value):
+    """Copy the cascode example YAML into ``tmp_path``, overriding ``ws_root``.
+
+    ``ws_root_value=None`` removes the field entirely (the omitted case). Returns
+    the path to the written YAML. Only ws_root resolution is exercised here —
+    from_yaml() does not stat the netlists, so they need not exist in tmp_path.
+    """
+    text = (REPO_ROOT / "examples/OTA/cascode/ihp-sg13g2/sizing/project_setup.yaml").read_text()
+    if ws_root_value is None:
+        text = re.sub(r"(?m)^[ \t]*ws_root[ \t]*:.*$", "", text)
+    else:
+        text = re.sub(r"(?m)^[ \t]*ws_root[ \t]*:.*$", f"  ws_root : {ws_root_value}", text)
+    dest = tmp_path / "project_setup.yaml"
+    dest.write_text(text)
+    return dest
+
+
+def test_ws_root_absolute_is_used_as_is(tmp_path):
+    """An absolute ws_root is honoured verbatim (server / out-of-repo workspace),
+    never joined to the YAML's directory."""
+    from spicexplorer.core.domains import Project_Setup
+
+    external_ws = (tmp_path.parent / "spx_external_ws").resolve()  # absolute, outside yaml dir
+    yaml_path = _example_yaml_with_ws_root(tmp_path, str(external_ws))
+    setup = Project_Setup.from_yaml(yaml_path)
+    assert Path(setup.ws_root) == external_ws
+
+
+@pytest.mark.parametrize("ws_root_value", [None, '""'], ids=["omitted", "empty"])
+def test_ws_root_omitted_or_empty_defaults_to_yaml_dir(tmp_path, ws_root_value):
+    """A missing or empty ws_root defaults to the YAML file's own directory."""
+    from spicexplorer.core.domains import Project_Setup
+
+    yaml_path = _example_yaml_with_ws_root(tmp_path, ws_root_value)
+    setup = Project_Setup.from_yaml(yaml_path)
+    assert Path(setup.ws_root) == tmp_path.resolve()
+
+
+def test_ws_root_tilde_is_expanded(tmp_path):
+    """A leading ~ in ws_root expands to the user's home, not the YAML directory."""
+    from spicexplorer.core.domains import Project_Setup
+
+    yaml_path = _example_yaml_with_ws_root(tmp_path, "~/spx_ws_unit_test")
+    setup = Project_Setup.from_yaml(yaml_path)
+    assert Path(setup.ws_root) == (Path.home() / "spx_ws_unit_test").resolve()
+
 
 def test_project_setup_loads():
     """Project_Setup.from_yaml() parses the example OTA project correctly."""
