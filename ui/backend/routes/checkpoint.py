@@ -21,6 +21,24 @@ def _infer_score_fn(path: Path) -> str:
     return "unknown"
 
 
+def _resolve_checkpoint_path(checkpoint_id: str) -> Path | None:
+    """Resolve a checkpoint id to a file on disk.
+
+    Tries the configured presets first, then any autosave under ``auto_save/``
+    (a live run writes a FINAL .json there). Shared by load/envelope/scatter so
+    the analysis views work on *live* results, not just the preset demo data.
+    """
+    path = preset_checkpoint_paths().get(checkpoint_id)
+    if path is not None and path.exists():
+        return path
+    autosave_root = REPO_ROOT / "auto_save"
+    if autosave_root.exists():
+        candidates = list(autosave_root.rglob(f"{checkpoint_id}*.json"))
+        if candidates:
+            return candidates[0]
+    return None
+
+
 def _list_autosave_checkpoints() -> list[dict[str, Any]]:
     results = []
     autosave_root = REPO_ROOT / "auto_save"
@@ -57,17 +75,8 @@ def list_checkpoints():
 
 @router.get("/checkpoint/{checkpoint_id}")
 def load_checkpoint(checkpoint_id: str, limit: int = Query(default=0)):
-    presets = preset_checkpoint_paths()
-    path: Path | None = presets.get(checkpoint_id)
-
+    path = _resolve_checkpoint_path(checkpoint_id)
     if path is None:
-        # Try autosave
-        autosave_root = REPO_ROOT / "auto_save"
-        candidates = list(autosave_root.rglob(f"{checkpoint_id}*.json")) if autosave_root.exists() else []
-        if candidates:
-            path = candidates[0]
-
-    if path is None or not path.exists():
         raise HTTPException(404, f"Checkpoint '{checkpoint_id}' not found")
 
     data = read_checkpoint(path, limit=limit if limit > 0 else None)
@@ -117,9 +126,8 @@ def checkpoint_envelope(checkpoint_id: str, yaml_path: str = Query(default="")):
     from pathlib import Path as _Path
     from spicexplorer.core.domains import Project_Setup
 
-    presets = preset_checkpoint_paths()
-    path = presets.get(checkpoint_id)
-    if path is None or not path.exists():
+    path = _resolve_checkpoint_path(checkpoint_id)
+    if path is None:
         raise HTTPException(404, f"Checkpoint '{checkpoint_id}' not found")
 
     data = read_checkpoint(path)
@@ -149,9 +157,8 @@ def checkpoint_scatter(
     from pathlib import Path as _Path
     from spicexplorer.core.domains import Project_Setup
 
-    presets = preset_checkpoint_paths()
-    path = presets.get(checkpoint_id)
-    if path is None or not path.exists():
+    path = _resolve_checkpoint_path(checkpoint_id)
+    if path is None:
         raise HTTPException(404, f"Checkpoint '{checkpoint_id}' not found")
 
     data = read_checkpoint(path)
