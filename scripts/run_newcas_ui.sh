@@ -62,9 +62,15 @@ stop_servers() {
 
 stop_servers  # clear anything a crashed previous run left behind
 
-# Start FastAPI backend
+# Start FastAPI backend.
+# --reload is scoped to the source dirs: watching the whole repo (the default)
+# reloads on every backend log write (logs/), checkpoint autosave (auto_save/),
+# and Next build artifact (ui/.next) — an endless reload loop that thrashes the
+# backend ("watchfiles: change detected" spam, a new log file per restart).
 echo "Starting FastAPI backend on :${BACKEND_PORT}… (LOG_LEVEL=${LOG_LEVEL})"
-LOG_LEVEL="${LOG_LEVEL}" uv run --extra ui uvicorn ui.backend.main:app --reload --port "${BACKEND_PORT}" &
+LOG_LEVEL="${LOG_LEVEL}" uv run --extra ui uvicorn ui.backend.main:app \
+  --reload --reload-dir "${ROOT_DIR}/ui/backend" --reload-dir "${ROOT_DIR}/src" \
+  --port "${BACKEND_PORT}" &
 BACKEND_PID=$!
 
 # Start Next.js frontend on :4000 (avoids VS Code Remote SSH occupying :3000)
