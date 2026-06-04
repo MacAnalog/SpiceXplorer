@@ -20,9 +20,11 @@ const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false 
 
 interface Props {
   onSaved?: (savedPath: string) => void;
+  /** Absolute path to pre-fill the Save field (e.g. the loaded project's path). */
+  defaultSavePath?: string;
 }
 
-export function WizardShell({ onSaved }: Props) {
+export function WizardShell({ onSaved, defaultSavePath }: Props) {
   const { form, stepIdx, setStep, next, back, reset } = useWizardStore();
   const [yamlText, setYamlText] = useState("");
   const [yamlErrors, setYamlErrors] = useState<string[]>([]);
@@ -31,10 +33,22 @@ export function WizardShell({ onSaved }: Props) {
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!savePath && form.project.ws_root) {
-      setSavePath(`${form.project.ws_root.replace(/\/$/, "")}/project_setup.yaml`);
+    if (savePath) return;
+    // Prefer an explicit absolute default (the loaded project's path).
+    if (defaultSavePath) {
+      setSavePath(defaultSavePath);
+      return;
     }
-  }, [form.project.ws_root, savePath]);
+    // Otherwise only auto-fill from ws_root when it is ABSOLUTE. A relative root
+    // (e.g. the examples' "..") would be written relative to the backend CWD —
+    // /app in Docker → a non-writable "/project_setup.yaml" — so leave the field
+    // empty and let the user enter an absolute path (the backend also rejects
+    // relative save paths with a clear message).
+    const root = form.project.ws_root?.replace(/\/$/, "");
+    if (root && (root.startsWith("/") || root.startsWith("~"))) {
+      setSavePath(`${root}/project_setup.yaml`);
+    }
+  }, [defaultSavePath, form.project.ws_root, savePath]);
 
   useEffect(() => {
     const t = setTimeout(async () => {

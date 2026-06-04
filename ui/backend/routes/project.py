@@ -16,7 +16,8 @@ router = APIRouter()
 
 
 class LoadRequest(BaseModel):
-    yaml_path: str
+    yaml_path: Optional[str] = None
+    yaml_content: Optional[str] = None  # apply edited/uploaded YAML that isn't on disk
 
 
 class ValidateRequest(BaseModel):
@@ -104,6 +105,25 @@ def _summarise(project: Project_Setup) -> dict[str, Any]:
 
 @router.post("/project/load")
 def load_project(body: LoadRequest):
+    # Apply from raw content (uploaded or edited YAML with no on-disk path). The
+    # parsed summary doesn't need the netlist/ws_root paths to exist — those only
+    # matter for live SPICE — so a project with relative paths still summarises.
+    if body.yaml_content:
+        import os
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
+            tmp.write(body.yaml_content)
+            tmp_path = tmp.name
+        try:
+            project = Project_Setup.from_yaml(tmp_path)
+            return {"ok": True, "summary": _summarise(project), "yaml_path": ""}
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        finally:
+            os.unlink(tmp_path)
+
+    if not body.yaml_path:
+        raise HTTPException(status_code=400, detail="Provide yaml_path or yaml_content")
     path = Path(body.yaml_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"YAML file not found: {path}")
@@ -166,6 +186,17 @@ def generate_project(body: GenerateRequest):
     saved_path: Optional[str] = None
     if body.save_path:
         path = Path(body.save_path).expanduser()
+        # A relative path would be resolved against the backend's CWD (/app in the
+        # container → a non-writable root like /project_setup.yaml). Require an
+        # absolute path so the target is unambiguous and writable.
+        if not path.is_absolute():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"save_path must be an absolute path (got '{body.save_path}'). "
+                    "Enter an absolute Save path, e.g. /work/project_setup.yaml."
+                ),
+            )
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(yaml_text)

@@ -37,6 +37,7 @@ export function SetupTab({ appConfig }: Props) {
     validationErrors,
     isApplied,
     setYaml,
+    setYamlPath,
     setValidationErrors,
     apply,
   } = useProjectStore();
@@ -98,11 +99,15 @@ export function SetupTab({ appConfig }: Props) {
   };
 
   const handleApply = async () => {
-    if (!yamlPath) return;
+    if (!yamlPath && !yaml.trim()) return;
     setLoading(true);
     try {
-      const res = await api.loadProject(yamlPath);
-      if (res.ok) apply(res.summary, yamlPath);
+      // Prefer the on-disk path (keeps relative netlist/ws_root resolution for
+      // live runs); fall back to the editor content for uploaded/edited YAML.
+      const res = yamlPath
+        ? await api.loadProject(yamlPath)
+        : await api.loadProjectContent(yaml);
+      if (res.ok) apply(res.summary, res.yaml_path);
     } finally {
       setLoading(false);
     }
@@ -114,6 +119,9 @@ export function SetupTab({ appConfig }: Props) {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const text = ev.target?.result as string;
+      // Uploaded content has no on-disk path; clear any stale path so Apply uses
+      // the uploaded YAML (and the button enables on content alone).
+      setYamlPath("");
       setYaml(text);
     };
     reader.readAsText(file);
@@ -218,7 +226,7 @@ export function SetupTab({ appConfig }: Props) {
             <Button
               variant="primary"
               onClick={handleApply}
-              disabled={loading || !yamlPath}
+              disabled={loading || (!yamlPath && !yaml.trim())}
             >
               {loading ? "Loading…" : "Apply →"}
             </Button>
@@ -293,7 +301,7 @@ export function SetupTab({ appConfig }: Props) {
           </Panel>
         ) : (
           <div className="flex min-h-0 min-w-0 flex-col">
-            <WizardShell onSaved={handleWizardSaved} />
+            <WizardShell onSaved={handleWizardSaved} defaultSavePath={yamlPath} />
           </div>
         )}
 
