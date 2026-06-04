@@ -25,6 +25,11 @@
 venv/
 .venv/
 
+# Docker / local container state (secrets + bind-mount workdir)
+.env
+!.env.example
+work/
+
 # Build and distribution directories
 build/
 dist/

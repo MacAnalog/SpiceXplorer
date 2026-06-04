@@ -6,8 +6,6 @@ Coverage:
   - Parameter update roundtrip does not raise
   - A real AC simulation runs end-to-end and returns a RawRead (slow)
 """
-import pytest
-from pathlib import Path
 
 from conftest import EXAMPLE_TB_NETLIST, requires_ngspice, slow
 

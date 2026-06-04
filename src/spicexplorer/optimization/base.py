@@ -5,7 +5,7 @@ import torch
 import numpy        as np
 import plotly.graph_objects as go
 
-from    typing      import Dict, List, Tuple, Any, Mapping
+from    typing      import Dict, Tuple, Any
 from    tqdm        import tqdm
 from    abc         import ABC, abstractmethod
 from    pathlib     import Path
@@ -22,12 +22,11 @@ from spicelib.sim.run_task   import RunTask   as SpicelibRunTaskClass
 
 # Symxplorer Specific Imports
 from   spicexplorer.spice_engine.spicelib     import NGSpice_Wrapper, Ngspice_Plot_Type
-from   spicexplorer.core.domains    import Project_Setup, ListTargetSpec, TargetSpec, Error_Types, TestbenchParams
+from   spicexplorer.core.domains    import Project_Setup, ListTargetSpec, TargetSpec, Error_Types
 from   spicexplorer.core.domains    import OptimizationGoalType, OptimizationPoint, OptimizationLogEntry, OptimizationLog
 from   spicexplorer.core.utils      import compute_error, compute_reward, convert_linear_to_log, log_denormalize, linear_denormalize
-from   spicexplorer.core.utils      import plot_complex_response, get_bode_fitness_loss, Transfer_Func_Helper, Frequency_Weight, UNIT_DICT
+from   spicexplorer.core.utils      import plot_complex_response, get_bode_fitness_loss, Transfer_Func_Helper, Frequency_Weight
 
-from spicexplorer.logging import setup_loggers
 
 logger = logging.getLogger("spicexplorer.optimization.base")
 
@@ -159,7 +158,7 @@ class Base_Optimizer(ABC):
         try:
             with tqdm(range(self.optimizer_config.budget), desc="Optimizing", unit="trial") as pbar:
                 for trial in pbar:
-                    logger.debug(f"---------------------------------------------------------------------------")
+                    logger.debug("---------------------------------------------------------------------------")
                     logger.debug(f"STARTING trial {trial+1}/{self.optimizer_config.budget}...")
                     
                     # (a) Perform the optimization logic for one step/trial
@@ -175,15 +174,15 @@ class Base_Optimizer(ABC):
                     if (not self.disable_autosave) and (self.autosave_checkpoint_freqeucny is not None) and ((trial+1) % self.autosave_checkpoint_freqeucny == 0):
                         self.save_checkpoint(name=self.get_auto_save_name(append_txt=f"trial{trial+1}"))
                         self.optimization_log = OptimizationLog()
-                        logger.critical(f"Reset the optimization_log")
+                        logger.critical("Reset the optimization_log")
 
                     # Update the progress bar with current and best scores
                     current_best = self.optimization_log[self.global_best_index].point.score
                     pbar.set_postfix(score=f"{curr_score:.4f}", best=f"{current_best:.4f}")
-                    logger.debug(f"---------------------------------------------------------------------------")
+                    logger.debug("---------------------------------------------------------------------------")
 
         except KeyboardInterrupt:
-            logger.critical(f"User requested interrupt")
+            logger.critical("User requested interrupt")
 
         if not self.disable_autosave and not self.optimization_log.is_empty():
             logger.info(f"saving the unsaved results... len = {len(self.optimization_log)} - Last Trial = {trial}")
@@ -490,7 +489,7 @@ class Spice_Base_Optimizer(Base_Optimizer):
             wrapper.update_params(parameterization=parameterization)
 
             if not self.setup_obj.parallel_sim:
-                logger.debug(f"parallel_sim: FALSE -> Using run_and_wait method")
+                logger.debug("parallel_sim: FALSE -> Using run_and_wait method")
                 curr_raw, curr_log, task_name = wrapper.run_and_wait(exe_log=True)
         
                 if curr_raw is None:
@@ -500,7 +499,7 @@ class Spice_Base_Optimizer(Base_Optimizer):
                 results[tb] = curr_raw
 
             else:                
-                logger.debug(f"parallel_sim: TRUE -> Using run_and_pass method")
+                logger.debug("parallel_sim: TRUE -> Using run_and_pass method")
                 run_task = wrapper.run_and_pass(exe_log=True)
                 run_task_lst[tb] = run_task
 
@@ -690,7 +689,7 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
         """
         # 1 - Run a SPICE simulation
         # ---------------------------------------------------------------
-        raw = self.simulate_circuit(parameterization=parameterization)
+        self.simulate_circuit(parameterization=parameterization)
 
         # 2 - Extract frequency array (first run only)
         # ---------------------------------------------------------------
@@ -724,7 +723,7 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
                 )
             )
 
-        logger.debug(f"finished the trial evaluation.... summary")
+        logger.debug("finished the trial evaluation.... summary")
         logger.debug(f"\tmetric_value = {fitness_score}")
         logger.debug(f"\t\t- mag_loss : {mag_loss}")
         logger.debug(f"\t\t- phase_loss : {phase_loss}")
@@ -799,7 +798,7 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
     # Over-writing the abstract method
     def plot_solution(self, parameterization: Dict[str, float], **kwargs):
 
-        raw = self.simulate_circuit(parameterization)
+        self.simulate_circuit(parameterization)
         current_complex_response = self.extract_circuit_response_from_latest_run()
         self.prepare_frequency_array()
         
@@ -868,7 +867,7 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
                 log_file={wrapper.testbench_name: wrapper.curr_log for wrapper in self.spicelib_wrappers.values() if wrapper.curr_log is not None}
                 ))
 
-        logger.debug(f"finished the trial evaluation.... summary")
+        logger.debug("finished the trial evaluation.... summary")
         logger.debug(f"\tmetric_value = {fitness_score}")
 
         self.clean_up(delete_raw_only=True)

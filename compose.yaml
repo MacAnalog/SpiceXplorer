@@ -1,0 +1,69 @@
+# =============================================================================
+# SpiceXplorer — full live-SPICE stack (FastAPI backend + Next.js frontend).
+#
+#   cp .env.example .env      # then edit if you want a custom mount / ports
+#   docker compose up --build
+#   open http://localhost:4000
+#
+# The backend image bundles ngspice + the IHP ihp-sg13g2 PDK, so live SPICE
+# works out of the box on x86-64 — no host install needed. All knobs below are
+# overridable via .env (docker compose loads it automatically); the defaults
+# give a working stack with no .env at all.
+# =============================================================================
+name: spicexplorer
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+      args:
+        # OSDI compact-model source: `compile` (default) builds them from the
+        # vendored Verilog-A for the host architecture → native on x86-64 AND
+        # arm64, no emulation. Set `vendor` for the fast prebuilt-x86-64 path
+        # (skips the openvaf toolchain; amd64 / emulation only).
+        OSDI_MODE: ${OSDI_MODE:-compile}
+        # Set true (here or via INSTALL_AGENTS in .env) once the LLM-agent layer
+        # lands, to install the `agents` dependency extra into the image.
+        INSTALL_AGENTS: ${INSTALL_AGENTS:-false}
+    image: spicexplorer-backend
+    # No platform pin — the image builds native to the host (x86-64 or arm64),
+    # so live SPICE runs without emulation everywhere. For the fast prebuilt
+    # OSDI path on a non-amd64 host, build amd64 under emulation instead:
+    #   OSDI_MODE=vendor DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose up --build
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      BACKEND_PORT: 8000
+      # Align in-container file ownership to the host user (Linux bind mounts).
+      HOST_UID: ${UID:-1000}
+      HOST_GID: ${GID:-1000}
+      # --- LLM API keys (optional; consumed once the agent layer is added) -----
+      # Passed through from your .env; blank if unset. Never baked into the image.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+    volumes:
+      # Your work drive — put project YAMLs/netlists here and point a run's
+      # ws_root at /work to persist outputs to the host. Customize via WORKDIR.
+      - ${WORKDIR:-./work}:/work
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+      args:
+        # Baked into the Next.js rewrite at build time; the internal compose
+        # service URL for the backend (do not point this at localhost).
+        BACKEND_URL: http://backend:8000
+    image: spicexplorer-frontend
+    environment:
+      BACKEND_URL: http://backend:8000
+      PORT: 4000
+    ports:
+      - "${FRONTEND_PORT:-4000}:4000"
+    depends_on:
+      - backend
+    restart: unless-stopped

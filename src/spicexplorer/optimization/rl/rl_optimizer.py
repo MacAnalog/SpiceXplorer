@@ -1,6 +1,6 @@
 import numpy as np
 import logging
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple
 
 # Stable Baselines3 (for vector envs)
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
@@ -13,7 +13,7 @@ from spicexplorer.core.domains import (
 from spicexplorer.spice_engine.spicelib import NGSpice_Wrapper
 
 # Import Base Classes and Environment
-from ..base import Spice_Constraint_Satisfaction, Spice_Single_Objective
+from ..base import Spice_Constraint_Satisfaction
 from .circuit_env import SpiceGymEnv
 from .rl_factory import RLAgentFactory
 

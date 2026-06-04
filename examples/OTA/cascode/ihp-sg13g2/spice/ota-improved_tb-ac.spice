@@ -43,7 +43,7 @@ Venable v_ena v_ss VDD
 .endc
 
 
-.include /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/cascode/ihp-sg13g2/spice/ota-improved_tb-ac.save
+.include ota-improved_tb-ac.save
 
 
 

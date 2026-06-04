@@ -35,13 +35,40 @@ ui = [
     "uvicorn[standard]>=0.32",
     "python-multipart>=0.0.12",
 ]
+# LLM-agent layer (placeholder — populate when the agent subsystem lands).
+# API keys are supplied at runtime via the environment (see .env.example),
+# never baked into the image. Installed in the container when the
+# INSTALL_AGENTS build arg is true (docker/Dockerfile.backend).
+agents = [
+    "anthropic>=0.40",
+    "python-dotenv>=1.0",
+    # "openai>=1.0",
+    # "langgraph>=0.2",
+]
 
 # [project.scripts]
 # run-symbolix = "spicexplorer.symbolic_solver.main:main"
 
+# --- Torch: CPU-only wheels on Linux ------------------------------------------
+# This project uses no CUDA, so on Linux we pull torch from the PyTorch CPU
+# index instead of the default PyPI wheels (which drag in the multi-GB NVIDIA
+# CUDA stack). This shrinks both the Docker image and the local Linux venv.
+# macOS/Windows fall through to the normal PyPI wheels.
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",
+    "ruff>=0.8",
+    "pyright>=1.1.380",
 ]
 
 [tool.pytest.ini_options]
@@ -50,6 +77,26 @@ addopts = "-v -m 'not slow'"
 markers = [
     "slow: marks tests that run a real SPICE simulation (deselect with -m 'not slow')",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "F",      # pyflakes
+    "E",      # pycodestyle errors
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "E701",   # multiple statements on one line (colon)
+    "E702",   # multiple statements on one line (semicolon)
+]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.10"
+typeCheckingMode = "off"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/spicexplorer"]

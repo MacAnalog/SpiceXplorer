@@ -1,7 +1,7 @@
 import torch
 import control as ctrl
 import sympy  as sp
-from   typing import Dict, List, Tuple
+from   typing import List
 from abc import ABC, abstractmethod
 
 from .utils import Transfer_Func_Helper

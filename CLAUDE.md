@@ -37,6 +37,21 @@ cd ui && npm run build          # type-checks and builds; delete ui/.next before
 
 Frontend runs on port 4000 (not 3000) because VS Code Remote SSH occupies 3000 on the server.
 
+### Docker (portable, self-contained stack)
+
+```bash
+cp .env.example .env            # optional; defaults work
+docker compose up --build       # backend (:8000) + frontend (:4000)
+```
+
+`compose.yaml` builds two images from [`docker/Dockerfile.backend`](docker/Dockerfile.backend) and [`ui/Dockerfile`](ui/Dockerfile). The backend **compiles ngspice from source** (`--enable-osdi`) and copies the vendored PDK subset in [`docker/pdk/`](docker/pdk/) — so live SPICE works with no host install. Non-obvious points:
+
+- **Native multi-arch via `OSDI_MODE`** (build arg, default `compile`): `compile` builds openvaf (Rust + LLVM-18) and compiles the OSDI from the vendored Verilog-A (`docker/pdk/.../verilog-a/`) for the build's own arch — native on x86-64 **and** arm64, no emulation. `vendor` reuses the committed prebuilt **x86-64** `osdi/*.osdi` (fast, skips openvaf; x86-64/emulation only). The Dockerfile selects via `FROM osdi-${OSDI_MODE}`.
+- **CPU-only torch**: `pyproject.toml` pins torch to the PyTorch CPU index on Linux (`[tool.uv.sources]` + `[[tool.uv.index]]`) — no CUDA. Re-run `uv lock` after touching torch deps.
+- **The `agents` extra + API keys** are provisioned for a future LLM-agent layer: `INSTALL_AGENTS=true` build arg installs the extra; `ANTHROPIC_API_KEY` etc. are passed at runtime via `.env` → backend `environment:`, never baked into the image.
+- **UID/GID + entrypoint**: [`docker/entrypoint-backend.sh`](docker/entrypoint-backend.sh) aligns the runtime user to host `UID`/`GID` (from `.env`) and `gosu`-drops privileges so `/work` bind-mount files aren't root-owned (Linux concern).
+- Complementary to `run_newcas_ui.sh` (kept for native dev on a PDK-equipped machine); the container is the portable artifact.
+
 ## Architecture
 
 ### Python library (`src/spicexplorer/`)
@@ -84,6 +99,8 @@ Five Zustand stores hold cross-view state: `projectStore` (loaded/applied projec
 **Plotly axis titles**: must be `{ title: { text: "..." } }` not a bare string — the TypeScript types require `Partial<DataTitle>`.
 
 **CORS**: The backend uses `allow_origin_regex` matching any `localhost:<port>`. Do not replace it with a static origin list.
+
+**Frontend `/api/*` must proxy to the backend — don't shadow it**: `next.config.mjs` rewrites `/api/:path*` to the backend, but the rewrite sits in `afterFiles`, so any local `ui/src/app/api/**/route.ts` handler takes precedence for that path. Such a handler runs in the **frontend** container, which — unlike native dev's shared filesystem — does **not** have the backend's `examples/`, checkpoints, etc., so it returns 404 under Docker (this caused the empty Setup editor). Add endpoints in `ui/backend/routes/`, not as Next route handlers; keep all `/api/*` flowing to the backend.
 
 **Stale `.next` cache**: Running `npm run build` leaves production chunks that break the dev server. Delete `ui/.next` before restarting after a build.
 

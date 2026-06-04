@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev/ui]
+  pull_request:
+    branches: [main, dev/ui]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Sync dependencies (with dev)
+        run: uv sync --all-extras --group dev
+
+      - name: Lint with ruff (catch obvious errors)
+        run: uv run ruff check src tests
+
+      - name: Run fast tests (mark 'not slow')
+        run: uv run pytest -m 'not slow'
+
+  docker-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        osdi-mode: [vendor]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image (OSDI_MODE=${{ matrix.osdi-mode }})
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.backend
+          build-args: |
+            OSDI_MODE=${{ matrix.osdi-mode }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          push: false

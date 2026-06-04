@@ -82,7 +82,7 @@ Venable v_ena v_ss VDD
 .endc
 
 
-.include /home/noorizad/code/TCAD/modules/SpiceXplorer/examples/OTA/5t-ota/ihp-sg13g2/xschem/ota-5t_tb-ac.save
+.include ../xschem/ota-5t_tb-ac.save
 
 
 *----------------------------------------------------------*

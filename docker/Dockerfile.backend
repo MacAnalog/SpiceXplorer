@@ -1,0 +1,169 @@
+# syntax=docker/dockerfile:1.7
+# =============================================================================
+# SpiceXplorer backend — FastAPI + ngspice (OSDI) + IHP ihp-sg13g2 PDK.
+#
+#   * ngspice is COMPILED FROM SOURCE (headless, OSDI + XSPICE) for the build's
+#     own architecture — native on x86-64 AND arm64, no emulation.
+#   * The OSDI compact models are obtained per OSDI_MODE:
+#       compile (default) — build openvaf and compile them from the vendored
+#                           Verilog-A FOR THE BUILD ARCH → truly multi-arch.
+#       vendor            — reuse the prebuilt x86-64 OSDI in docker/pdk/
+#                           (x86-64 only; fast, skips the openvaf toolchain —
+#                           pair with an amd64 build / emulation).
+#   * The PDK device models (.lib) + .spiceinit are arch-neutral (vendored).
+#   * torch resolves to CPU-only wheels on Linux for both arches (pyproject.toml).
+#
+# Build context = repo root.   Built via:  docker compose build backend
+# =============================================================================
+ARG UBUNTU_TAG=24.04
+ARG OSDI_MODE=compile
+
+# ---- Stage: compile ngspice (headless: OSDI + XSPICE codemodels, no X) -------
+FROM ubuntu:${UBUNTU_TAG} AS ngspice-build
+ARG NGSPICE_VERSION=45
+ENV DEBIAN_FRONTEND=noninteractive
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential bison flex \
+        libreadline-dev libncurses-dev \
+        ca-certificates wget \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+# v45 matches the ABI the PDK models expect. SourceForge keeps the current
+# release at ng-spice-rework/<v>/ and archives older ones under old-releases/<v>/.
+RUN --mount=type=cache,target=/root/.cache/wget \
+    wget -q "https://downloads.sourceforge.net/project/ngspice/ng-spice-rework/old-releases/${NGSPICE_VERSION}/ngspice-${NGSPICE_VERSION}.tar.gz" -O ngspice.tar.gz \
+    && tar -xzf ngspice.tar.gz && rm ngspice.tar.gz
+WORKDIR /build/ngspice-${NGSPICE_VERSION}/release
+RUN ../configure \
+        --prefix=/opt/ngspice \
+        --enable-osdi \
+        --enable-xspice \
+        --enable-openmp \
+        --with-readline=yes \
+        --without-x \
+        --disable-debug \
+    && make -j"$(nproc)" \
+    && make install \
+    && (strip /opt/ngspice/bin/ngspice || true)
+
+# ---- Stage: osdi-vendor — reuse the committed prebuilt OSDI (x86-64 only) ----
+FROM ubuntu:${UBUNTU_TAG} AS osdi-vendor
+COPY docker/pdk/ihp-sg13g2/libs.tech/ngspice/osdi /osdi
+
+# ---- Stage: osdi-compile — compile OSDI from Verilog-A for the BUILD arch ----
+# Uses openvaf-reloaded (arpadbuermen's fork — the same source iic-osic-tools
+# uses), built with Rust + LLVM-18. Heavy, but build-only: nothing here lands in
+# the runtime image. Produces OSDI native to whatever arch the build runs on.
+FROM ubuntu:${UBUNTU_TAG} AS osdi-compile
+ARG OPENVAF_REPO=https://github.com/arpadbuermen/OpenVAF.git
+ARG OPENVAF_COMMIT=2e066436d985b05cf8e6563e936daf9ab875775a
+ENV DEBIAN_FRONTEND=noninteractive
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+        git curl ca-certificates build-essential pkg-config \
+        llvm-18 llvm-18-dev clang-18 libclang-common-18-dev libpolly-18-dev lld-18 \
+        zlib1g-dev libzstd-dev \
+    && rm -rf /var/lib/apt/lists/*
+ENV RUSTUP_HOME=/opt/rustup \
+    CARGO_HOME=/opt/cargo \
+    PATH=/opt/cargo/bin:/usr/lib/llvm-18/bin:$PATH \
+    LLVM_SYS_180_PREFIX=/usr/lib/llvm-18
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    git clone --filter=blob:none "$OPENVAF_REPO" /src/openvaf \
+    && cd /src/openvaf && git checkout "$OPENVAF_COMMIT" \
+    && cargo build --release --features llvm18 --bin openvaf-r \
+    && install -m755 target/release/openvaf-r /usr/local/bin/openvaf
+# Compile the four compact models (per the PDK's openvaf-compile-va.sh).
+COPY docker/pdk/ihp-sg13g2/libs.tech/verilog-a /va
+WORKDIR /va
+RUN mkdir -p /osdi \
+    && openvaf --target_cpu generic -D__NGSPICE__ -o /osdi/psp103.osdi     psp103/psp103.va \
+    && openvaf --target_cpu generic -D__NGSPICE__ -o /osdi/psp103_nqs.osdi psp103/psp103_nqs.va \
+    && openvaf --target_cpu generic -D__NGSPICE__ -o /osdi/r3_cmc.osdi     r3_cmc/r3_cmc.va \
+    && openvaf --target_cpu generic -D__NGSPICE__ -o /osdi/mosvar.osdi     mosvar/mosvar.va
+
+# ---- Stage: osdi — select compile|vendor via the OSDI_MODE build arg ---------
+FROM osdi-${OSDI_MODE} AS osdi
+
+# ---- Stage: runtime — Ubuntu 24.04 + Python + uv venv + ngspice + PDK --------
+FROM ubuntu:${UBUNTU_TAG} AS runtime
+ENV DEBIAN_FRONTEND=noninteractive
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-venv \
+        libreadline8t64 libncursesw6 libgomp1 \
+        gosu ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# uv (Astral) — used to build the project virtualenv from the locked deps.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+# ngspice (compiled above), kept at its build prefix so internal lookups
+# (codemodels under lib/, spinit under share/) resolve unchanged.
+COPY --from=ngspice-build /opt/ngspice /opt/ngspice
+
+# PDK: arch-neutral device models + .spiceinit (vendored), plus the arch-correct
+# OSDI from the selected osdi stage (compiled for this arch, or prebuilt x86-64).
+COPY docker/pdk/ihp-sg13g2/libs.tech/ngspice/models /opt/pdk/ihp-sg13g2/libs.tech/ngspice/models
+COPY docker/pdk/ihp-sg13g2/libs.tech/ngspice/.spiceinit /opt/pdk/ihp-sg13g2/libs.tech/ngspice/.spiceinit
+COPY --from=osdi /osdi /opt/pdk/ihp-sg13g2/libs.tech/ngspice/osdi
+
+ENV PATH=/opt/ngspice/bin:/app/.venv/bin:$PATH \
+    HOME=/app \
+    PDK_ROOT=/opt/pdk \
+    PDK=ihp-sg13g2 \
+    IHP_PDK_ROOT=/opt/pdk/ihp-sg13g2 \
+    SPICE_USERINIT_DIR=/opt/pdk/ihp-sg13g2/libs.tech/ngspice \
+    UV_PYTHON=/usr/bin/python3 \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+WORKDIR /app
+
+# ngspice reads the PDK .spiceinit from $HOME (=/app); it sets sourcepath and
+# loads the OSDI models via $PDK_ROOT/$PDK (resolved from the env above).
+RUN cp /opt/pdk/ihp-sg13g2/libs.tech/ngspice/.spiceinit /app/.spiceinit
+
+# Toggle the (optional) LLM-agent dependency layer. API keys are supplied at
+# runtime via the environment (see .env.example), never baked into the image.
+ARG INSTALL_AGENTS=false
+
+# 1) Dependency layer — cached on (pyproject.toml, uv.lock). The project itself
+#    is installed in step 2 so app-code edits don't bust the dependency cache.
+COPY pyproject.toml uv.lock README.md LICENSE ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    set -eux; \
+    EXTRAS="--extra ui"; \
+    if [ "$INSTALL_AGENTS" = "true" ]; then EXTRAS="$EXTRAS --extra agents"; fi; \
+    uv sync --frozen --no-install-project $EXTRAS
+
+# 2) Project source + install. (.dockerignore drops ui/node_modules, ui/.next,
+#    .venv, .git, logs/, auto_save/, *.raw, etc.)
+COPY src ./src
+COPY ui ./ui
+COPY examples ./examples
+RUN --mount=type=cache,target=/root/.cache/uv \
+    set -eux; \
+    EXTRAS="--extra ui"; \
+    if [ "$INSTALL_AGENTS" = "true" ]; then EXTRAS="$EXTRAS --extra agents"; fi; \
+    uv sync --frozen $EXTRAS
+
+COPY docker/entrypoint-backend.sh /usr/local/bin/entrypoint-backend.sh
+RUN chmod +x /usr/local/bin/entrypoint-backend.sh
+
+ENV LOG_LEVEL=INFO \
+    BACKEND_PORT=8000
+EXPOSE 8000
+
+# The entrypoint aligns the runtime user to the host UID/GID (so bind-mount
+# files aren't root-owned) and drops privileges before launching uvicorn.
+ENTRYPOINT ["/usr/local/bin/entrypoint-backend.sh"]
+CMD ["sh", "-c", "exec uvicorn ui.backend.main:app --host 0.0.0.0 --port ${BACKEND_PORT:-8000}"]

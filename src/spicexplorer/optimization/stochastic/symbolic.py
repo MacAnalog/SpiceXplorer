@@ -2,20 +2,19 @@
 These were tested during the development and are not recommended to 
 be used since the alternative options are more practical"""
 import logging
-import json
 import torch
 import numpy        as np
 import sympy        as sp
 import nevergrad    as ng
 import plotly.graph_objects as go
 
-from    typing      import Dict, List, Tuple, Any, Optional
+from    typing      import Dict, List, Tuple, Optional
 from    tqdm        import tqdm
 
 
 # Symxplorer Specific Imports
 from   spicexplorer.core.symbolic_sizing                     import Symbolic_Sizing_Assist
-from   spicexplorer.core.utils                               import plot_complex_response, get_bode_fitness_loss, Transfer_Func_Helper, Frequency_Weight, UNIT_DICT
+from   spicexplorer.core.utils                               import plot_complex_response, get_bode_fitness_loss, Transfer_Func_Helper
 
 logger = logging.getLogger("spicexplorer.optimization.stochastic.symbolic")
 
@@ -92,7 +91,6 @@ class Nevergrad_Symbolic_Bode_Fitter:
 
         parameters: Dict[str, ng.p.Log] = {}
         for var in self.sizing_assist.design_variables_dict:
-            param = None
             if var.startswith("R"):
                 parameters[str(var)] = ng.p.Log(lower=r_range_normalized[0], upper=r_range_normalized[1]) if log_scale else ng.p.Scalar(lower=r_range_normalized[0], upper=r_range_normalized[1]) 
             elif var.startswith("C"):
@@ -214,7 +212,6 @@ class Nevergrad_Symbolic_Bode_Fitter:
             return
         
         best_solution, loss = self.optimizer_trace[self.global_min_index]
-        best_parameters = best_solution.value
 
         print("Optimized x - normalized:", best_solution.value)
         print("Optimized x - de-normalized:", self.denormalize_params(best_solution.value))

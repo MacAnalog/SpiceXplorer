@@ -1,5 +1,15 @@
 # TODO
 
+> **Context:** since this list was first written the UI migrated from the 4-tab shell to the
+> **Studio workspace** (see [PLAN_UI_DESIGN.md](PLAN_UI_DESIGN.md) + [CLAUDE.md](CLAUDE.md)). Several
+> large pieces landed that were never tracked here as line items: the persistent Studio shell (7
+> views, activity bar, per-activity left rails, always-on right rail, bottom panel, status bar), the
+> **⌘K command palette + wizard overlay**, **run history** (`runStore` + localStorage), the
+> **Schematic** view (Xschem viewer + `DeviceInspector` + sensitivity endpoint), the read-only
+> **Pipeline** DAG view, the **Health** view + **PDK-aware degradation** (`GET /api/env`), the
+> **sanity-check** endpoint, and **long-run checkpointing** (autosave + resume). The items below are
+> what remains.
+
 ## 1. Create Wizard ✅
 
 Adds a step-by-step YAML generator to the Setup tab. Full spec in `PLAN_UI_DESIGN.md`.
@@ -25,11 +35,11 @@ Adds a step-by-step YAML generator to the Setup tab. Full spec in `PLAN_UI_DESIG
 
 ## 2. UX fixes in existing tabs
 
-- [ ] **Wizard DutParamsStep — column header misalignment**: The header row labels (MIN, MAX, INIT, INT, LOG, FRZ) don't line up with the input cells below them. The name cell contains a flex sub-row (input + optional Badge) that shifts subsequent columns. Fix by centering each header label over its cell, or switch the name column to a fixed-width so the badge doesn't affect column widths (`DutParamsStep.tsx` line 94–103).
+- [x] **Wizard DutParamsStep — column header misalignment**: Fixed — the header row (`DutParamsStep.tsx:94`) and the value rows (`:105`) now share the same `grid-cols-[1.6fr_1.1fr_1.1fr_0.8fr_0.5fr_0.5fr_0.5fr_auto]` template, so labels line up with their cells.
 - [x] **OptimizeTab — Sanity Check "NoneType has no attribute 'ask'"**: Fixed in `ui/backend/routes/sanity.py` — `_create_optimizer_obj()` is now called before `optimization_step()` so `self.optimizer` is never None when `.ask()` is invoked.
-- [ ] **SetupTab — Apply from editor content**: "Apply" currently re-reads from disk via `api.loadProject()`, discarding unsaved Monaco edits. Fix: POST current editor content directly to `/api/project/load` (as YAML text, not path), or write to a temp file first.
-- [ ] **OptimizeTab — wire algorithm selection to live run**: `api.startRun()` sends `yaml_path` and `budget` but not the chosen algorithm. Pass algorithm name to backend; `optimizer_runner.py` needs to accept and use it.
-- [ ] **OptimizeTab — score function toggle**: Add sigmoid vs linear radio button; pass choice to `api.startRun()` and honour it in the optimizer runner (currently fixed by YAML).
+- [ ] **SetupTab — Apply from editor content**: "Apply" still re-reads from disk via `api.loadProject(yamlPath)` (`SetupTab.tsx:104`), discarding unsaved Monaco edits. Fix: POST current editor content directly to `/api/project/load` (as YAML text, not path), or write to a temp file first.
+- [x] **OptimizeTab — wire algorithm selection to live run**: Done (commit `4ad528d`). The chosen algorithm/budget/seed flow through `lib/launchRun.ts` → `POST /api/optimize/start` and are applied in-memory by `optimizer_runner._apply_overrides`.
+- [ ] **OptimizeTab — score function toggle**: *Partially done.* The sigmoid/linear `Segmented` control exists in the UI (`OptimizeTab.tsx:143`), but its value (`scoreFn`) is **not yet sent to the backend** — `launchLiveRun()` doesn't pass it, so the score function is still fixed by the YAML. Wire `scoreFn` through `launchRun.ts` → `api.startRun()` and honour it in `optimizer_runner.py`.
 
 ---
 
@@ -51,7 +61,7 @@ The current tab lets you tweak one spec value at a time in isolation. For multi-
 
 ---
 
-## 4. Wizard as DSL builder (refined scope)
+## 5. Wizard as DSL builder (refined scope)
 
 The wizard's job is to produce a valid `project_setup.yaml` that fully describes a run — the YAML IS the artifact, the checkpoint, and the way runs are transported between machines. Frame every step around "what does this become in YAML."
 
@@ -73,7 +83,7 @@ The wizard's job is to produce a valid `project_setup.yaml` that fully describes
 
 ---
 
-## 5. Plot interactivity & customization
+## 6. Plot interactivity & customization
 
 The current charts are read-only — `displayModeBar: false` in `PlotlyChart.tsx:38` strips zoom, pan, hover detail, and download. Restore Plotly's full interactivity selectively.
 
@@ -85,7 +95,7 @@ The current charts are read-only — `displayModeBar: false` in `PlotlyChart.tsx
 
 ---
 
-## 6. KPI / data cards
+## 7. KPI / data cards
 
 The current tabs jump straight into charts and tables — no top-line summary. Add a row of cards at the top of each tab.
 
@@ -97,7 +107,7 @@ The current tabs jump straight into charts and tables — no top-line summary. A
 
 ---
 
-## 7. Better exploration visualization
+## 8. Better exploration visualization
 
 The Explorer tab today is scatter + envelope table. For real design-space exploration, designers need more.
 
@@ -106,11 +116,11 @@ The Explorer tab today is scatter + envelope table. For real design-space explor
 - [ ] **Brushing & linking**: select a region in the scatter → highlight the same points in the convergence chart and parallel coordinates → filter the Best Designs table to just those points. Foundational interactive-viz pattern.
 - [ ] **Design point inspector**: click any scatter point → side drawer opens with full param values, all metric values, iteration number, and a "Re-simulate this point" action that drops the params into a new run.
 - [ ] **Convergence comparison improvements**: add ribbon/std-band for multiple replays of the same algorithm, and let the user overlay 3+ runs (not just A vs B).
-- [ ] **Spec sensitivity view**: small-multiples bar chart showing each spec's contribution to the final score across the run — answers "which spec was hardest."
+- [ ] **Spec sensitivity view**: small-multiples bar chart showing each spec's contribution to the final score across the run — answers "which spec was hardest." *(Distinct from the already-shipped device-parameter sensitivity in the Schematic `DeviceInspector` (`SensitivityChart` + `GET /api/spec/{name}/sensitivity`), which is finite-difference of metrics vs. DUT params, not per-spec score contribution across a run.)*
 
 ---
 
-## 8. UI density & editing affordances
+## 9. UI density & editing affordances
 
 Things get crowded once a project has 10+ params and 6+ specs. Reduce clutter without hiding data.
 
@@ -119,12 +129,12 @@ Things get crowded once a project has 10+ params and 6+ specs. Reduce clutter wi
 - [ ] **Collapsible panels**: each panel (`PanelHeader`) should be collapsible with a chevron. Save collapse state to localStorage per tab.
 - [ ] **Compact / comfortable density toggle**: a global toggle in the top nav that switches between dense (8 px padding, 11 px font) and comfortable (12 px / 13 px) modes. Useful for screen-share vs. local work.
 - [ ] **Sticky tab actions**: Apply, Start Run, etc. should stick to the top of the tab when scrolling so they remain reachable on long pages.
-- [ ] **Keyboard shortcuts**: `g s` → Setup, `g o` → Optimize, `g e` → Explorer, `?` → show shortcut sheet. Small win for demo polish.
+- [~] **Keyboard shortcuts**: *Partially shipped.* The ⌘K command palette and `⌘1`..`⌘7` / bare-key view switching are wired (`CommandPalette.tsx` global keydown, shortcuts in `nav.ts`). Still open: the `g s`/`g o` chord style and a `?` shortcut-help sheet.
 
 ---
 
-## 9. Misc polish
+## 10. Misc polish
 
 - [ ] **Export entire run report**: a "Download report" button on the Optimize and Explorer tabs that packages the YAML + JSON checkpoint + all chart PNGs + a summary markdown into a single zip. Useful for sharing post-run.
-- [ ] **Recent runs sidebar**: a left rail listing the last N runs (replays + live) with timestamps, status, and a click-to-load action that drops the run into the Explorer tab.
+- [x] **Recent runs sidebar**: Done — the run-centric left rail (`shell/rails/RunsRail.tsx`) lists `runStore.history` (replays + live) with score sparklines and a click-to-load (`rerun`) action, plus checkpoint resume/delete. Backed by `runStore.history` persisted to localStorage.
 - [ ] **Validation error inline highlighting in Monaco**: the YAML editor already validates with a 600 ms debounce; surface errors as Monaco markers (red squiggles) with hover tooltips, not just a panel below.
