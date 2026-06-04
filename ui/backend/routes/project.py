@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from spicexplorer.core.domains import Project_Setup
@@ -111,6 +112,22 @@ def load_project(body: LoadRequest):
         return {"ok": True, "summary": _summarise(project), "yaml_path": str(path)}
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/yaml-text", response_class=PlainTextResponse)
+def yaml_text(path: str = Query(..., description="Absolute path of a project YAML")):
+    """Return the raw text of a project YAML for the Setup editor.
+
+    The Setup view populates Monaco from this after /project/load fills the
+    rails. Gated to existing .yaml/.yml files (the same files /project/load
+    already reads), served as plain text (the client reads ``response.text()``).
+    """
+    resolved = Path(path).expanduser()
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(status_code=404, detail=f"YAML file not found: {resolved}")
+    if resolved.suffix.lower() not in {".yaml", ".yml"}:
+        raise HTTPException(status_code=400, detail=f"Not a YAML file: {resolved}")
+    return resolved.read_text()
 
 
 @router.post("/project/validate")
