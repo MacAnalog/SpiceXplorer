@@ -22,7 +22,9 @@ ARG OSDI_MODE=compile
 FROM ubuntu:${UBUNTU_TAG} AS ngspice-build
 ARG NGSPICE_VERSION=45
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
         build-essential bison flex \
         libreadline-dev libncurses-dev \
         ca-certificates wget \
@@ -30,8 +32,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 # v45 matches the ABI the PDK models expect. SourceForge keeps the current
 # release at ng-spice-rework/<v>/ and archives older ones under old-releases/<v>/.
-RUN wget -q "https://downloads.sourceforge.net/project/ngspice/ng-spice-rework/old-releases/${NGSPICE_VERSION}/ngspice-${NGSPICE_VERSION}.tar.gz" -O ngspice.tar.gz \
-    && tar -xzf ngspice.tar.gz
+RUN --mount=type=cache,target=/root/.cache/wget \
+    wget -q "https://downloads.sourceforge.net/project/ngspice/ng-spice-rework/old-releases/${NGSPICE_VERSION}/ngspice-${NGSPICE_VERSION}.tar.gz" -O ngspice.tar.gz \
+    && tar -xzf ngspice.tar.gz && rm ngspice.tar.gz
 WORKDIR /build/ngspice-${NGSPICE_VERSION}/release
 RUN ../configure \
         --prefix=/opt/ngspice \
@@ -57,7 +60,9 @@ FROM ubuntu:${UBUNTU_TAG} AS osdi-compile
 ARG OPENVAF_REPO=https://github.com/arpadbuermen/OpenVAF.git
 ARG OPENVAF_COMMIT=2e066436d985b05cf8e6563e936daf9ab875775a
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
         git curl ca-certificates build-essential pkg-config \
         llvm-18 llvm-18-dev clang-18 libclang-common-18-dev libpolly-18-dev lld-18 \
         zlib1g-dev libzstd-dev \
@@ -67,7 +72,9 @@ ENV RUSTUP_HOME=/opt/rustup \
     PATH=/opt/cargo/bin:/usr/lib/llvm-18/bin:$PATH \
     LLVM_SYS_180_PREFIX=/usr/lib/llvm-18
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-RUN git clone --filter=blob:none "$OPENVAF_REPO" /src/openvaf \
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    git clone --filter=blob:none "$OPENVAF_REPO" /src/openvaf \
     && cd /src/openvaf && git checkout "$OPENVAF_COMMIT" \
     && cargo build --release --features llvm18 --bin openvaf-r \
     && install -m755 target/release/openvaf-r /usr/local/bin/openvaf
@@ -86,10 +93,12 @@ FROM osdi-${OSDI_MODE} AS osdi
 # ---- Stage: runtime — Ubuntu 24.04 + Python + uv venv + ngspice + PDK --------
 FROM ubuntu:${UBUNTU_TAG} AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-venv \
         libreadline8t64 libncursesw6 libgomp1 \
-        gosu ca-certificates \
+        gosu ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 # uv (Astral) — used to build the project virtualenv from the locked deps.
