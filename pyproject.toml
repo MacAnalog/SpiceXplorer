@@ -35,9 +35,34 @@ ui = [
     "uvicorn[standard]>=0.32",
     "python-multipart>=0.0.12",
 ]
+# LLM-agent layer (placeholder — populate when the agent subsystem lands).
+# API keys are supplied at runtime via the environment (see .env.example),
+# never baked into the image. Installed in the container when the
+# INSTALL_AGENTS build arg is true (docker/Dockerfile.backend).
+agents = [
+    "anthropic>=0.40",
+    "python-dotenv>=1.0",
+    # "openai>=1.0",
+    # "langgraph>=0.2",
+]
 
 # [project.scripts]
 # run-symbolix = "spicexplorer.symbolic_solver.main:main"
+
+# --- Torch: CPU-only wheels on Linux ------------------------------------------
+# This project uses no CUDA, so on Linux we pull torch from the PyTorch CPU
+# index instead of the default PyPI wheels (which drag in the multi-GB NVIDIA
+# CUDA stack). This shrinks both the Docker image and the local Linux venv.
+# macOS/Windows fall through to the normal PyPI wheels.
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [dependency-groups]
 dev = [

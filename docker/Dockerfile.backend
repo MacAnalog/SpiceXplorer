@@ -1,0 +1,116 @@
+# syntax=docker/dockerfile:1.7
+# =============================================================================
+# SpiceXplorer backend — FastAPI + ngspice (OSDI) + IHP ihp-sg13g2 PDK.
+#
+#   * ngspice is COMPILED FROM SOURCE (headless, OSDI + XSPICE) — transparent and
+#     portable; `docker build` works on any x86-64 machine, nothing tied to a host.
+#   * The PDK ngspice subset (device models + .spiceinit + prebuilt OSDI compact
+#     models) is VENDORED under docker/pdk/ (Apache-2.0, ~2.4 MB) and copied in.
+#   * torch resolves to CPU-only wheels on Linux (see pyproject.toml) — no CUDA.
+#
+# Build context = repo root.   Built via:  docker compose build backend
+# x86-64 only (the vendored OSDI are x86-64 ELF; see docker/pdk/README.md).
+# =============================================================================
+ARG UBUNTU_TAG=24.04
+
+# ---- Stage 1: compile ngspice (headless: OSDI + XSPICE codemodels, no X) -----
+FROM ubuntu:${UBUNTU_TAG} AS ngspice-build
+ARG NGSPICE_VERSION=45
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential bison flex \
+        libreadline-dev libncurses-dev \
+        ca-certificates wget \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+# v45 matches the ABI of the vendored OSDI (docker/pdk/). SourceForge keeps the
+# current release at ng-spice-rework/<v>/ and archives older ones under
+# old-releases/<v>/ — v45 now lives in old-releases.
+RUN wget -q "https://downloads.sourceforge.net/project/ngspice/ng-spice-rework/old-releases/${NGSPICE_VERSION}/ngspice-${NGSPICE_VERSION}.tar.gz" -O ngspice.tar.gz \
+    && tar -xzf ngspice.tar.gz
+# Out-of-tree build in release/, per the ngspice build docs.
+WORKDIR /build/ngspice-${NGSPICE_VERSION}/release
+RUN ../configure \
+        --prefix=/opt/ngspice \
+        --enable-osdi \
+        --enable-xspice \
+        --enable-openmp \
+        --with-readline=yes \
+        --without-x \
+        --disable-debug \
+    && make -j"$(nproc)" \
+    && make install \
+    && (strip /opt/ngspice/bin/ngspice || true)
+
+# ---- Stage 2: runtime — Ubuntu 24.04 + Python + uv venv + ngspice + PDK ------
+FROM ubuntu:${UBUNTU_TAG} AS runtime
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-venv \
+        libreadline8t64 libncursesw6 libgomp1 \
+        gosu ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# uv (Astral) — used to build the project virtualenv from the locked deps.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+# ngspice (compiled in stage 1), kept at its build prefix so internal lookups
+# (codemodels under lib/, spinit under share/) resolve unchanged.
+COPY --from=ngspice-build /opt/ngspice /opt/ngspice
+
+# IHP ihp-sg13g2 PDK ngspice subset (vendored; Apache-2.0).
+COPY docker/pdk/ /opt/pdk/
+
+ENV PATH=/opt/ngspice/bin:/app/.venv/bin:$PATH \
+    HOME=/app \
+    PDK_ROOT=/opt/pdk \
+    PDK=ihp-sg13g2 \
+    IHP_PDK_ROOT=/opt/pdk/ihp-sg13g2 \
+    SPICE_USERINIT_DIR=/opt/pdk/ihp-sg13g2/libs.tech/ngspice \
+    UV_PYTHON=/usr/bin/python3 \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+WORKDIR /app
+
+# ngspice reads the PDK .spiceinit from $HOME (=/app); it sets sourcepath and
+# loads the OSDI models via $PDK_ROOT/$PDK (resolved from the env above).
+RUN cp /opt/pdk/ihp-sg13g2/libs.tech/ngspice/.spiceinit /app/.spiceinit
+
+# Toggle the (optional) LLM-agent dependency layer. API keys are supplied at
+# runtime via the environment (see .env.example), never baked into the image.
+ARG INSTALL_AGENTS=false
+
+# 1) Dependency layer — cached on (pyproject.toml, uv.lock). The project itself
+#    is installed in step 2 so app-code edits don't bust the dependency cache.
+COPY pyproject.toml uv.lock README.md LICENSE ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    set -eux; \
+    EXTRAS="--extra ui"; \
+    if [ "$INSTALL_AGENTS" = "true" ]; then EXTRAS="$EXTRAS --extra agents"; fi; \
+    uv sync --frozen --no-install-project $EXTRAS
+
+# 2) Project source + install. (.dockerignore drops ui/node_modules, ui/.next,
+#    .venv, .git, logs/, auto_save/, *.raw, etc.)
+COPY src ./src
+COPY ui ./ui
+COPY examples ./examples
+RUN --mount=type=cache,target=/root/.cache/uv \
+    set -eux; \
+    EXTRAS="--extra ui"; \
+    if [ "$INSTALL_AGENTS" = "true" ]; then EXTRAS="$EXTRAS --extra agents"; fi; \
+    uv sync --frozen $EXTRAS
+
+COPY docker/entrypoint-backend.sh /usr/local/bin/entrypoint-backend.sh
+RUN chmod +x /usr/local/bin/entrypoint-backend.sh
+
+ENV LOG_LEVEL=INFO \
+    BACKEND_PORT=8000
+EXPOSE 8000
+
+# The entrypoint aligns the runtime user to the host UID/GID (so bind-mount
+# files aren't root-owned) and drops privileges before launching uvicorn.
+ENTRYPOINT ["/usr/local/bin/entrypoint-backend.sh"]
+CMD ["sh", "-c", "exec uvicorn ui.backend.main:app --host 0.0.0.0 --port ${BACKEND_PORT:-8000}"]

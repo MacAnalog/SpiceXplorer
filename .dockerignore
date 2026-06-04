@@ -1,0 +1,30 @@
+# Backend build context = repo root. Keep src/, ui/ (minus node_modules/.next),
+# examples/, docker/pdk/, pyproject.toml, uv.lock, README.md, LICENSE.
+.git
+.gitignore
+**/__pycache__/
+**/*.pyc
+.venv/
+venv/
+
+# Frontend build artifacts / deps (the frontend has its own image + context).
+ui/node_modules/
+ui/.next/
+node_modules/
+
+# Local runtime state — never bake into the image.
+logs/
+auto_save/
+work/
+.env
+*.env
+
+# Heavy / generated simulation artifacts.
+*.raw
+*.pkl
+*.zip
+
+# Editor / OS cruft.
+.vscode/
+.DS_Store
+.claude/

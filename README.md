@@ -141,6 +141,44 @@ For UI architecture, the full API table, and troubleshooting, see **[ui/README.m
 
 ---
 
+## Run in Docker (portable, bundled PDK)
+
+For collaborators who **don't** have ngspice or the IHP PDK installed, the repo
+ships a self-contained two-container stack. The backend image **compiles ngspice
+from source** and bundles the IHP `ihp-sg13g2` ngspice models + OSDI compact
+models (vendored under [`docker/pdk/`](docker/pdk/), Apache-2.0), so **live SPICE
+works out of the box** — no host install, no multi-GB EDA image. torch resolves to
+CPU-only wheels (no CUDA). **x86-64 only** (the bundled OSDI are x86-64; see
+[docker/pdk/README.md](docker/pdk/README.md) to regenerate for arm64).
+
+```bash
+cp .env.example .env          # optional — defaults work as-is
+docker compose up --build     # builds both images, starts the stack
+# open http://localhost:4000
+```
+
+Everything is configurable through `.env` (loaded automatically by Compose):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `WORKDIR` | `./work` | Host dir bind-mounted at `/work` (your projects + outputs). Set to any drive, e.g. `/mnt/data/spicex`. |
+| `UID` / `GID` | `1000` | On **Linux**, set to `$(id -u)`/`$(id -g)` so files written to `WORKDIR` are owned by you, not root. |
+| `FRONTEND_PORT` / `BACKEND_PORT` | `4000` / `8000` | Host ports. |
+| `LOG_LEVEL` | `INFO` | `spicexplorer` console log level. |
+| `INSTALL_AGENTS` | `false` | Install the `agents` dependency extra into the backend image (for the future LLM-agent layer; rebuild required). |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | *(unset)* | Passed into the backend at **runtime only** — never baked into the image. For the agent layer. |
+
+To persist a run's outputs to the host, put your `project_setup.yaml` + netlists
+under `WORKDIR` and point the run's `ws_root` at `/work`.
+
+This is **complementary** to [`scripts/run_newcas_ui.sh`](scripts/run_newcas_ui.sh):
+keep the script for fast native iteration on a machine that already has ngspice +
+the PDK (e.g. the research server); use the container for portability and as a
+reproducible artifact. See [doc/PLAN_STUDIO_INTEGRATION.md](doc/PLAN_STUDIO_INTEGRATION.md)
+or the file headers in [docker/](docker/) for build details.
+
+---
+
 ## The YAML project DSL
 
 A run is defined by one `project_setup.yaml`, loaded through `Project_Setup.from_yaml(...)` into the typed dataclasses in [`src/spicexplorer/core/domains.py`](src/spicexplorer/core/domains.py). Abbreviated:
