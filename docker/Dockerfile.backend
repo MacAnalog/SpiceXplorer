@@ -2,18 +2,23 @@
 # =============================================================================
 # SpiceXplorer backend — FastAPI + ngspice (OSDI) + IHP ihp-sg13g2 PDK.
 #
-#   * ngspice is COMPILED FROM SOURCE (headless, OSDI + XSPICE) — transparent and
-#     portable; `docker build` works on any x86-64 machine, nothing tied to a host.
-#   * The PDK ngspice subset (device models + .spiceinit + prebuilt OSDI compact
-#     models) is VENDORED under docker/pdk/ (Apache-2.0, ~2.4 MB) and copied in.
-#   * torch resolves to CPU-only wheels on Linux (see pyproject.toml) — no CUDA.
+#   * ngspice is COMPILED FROM SOURCE (headless, OSDI + XSPICE) for the build's
+#     own architecture — native on x86-64 AND arm64, no emulation.
+#   * The OSDI compact models are obtained per OSDI_MODE:
+#       compile (default) — build openvaf and compile them from the vendored
+#                           Verilog-A FOR THE BUILD ARCH → truly multi-arch.
+#       vendor            — reuse the prebuilt x86-64 OSDI in docker/pdk/
+#                           (x86-64 only; fast, skips the openvaf toolchain —
+#                           pair with an amd64 build / emulation).
+#   * The PDK device models (.lib) + .spiceinit are arch-neutral (vendored).
+#   * torch resolves to CPU-only wheels on Linux for both arches (pyproject.toml).
 #
 # Build context = repo root.   Built via:  docker compose build backend
-# x86-64 only (the vendored OSDI are x86-64 ELF; see docker/pdk/README.md).
 # =============================================================================
 ARG UBUNTU_TAG=24.04
+ARG OSDI_MODE=compile
 
-# ---- Stage 1: compile ngspice (headless: OSDI + XSPICE codemodels, no X) -----
+# ---- Stage: compile ngspice (headless: OSDI + XSPICE codemodels, no X) -------
 FROM ubuntu:${UBUNTU_TAG} AS ngspice-build
 ARG NGSPICE_VERSION=45
 ENV DEBIAN_FRONTEND=noninteractive
@@ -23,12 +28,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates wget \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
-# v45 matches the ABI of the vendored OSDI (docker/pdk/). SourceForge keeps the
-# current release at ng-spice-rework/<v>/ and archives older ones under
-# old-releases/<v>/ — v45 now lives in old-releases.
+# v45 matches the ABI the PDK models expect. SourceForge keeps the current
+# release at ng-spice-rework/<v>/ and archives older ones under old-releases/<v>/.
 RUN wget -q "https://downloads.sourceforge.net/project/ngspice/ng-spice-rework/old-releases/${NGSPICE_VERSION}/ngspice-${NGSPICE_VERSION}.tar.gz" -O ngspice.tar.gz \
     && tar -xzf ngspice.tar.gz
-# Out-of-tree build in release/, per the ngspice build docs.
 WORKDIR /build/ngspice-${NGSPICE_VERSION}/release
 RUN ../configure \
         --prefix=/opt/ngspice \
@@ -42,7 +45,45 @@ RUN ../configure \
     && make install \
     && (strip /opt/ngspice/bin/ngspice || true)
 
-# ---- Stage 2: runtime — Ubuntu 24.04 + Python + uv venv + ngspice + PDK ------
+# ---- Stage: osdi-vendor — reuse the committed prebuilt OSDI (x86-64 only) ----
+FROM ubuntu:${UBUNTU_TAG} AS osdi-vendor
+COPY docker/pdk/ihp-sg13g2/libs.tech/ngspice/osdi /osdi
+
+# ---- Stage: osdi-compile — compile OSDI from Verilog-A for the BUILD arch ----
+# Uses openvaf-reloaded (arpadbuermen's fork — the same source iic-osic-tools
+# uses), built with Rust + LLVM-18. Heavy, but build-only: nothing here lands in
+# the runtime image. Produces OSDI native to whatever arch the build runs on.
+FROM ubuntu:${UBUNTU_TAG} AS osdi-compile
+ARG OPENVAF_REPO=https://github.com/arpadbuermen/OpenVAF.git
+ARG OPENVAF_COMMIT=2e066436d985b05cf8e6563e936daf9ab875775a
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git curl ca-certificates build-essential pkg-config \
+        llvm-18 llvm-18-dev clang-18 libclang-common-18-dev libpolly-18-dev lld-18 \
+        zlib1g-dev libzstd-dev \
+    && rm -rf /var/lib/apt/lists/*
+ENV RUSTUP_HOME=/opt/rustup \
+    CARGO_HOME=/opt/cargo \
+    PATH=/opt/cargo/bin:/usr/lib/llvm-18/bin:$PATH \
+    LLVM_SYS_180_PREFIX=/usr/lib/llvm-18
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+RUN git clone --filter=blob:none "$OPENVAF_REPO" /src/openvaf \
+    && cd /src/openvaf && git checkout "$OPENVAF_COMMIT" \
+    && cargo build --release --features llvm18 --bin openvaf-r \
+    && install -m755 target/release/openvaf-r /usr/local/bin/openvaf
+# Compile the four compact models (per the PDK's openvaf-compile-va.sh).
+COPY docker/pdk/ihp-sg13g2/libs.tech/verilog-a /va
+WORKDIR /va
+RUN mkdir -p /osdi \
+    && openvaf --target_cpu generic -D__NGSPICE__ -o /osdi/psp103.osdi     psp103/psp103.va \
+    && openvaf --target_cpu generic -D__NGSPICE__ -o /osdi/psp103_nqs.osdi psp103/psp103_nqs.va \
+    && openvaf --target_cpu generic -D__NGSPICE__ -o /osdi/r3_cmc.osdi     r3_cmc/r3_cmc.va \
+    && openvaf --target_cpu generic -D__NGSPICE__ -o /osdi/mosvar.osdi     mosvar/mosvar.va
+
+# ---- Stage: osdi — select compile|vendor via the OSDI_MODE build arg ---------
+FROM osdi-${OSDI_MODE} AS osdi
+
+# ---- Stage: runtime — Ubuntu 24.04 + Python + uv venv + ngspice + PDK --------
 FROM ubuntu:${UBUNTU_TAG} AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -54,12 +95,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # uv (Astral) — used to build the project virtualenv from the locked deps.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
-# ngspice (compiled in stage 1), kept at its build prefix so internal lookups
+# ngspice (compiled above), kept at its build prefix so internal lookups
 # (codemodels under lib/, spinit under share/) resolve unchanged.
 COPY --from=ngspice-build /opt/ngspice /opt/ngspice
 
-# IHP ihp-sg13g2 PDK ngspice subset (vendored; Apache-2.0).
-COPY docker/pdk/ /opt/pdk/
+# PDK: arch-neutral device models + .spiceinit (vendored), plus the arch-correct
+# OSDI from the selected osdi stage (compiled for this arch, or prebuilt x86-64).
+COPY docker/pdk/ihp-sg13g2/libs.tech/ngspice/models /opt/pdk/ihp-sg13g2/libs.tech/ngspice/models
+COPY docker/pdk/ihp-sg13g2/libs.tech/ngspice/.spiceinit /opt/pdk/ihp-sg13g2/libs.tech/ngspice/.spiceinit
+COPY --from=osdi /osdi /opt/pdk/ihp-sg13g2/libs.tech/ngspice/osdi
 
 ENV PATH=/opt/ngspice/bin:/app/.venv/bin:$PATH \
     HOME=/app \

@@ -6,10 +6,13 @@ EDA base image). It is **~2.4 MB** vs. the ~227 MB full PDK — we keep only
 `libs.tech/ngspice/`:
 
 ```
-ihp-sg13g2/libs.tech/ngspice/
-  .spiceinit          # sets sourcepath + loads the OSDI compact models
-  models/*.lib        # device model libraries (cornerMOSlv.lib, cornerRES.lib, …)
-  osdi/*.osdi         # prebuilt OSDI compact models (PSP103, r3_cmc, mosvar)
+ihp-sg13g2/libs.tech/
+  ngspice/
+    .spiceinit        # sets sourcepath + loads the OSDI compact models
+    models/*.lib      # device model libraries (cornerMOSlv.lib, cornerRES.lib, …)
+    osdi/*.osdi       # prebuilt OSDI compact models — x86-64 (used by OSDI_MODE=vendor)
+  verilog-a/          # OSDI source (psp103, r3_cmc, mosvar) — compiled per-arch
+    {psp103,r3_cmc,mosvar}/*.va    #   by openvaf when OSDI_MODE=compile (default)
 ```
 
 The image's `docker/Dockerfile.backend` copies this tree to `/opt/pdk/` and points
@@ -23,10 +26,18 @@ project is <https://github.com/IHP-GmbH/IHP-Open-PDK>. Do not strip the headers.
 
 ## Architecture note (the `*.osdi` files)
 
-The OSDI files are **x86-64 ELF** shared objects, ABI-matched to ngspice ≥45.
-The image therefore targets **x86-64**. To rebuild them (e.g. for arm64, or to
-track a newer PDK), compile from the PDK's Verilog-A source with **openvaf**
-(the same recipe iic-osic-tools uses):
+OSDI compact models are architecture-specific compiled binaries. The backend
+image handles this with the `OSDI_MODE` build arg:
+
+- **`compile` (default):** `docker/Dockerfile.backend` builds openvaf and compiles
+  the `verilog-a/` sources **for the build's own architecture** — so the image is
+  native on x86-64 **and** arm64 (incl. Apple silicon), no emulation. This is the
+  recipe below, run automatically at build time.
+- **`vendor`:** reuse the committed `osdi/*.osdi`, which are **x86-64 ELF**
+  (ABI-matched to ngspice 45). Faster (no openvaf toolchain) but x86-64 only.
+
+To regenerate the committed prebuilt `osdi/*.osdi` (e.g. to refresh `vendor` mode
+or track a newer PDK), use the same recipe iic-osic-tools uses:
 
 ```bash
 # 1. Build openvaf-reloaded (needs Rust + LLVM-18):
@@ -41,6 +52,6 @@ openvaf --target_cpu generic -D__NGSPICE__ -o ../ngspice/osdi/r3_cmc.osdi     r3
 openvaf --target_cpu generic -D__NGSPICE__ -o ../ngspice/osdi/mosvar.osdi     mosvar/mosvar.va
 ```
 
-Then replace the `osdi/*.osdi` here. (We vendor the prebuilt binaries rather than
-compiling them in the Dockerfile because openvaf needs a ~1 GB LLVM-18 + Rust
-toolchain — a heavy build stage for a 2 MB output.)
+Then replace the `osdi/*.osdi` here. (The default `compile` mode runs exactly this
+in a throwaway build stage; the committed `osdi/*.osdi` exist only for the optional
+`vendor` fast-path, since the openvaf build needs a ~1 GB LLVM-18 + Rust toolchain.)

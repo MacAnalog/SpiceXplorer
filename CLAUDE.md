@@ -46,7 +46,7 @@ docker compose up --build       # backend (:8000) + frontend (:4000)
 
 `compose.yaml` builds two images from [`docker/Dockerfile.backend`](docker/Dockerfile.backend) and [`ui/Dockerfile`](ui/Dockerfile). The backend **compiles ngspice from source** (`--enable-osdi`) and copies the vendored PDK subset in [`docker/pdk/`](docker/pdk/) — so live SPICE works with no host install. Non-obvious points:
 
-- **x86-64 only**: the vendored `docker/pdk/.../osdi/*.osdi` are x86-64 ELF, ABI-matched to ngspice-45. `docker/pdk/README.md` has the openvaf recipe to regenerate for arm64 / newer PDKs.
+- **Native multi-arch via `OSDI_MODE`** (build arg, default `compile`): `compile` builds openvaf (Rust + LLVM-18) and compiles the OSDI from the vendored Verilog-A (`docker/pdk/.../verilog-a/`) for the build's own arch — native on x86-64 **and** arm64, no emulation. `vendor` reuses the committed prebuilt **x86-64** `osdi/*.osdi` (fast, skips openvaf; x86-64/emulation only). The Dockerfile selects via `FROM osdi-${OSDI_MODE}`.
 - **CPU-only torch**: `pyproject.toml` pins torch to the PyTorch CPU index on Linux (`[tool.uv.sources]` + `[[tool.uv.index]]`) — no CUDA. Re-run `uv lock` after touching torch deps.
 - **The `agents` extra + API keys** are provisioned for a future LLM-agent layer: `INSTALL_AGENTS=true` build arg installs the extra; `ANTHROPIC_API_KEY` etc. are passed at runtime via `.env` → backend `environment:`, never baked into the image.
 - **UID/GID + entrypoint**: [`docker/entrypoint-backend.sh`](docker/entrypoint-backend.sh) aligns the runtime user to host `UID`/`GID` (from `.env`) and `gosu`-drops privileges so `/work` bind-mount files aren't root-owned (Linux concern).

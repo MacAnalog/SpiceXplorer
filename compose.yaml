@@ -18,17 +18,19 @@ services:
       context: .
       dockerfile: docker/Dockerfile.backend
       args:
+        # OSDI compact-model source: `compile` (default) builds them from the
+        # vendored Verilog-A for the host architecture → native on x86-64 AND
+        # arm64, no emulation. Set `vendor` for the fast prebuilt-x86-64 path
+        # (skips the openvaf toolchain; amd64 / emulation only).
+        OSDI_MODE: ${OSDI_MODE:-compile}
         # Set true (here or via INSTALL_AGENTS in .env) once the LLM-agent layer
         # lands, to install the `agents` dependency extra into the image.
         INSTALL_AGENTS: ${INSTALL_AGENTS:-false}
     image: spicexplorer-backend
-    # The vendored OSDI compact models (docker/pdk/.../osdi/*.osdi) are x86-64.
-    # Pinning amd64 makes the backend run natively on x86-64 Linux and under
-    # emulation on Apple-silicon/arm64 (Docker Desktop ships the emulator), so
-    # live SPICE works everywhere with the bundled models. To run natively on
-    # arm64 you must supply arm64 OSDI (see docker/pdk/README.md) and override
-    # this to linux/arm64 via BACKEND_PLATFORM in .env.
-    platform: ${BACKEND_PLATFORM:-linux/amd64}
+    # No platform pin — the image builds native to the host (x86-64 or arm64),
+    # so live SPICE runs without emulation everywhere. For the fast prebuilt
+    # OSDI path on a non-amd64 host, build amd64 under emulation instead:
+    #   OSDI_MODE=vendor DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose up --build
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       BACKEND_PORT: 8000

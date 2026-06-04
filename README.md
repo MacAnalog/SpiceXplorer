@@ -145,11 +145,15 @@ For UI architecture, the full API table, and troubleshooting, see **[ui/README.m
 
 For collaborators who **don't** have ngspice or the IHP PDK installed, the repo
 ships a self-contained two-container stack. The backend image **compiles ngspice
-from source** and bundles the IHP `ihp-sg13g2` ngspice models + OSDI compact
-models (vendored under [`docker/pdk/`](docker/pdk/), Apache-2.0), so **live SPICE
-works out of the box** — no host install, no multi-GB EDA image. torch resolves to
-CPU-only wheels (no CUDA). **x86-64 only** (the bundled OSDI are x86-64; see
-[docker/pdk/README.md](docker/pdk/README.md) to regenerate for arm64).
+from source** and, by default, **compiles the IHP `ihp-sg13g2` OSDI compact models
+from the vendored Verilog-A for the host architecture** — so it runs **native on
+both x86-64 and arm64 (incl. Apple silicon), no emulation**, and live SPICE works
+out of the box with no host install and no multi-GB EDA image. torch resolves to
+CPU-only wheels (no CUDA). The PDK device models + Verilog-A are vendored under
+[`docker/pdk/`](docker/pdk/) (Apache-2.0).
+
+> Set `OSDI_MODE=vendor` to skip the openvaf build and reuse the committed
+> prebuilt **x86-64** OSDI instead (faster build, x86-64/emulation only).
 
 ```bash
 cp .env.example .env          # optional — defaults work as-is
@@ -165,6 +169,7 @@ Everything is configurable through `.env` (loaded automatically by Compose):
 | `UID` / `GID` | `1000` | On **Linux**, set to `$(id -u)`/`$(id -g)` so files written to `WORKDIR` are owned by you, not root. |
 | `FRONTEND_PORT` / `BACKEND_PORT` | `4000` / `8000` | Host ports. |
 | `LOG_LEVEL` | `INFO` | `spicexplorer` console log level. |
+| `OSDI_MODE` | `compile` | `compile` = build OSDI from Verilog-A for the host arch (native everywhere). `vendor` = reuse prebuilt x86-64 OSDI (faster, x86-64 only). |
 | `INSTALL_AGENTS` | `false` | Install the `agents` dependency extra into the backend image (for the future LLM-agent layer; rebuild required). |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, … | *(unset)* | Passed into the backend at **runtime only** — never baked into the image. For the agent layer. |
 
