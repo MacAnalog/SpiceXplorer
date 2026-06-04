@@ -48,6 +48,14 @@ export const api = {
       body: JSON.stringify({ yaml_path }),
     }),
 
+  // Apply edited/uploaded YAML that has no on-disk path (returns yaml_path: "").
+  loadProjectContent: (yaml_content: string) =>
+    req<LoadProjectResponse>("/api/project/load", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ yaml_content }),
+    }),
+
   validateYaml: (yaml_content: string) =>
     req<ValidateResponse>("/api/project/validate", {
       method: "POST",
