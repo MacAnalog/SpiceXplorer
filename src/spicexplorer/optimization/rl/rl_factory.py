@@ -3,7 +3,7 @@ import numpy as np
 from typing import Type, Callable, Dict, Any, Optional, Tuple
 
 # Stable Baselines3 Imports
-from stable_baselines3 import PPO, SAC, DDPG, TD3
+from stable_baselines3 import SAC, DDPG, TD3
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
 

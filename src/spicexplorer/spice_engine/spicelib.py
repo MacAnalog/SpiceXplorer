@@ -13,13 +13,10 @@ from enum    import Enum
 
 from spicelib import SimRunner, RawRead, SpiceEditor, AscEditor
 # Import simulation runners
-from spicelib.simulators.ltspice_simulator import LTspice
 from spicelib.simulators.ngspice_simulator import NGspiceSimulator
-from spicelib.simulators.xyce_simulator    import XyceSimulator
 
 # For typing
 from typing import List, Dict, Tuple, Any
-from spicelib.sim.simulator  import Simulator as SpicelibSimulatorClass
 from spicelib.sim.run_task   import RunTask   as SpicelibRunTaskClass
 from spicelib.editor.base_editor import ParameterNotFoundError, ComponentNotFoundError
 
@@ -58,7 +55,7 @@ class LTspice_Wrapper:
         """Reads and simulates the circuit defined in the given .asc file"""
         self.asc_filename: str = asc_filename
         self.netlist: AscEditor = AscEditor(asc_file=asc_filename)
-        self.simengine:  SpicelibSimulatorClass  = SIM_ENGINES["ltspice"]
+        self.simengine: type[NGspiceSimulator] = NGspiceSimulator
 
         output_folder = f"{dump_parent_folder}/{self.simengine.__name__}"
         if not os.path.exists(output_folder):
@@ -164,7 +161,6 @@ class LTspice_Wrapper:
             raise RuntimeError("Need to run the simulation at least once")
         
         wave = self.curr_raw.get_wave(wave_name)
-        dtype = torch.float64 if is_real else torch.complex128
 
         if is_real:
             return torch.from_numpy(wave).real.to(dtype=torch.float64)
@@ -294,7 +290,7 @@ class NGSpice_Wrapper:
     # ---------------------------------------------------- 
     def update_params(self, parameterization: Dict[str, float]) -> bool:
         logger = self.logger
-        logger.debug(f"Updating parameters...")
+        logger.debug("Updating parameters...")
         RES_UNIT = 'k' # kilo
         CAP_UNIT = 'p' # pico
         if self.editor is None:
@@ -314,7 +310,7 @@ class NGSpice_Wrapper:
             else:
                 self.editor.set_parameter(key, f"{value}")
                 logger.debug(f"... Parameter {key} set to {value:.3e}")
-        logger.debug(f"✅  All parameters updated successfully")
+        logger.debug("✅  All parameters updated successfully")
         return True
     
     def run_sanity_check(self, use_editor: bool = True, sim_execution_t: Sim_Execution_Type = Sim_Execution_Type.RUN_NOW, clean_up_after: bool = True) -> bool:
@@ -392,7 +388,6 @@ class NGSpice_Wrapper:
     def run_and_wait(self, exe_log: bool = True) -> Tuple[RawRead | None, str | None, str]:
         """Runs the simulation and waits for it to complete, returning the RawRead instance (or None), the log filename (or None), and task name"""
         # (1) Pre-body
-        logger = self.logger
         if self.runner is None or self.editor is None:
             raise RuntimeError("Runner or Editor not initialized")
 
@@ -422,7 +417,6 @@ class NGSpice_Wrapper:
     
     def run_and_pass(self, exe_log: bool = True) -> SpicelibRunTaskClass:
         # (1) Pre-body
-        logger = self.logger
         if self.runner is None or self.editor is None:
             raise RuntimeError("Runner or Editor not initialized")
 
@@ -537,7 +531,6 @@ class NGSpice_Wrapper:
             raise e
 
         # 4. Convert to Tensor
-        dtype = torch.float64 if is_real else torch.complex128
         if is_real:
             return torch.from_numpy(wave).real.to(dtype=torch.float64)
         return torch.from_numpy(wave)
@@ -622,7 +615,7 @@ class NGSpice_Wrapper:
             raise RuntimeError("Editor not initialized")
         editor = self.editor
         params = editor.get_all_parameter_names()
-        tb_params  = [(param, editor.get_parameter(param)) for param in params if not "X_DUT" in param]
+        tb_params  = [(param, editor.get_parameter(param)) for param in params if "X_DUT" not in param]
         return tb_params
     
     def clean_up(self, delete_directories: bool = False, keep_netlist: bool = False, keep_logs: bool = False, keep_raw: bool = False) -> None:

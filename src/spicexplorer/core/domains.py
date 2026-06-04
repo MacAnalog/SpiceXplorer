@@ -1,10 +1,8 @@
 import yaml
 import numpy as np
 import logging
-from datetime import datetime
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Union, Dict, Any, Iterator, Tuple
 from typing import List, Optional, Union, Dict, Any, Iterator, Tuple
 from pathlib import Path
 from enum import Enum
@@ -529,7 +527,7 @@ class OptimizerConfig:
         if self.optimizer_kwargs is None:
             self.optimizer_kwargs = {}
         else:
-            logger.debug(f"optimizer_kwargs provided:")
+            logger.debug("optimizer_kwargs provided:")
             for k, v in self.optimizer_kwargs.items():
                 logger.debug(f"\t{k}: {v}")
 
@@ -787,15 +785,15 @@ class OptimizationLogEntry:
         return self.point.metadata
     
     def get_param_val(self, param_name: str) -> float | np.floating | None:
-        if not param_name in self.point.params.keys():
+        if param_name not in self.point.params.keys():
             logger.debug(f"{param_name} was not found in the OptimizationLogEntry object - should be one of {self.point.params.keys()}")
             return None
         return self.point.params[param_name]
     
     def get_fit_summary(self) -> Dict[str, Any]:
         if self.fit_summary is None:
-            logger.error(f"tried accessing the fit_summary but this was never created")
-            raise ValueError(f"tried accessing the fit_summary but this was never created")
+            logger.error("tried accessing the fit_summary but this was never created")
+            raise ValueError("tried accessing the fit_summary but this was never created")
         return self.fit_summary
     
     def get_performance_params(self) -> Dict[str, float]:
@@ -863,7 +861,7 @@ class OptimizationLog:
         if len(self.log) == 0:
             logger.debug("no log file in the object")
             return False
-        if not param_name in self.log[0].get_params():
+        if param_name not in self.log[0].get_params():
             logger.debug(f"param '{param_name}' not found in optimization trace")
             return False
         return True

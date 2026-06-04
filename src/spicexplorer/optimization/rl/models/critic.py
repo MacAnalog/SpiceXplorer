@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from .base import BaseCritic
 from ..utils.hyperparameters import DDPGConfig

@@ -1,16 +1,15 @@
 """This Module implements the user endpoint for selecting optimizers types based on an input project_setup yaml file and optimization engine type"""
 import logging
-import numpy        as np
 
 # Third-party imports
 from    enum        import Enum
-from    typing      import Callable, Dict, Tuple, Any, List, Type
+from    typing      import Callable, Dict, Type
 from    pathlib     import Path
 from    abc         import ABC, abstractmethod
 
 # Symxplorer Specific Imports
 from    spicexplorer.spice_engine    import NGSpice_Wrapper, Sim_Execution_Type
-from    spicexplorer.core.domains    import Project_Setup, TestbenchParams
+from    spicexplorer.core.domains    import Project_Setup
 
 from    .base           import Spice_Base_Optimizer, Base_Optimizer
 from    .stochastic.nevergrad      import Nevergrad_Spice_Bode_Optimizer, Nevergrad_Spice_Constraint_Satisfaction,  Nevergrad_Spice_Single_Objective
@@ -66,7 +65,7 @@ class Circuit_Optimizer_Orchestrator_Base(ABC):
     
     def initialize(self):
         self.spicelib_wrappers:  Dict[str, NGSpice_Wrapper] = self.create_spicelib_wrappers()
-        logger.debug(f"created the spicelib_wrapper.")
+        logger.debug("created the spicelib_wrapper.")
 
 
     def read_project_setup(self) -> Project_Setup:
@@ -99,7 +98,7 @@ class Circuit_Optimizer_Orchestrator_Base(ABC):
 
 
         # Create the Spice Simulator Wrapper for each testbench
-        logger.debug(f"Creating spicelib_wrappers for each testbench...")
+        logger.debug("Creating spicelib_wrappers for each testbench...")
         logger.debug("-----------------------------------------------------------------------------")
         spicelib_wrappers : Dict[str, NGSpice_Wrapper] = {}
 
@@ -109,7 +108,7 @@ class Circuit_Optimizer_Orchestrator_Base(ABC):
                 continue
 
             logger.debug(f"({i+1}) Creating spicelib_wrapper for testbench: {tb.name} - {tb.description}")
-            logger.debug(f"\tspicelib_wrapper will use the following configs:")
+            logger.debug("\tspicelib_wrapper will use the following configs:")
             logger.debug(f"\t- testbench_name {tb.name}")
             logger.debug(f"\t- netlist_filename {tb.netlist}")
 
@@ -158,5 +157,5 @@ class Circuit_Optimizer_Orchestrator_with_SPICE(Circuit_Optimizer_Orchestrator_B
             if not spicelib_wrapper.run_sanity_check(use_editor=use_editor, sim_execution_t=Sim_Execution_Type.RUN_NOW):
                 logger.warning(f"sanity check failed for spicelib_wrapper for testbench: {tb_name}")
                 return False
-        logger.info(f"HOORAY! sanity check passed for all spicelib_wrappers.")
+        logger.info("HOORAY! sanity check passed for all spicelib_wrappers.")
         return True

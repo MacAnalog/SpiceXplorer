@@ -4,12 +4,12 @@ import numpy                as np
 import plotly.graph_objects as go
 import pandas               as pd
 
-from    pathlib     import PosixPath, WindowsPath, Path
+from    pathlib     import Path
 from    dacite      import from_dict, Config
-from    typing      import Dict, List, Tuple, Any, Mapping
+from    typing      import List, Tuple
 from    dataclasses import asdict
 
-from spicexplorer.core.domains import OptimizationLog, OptimizationLogEntry, Project_Setup
+from spicexplorer.core.domains import OptimizationLog, OptimizationLogEntry
 from spicexplorer.optimization.base import CHECKPOINT_SCHEMA_VERSION, Spice_Constraint_Satisfaction
 
 
@@ -180,7 +180,7 @@ class Optimization_Log_Visualizer:
     ) -> Tuple[np.ndarray, np.ndarray] | None:
 
         if self.is_empty():
-            logger.warning(f"optimizatio log is empty")
+            logger.warning("optimizatio log is empty")
             return None
 
         if not self.has_param(param_x) or not self.has_param(param_y):

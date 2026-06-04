@@ -4,8 +4,6 @@ import sys
 
 from pathlib import Path
 
-import logging
-import os
 from datetime import datetime
 
 def setup_loggers(
@@ -197,7 +195,7 @@ def setup_loggers_with_spicelib_suppression(out_logname="SpiceXplorer", parent_f
     # Log initial status
     logger.info("🚀 Logger initialized!")
     logger.info(f"📄 Log file: {os.path.abspath(log_path)}")
-    logger.info(f"👀 TQDM and Errors will still show in console (stderr).")
-    logger.info(f"🔇 Standard outputs and SPICE logs are redirected to file (stdout).")
+    logger.info("👀 TQDM and Errors will still show in console (stderr).")
+    logger.info("🔇 Standard outputs and SPICE logs are redirected to file (stdout).")
     
     return logger
