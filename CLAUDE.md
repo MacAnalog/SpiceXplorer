@@ -100,6 +100,8 @@ Five Zustand stores hold cross-view state: `projectStore` (loaded/applied projec
 
 **CORS**: The backend uses `allow_origin_regex` matching any `localhost:<port>`. Do not replace it with a static origin list.
 
+**Frontend `/api/*` must proxy to the backend — don't shadow it**: `next.config.mjs` rewrites `/api/:path*` to the backend, but the rewrite sits in `afterFiles`, so any local `ui/src/app/api/**/route.ts` handler takes precedence for that path. Such a handler runs in the **frontend** container, which — unlike native dev's shared filesystem — does **not** have the backend's `examples/`, checkpoints, etc., so it returns 404 under Docker (this caused the empty Setup editor). Add endpoints in `ui/backend/routes/`, not as Next route handlers; keep all `/api/*` flowing to the backend.
+
 **Stale `.next` cache**: Running `npm run build` leaves production chunks that break the dev server. Delete `ui/.next` before restarting after a build.
 
 **`ws_root` in YAML**: `Project_Setup.from_yaml()` resolves `ws_root` so the committed examples are portable across machines. A **relative** path (the examples ship `ws_root: ..`) is resolved against the YAML file's own directory; an **absolute** path is used as-is (point it at an out-of-repo workspace); an **omitted/empty** value defaults to the YAML's directory. A leading `~` is expanded. The example netlists are committed inside the repo alongside the YAML, so a fresh clone runs without editing any paths. This is **independent of PDK availability**: live SPICE runs and the sanity check only work where ngspice **and** the IHP `ihp-sg13g2` PDK are installed (the server); on a PDK-less machine they fail by design and the UI shows "PDK missing — replay only".
