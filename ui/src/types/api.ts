@@ -371,11 +371,33 @@ export interface WizardTech {
   constraints: ConstraintRow[];
 }
 
+/** Legacy display-only corner row. */
 export interface WizardPVT {
   name: string;
   temp: string | number;
   corner: string;
   supply: string | number;
+}
+
+// New PVT corner system (Phase 1) — wizard editing shapes. Corners are emitted
+// with inline `model_includes` (no process_bundles) to keep the wizard flat.
+export interface WizardModelInclude {
+  lib_file: string;
+  section: string;
+}
+
+export interface WizardPVTCorner {
+  name: string;
+  temp: string;
+  supply_node: string;
+  supply_value: string;
+  enabled: boolean;
+  includes: WizardModelInclude[];
+}
+
+export interface WizardPVTConfig {
+  active_corner: string;
+  corners: WizardPVTCorner[];
 }
 
 export interface WizardDutParam {
@@ -438,7 +460,10 @@ export interface WizardOptimizer {
 export interface WizardForm {
   project: WizardProjectInfo;
   tech: WizardTech;
+  /** Legacy display-only corners (kept for round-trip; not simulator-driving). */
   pvt_corners: WizardPVT[];
+  /** PVT corner system (Phase 1) — the simulator-driving config. */
+  pvt: WizardPVTConfig;
   dut_params: WizardDutParam[];
   testbenches: WizardTestbench[];
   target_specs: WizardTargetSpec[];

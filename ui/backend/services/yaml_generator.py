@@ -171,6 +171,41 @@ def _build_pvt(form: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
+def _build_pvt_block(form: Dict[str, Any]) -> Dict[str, Any] | None:
+    """Emit the new `pvt:` block (Phase 1) from the wizard's pvt config.
+
+    Corners are written with inline `model_includes` (the wizard skips the
+    `process_bundles` sugar). Returns None when no corner is defined, so no `pvt:`
+    block is emitted and the netlist's own hardcoded corner stays in effect.
+    """
+    pvt = form.get("pvt") or {}
+    corners_out: List[Dict[str, Any]] = []
+    for c in pvt.get("corners") or []:
+        name = (c.get("name") or "").strip()
+        if not name:
+            continue
+        corner: Dict[str, Any] = {"name": name}
+        includes = [
+            {"lib_file": (inc.get("lib_file") or "").strip(), "section": (inc.get("section") or "").strip()}
+            for inc in (c.get("includes") or [])
+            if (inc.get("lib_file") or "").strip() and (inc.get("section") or "").strip()
+        ]
+        if includes:
+            corner["model_includes"] = includes
+        if c.get("temp") not in (None, ""):
+            corner["temp"] = _coerce_number(c.get("temp"))
+        node = (c.get("supply_node") or "").strip()
+        if node and c.get("supply_value") not in (None, ""):
+            corner["supply"] = {"node": node, "value": _coerce_number(c.get("supply_value"))}
+        corner["enabled"] = bool(c.get("enabled", True))
+        corners_out.append(corner)
+
+    if not corners_out:
+        return None
+    active = (pvt.get("active_corner") or "").strip() or corners_out[0]["name"]
+    return {"active_corner": active, "corners": corners_out}
+
+
 def build_project_dict(form: Dict[str, Any]) -> Dict[str, Any]:
     """Top-level mapping: returns the structure dumped as YAML."""
     project = form.get("project", {})
@@ -186,6 +221,7 @@ def build_project_dict(form: Dict[str, Any]) -> Dict[str, Any]:
         **({"schematic": project["schematic"]} if project.get("schematic") else {}),
         "tech_spec": _build_tech_spec(form),
         "pvt_corners": _build_pvt(form),
+        **({"pvt": _pvt_block} if (_pvt_block := _build_pvt_block(form)) else {}),
         "dut_params": [_build_dut_param(p) for p in form.get("dut_params", []) if p.get("name")],
         "testbenches": [_build_testbench(tb) for tb in form.get("testbenches", []) if tb.get("name")],
         "optimizer_config": _build_optimizer(form),
@@ -214,6 +250,49 @@ def _bool(v: Any, default: bool = False) -> bool:
     return bool(v)
 
 
+def _pvt_block_to_form(raw_pvt: Any) -> Dict[str, Any]:
+    """Convert a raw `pvt:` block (yaml.safe_load shape) into the wizard's pvt form.
+
+    Reuses the canonical desugaring (`_normalize_pvt_block`) so a YAML using
+    `process_bundles` / `process:` refs / singular `supply` flattens to the inline
+    shape the wizard edits. The wizard models a single supply rail, so only the
+    first supply is carried (multi-rail YAML is fully editable in the raw editor).
+    """
+    empty = {"active_corner": "", "corners": []}
+    if not isinstance(raw_pvt, dict):
+        return empty
+
+    import copy
+    from spicexplorer.core.domains import _normalize_pvt_block
+
+    holder = {"pvt": copy.deepcopy(raw_pvt)}
+    try:
+        _normalize_pvt_block(holder)
+    except Exception:
+        return empty
+    block = holder["pvt"]
+
+    corners_out: List[Dict[str, Any]] = []
+    for c in (block.get("corners") or []):
+        supplies = c.get("supplies") or []
+        first = supplies[0] if supplies else {}
+        corners_out.append({
+            "name": _str_or_blank(c.get("name")),
+            "temp": _str_or_blank(c.get("temp")) or "27",
+            "supply_node": _str_or_blank(first.get("node")) or "VDD",
+            "supply_value": _str_or_blank(first.get("value")),
+            "enabled": _bool(c.get("enabled"), True),
+            "includes": [
+                {"lib_file": _str_or_blank(m.get("lib_file")), "section": _str_or_blank(m.get("section"))}
+                for m in (c.get("model_includes") or [])
+            ],
+        })
+    return {
+        "active_corner": _str_or_blank(block.get("active_corner")),
+        "corners": corners_out,
+    }
+
+
 def project_dict_to_form(data: Dict[str, Any]) -> Dict[str, Any]:
     """Convert a `yaml.safe_load`-style project dict into the wizard's form shape.
 
@@ -235,6 +314,8 @@ def project_dict_to_form(data: Dict[str, Any]) -> Dict[str, Any]:
             "corner": _str_or_blank(c.get("corner")) or "tt",
             "supply": _str_or_blank(c.get("supply")),
         })
+
+    pvt_form = _pvt_block_to_form(p.get("pvt"))
 
     dut_rows = []
     for d in (p.get("dut_params") or []):
@@ -324,6 +405,7 @@ def project_dict_to_form(data: Dict[str, Any]) -> Dict[str, Any]:
             "constraints": constraints,
         },
         "pvt_corners": pvt_rows,
+        "pvt": pvt_form,
         "dut_params": dut_rows,
         "testbenches": tb_rows,
         "target_specs": spec_rows,
