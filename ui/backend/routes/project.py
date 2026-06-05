@@ -80,11 +80,6 @@ def _summarise(project: Project_Setup) -> dict[str, Any]:
             ],
         })
 
-    # Legacy display-only corners (kept for backward compat).
-    pvt = []
-    for corner in project.pvt_corners:
-        pvt.append({"temp": corner.temp, "corner": corner.corner, "supply": corner.supply})
-
     # PVT corner system (Phase 1) — the simulator-driving config. `None` when the
     # project has no `pvt:` block (legacy / netlist-hardcoded corner).
     pvt_config: dict[str, Any] | None = None
@@ -118,7 +113,6 @@ def _summarise(project: Project_Setup) -> dict[str, Any]:
             "name": project.tech_spec.name,
             "constraints": {k: float(v) for k, v in project.tech_spec.constraints.items()},
         },
-        "pvt_corners": pvt,
         "pvt": pvt_config,
         "dut_params": dut_params,
         "testbenches": testbenches,

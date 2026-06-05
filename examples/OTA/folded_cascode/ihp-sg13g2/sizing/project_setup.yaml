@@ -35,39 +35,6 @@ project:
       # supply voltage
       max_vdd : 1.8
 
-    pvt_map:
-      tt :  # each of the following line would update the .lib statement in the spice netlist
-            # .lib cornerMOSlv.lib mos_tt
-        - name : mos_tt
-          spice_corner : mos_tt
-          lib_name  : cornerMOSlv.lib
-        - name : res_tt
-          spice_corner : res_typ
-          lib_name  : cornerRES.lib
-
-      ss :
-        - name : ss
-          spice_corner : mos_ss
-          lib_name  : cornerMOSlv.lib
-
-      ff :
-        - name : ff
-          spice_corner : mos_ff
-          lib_name  : cornerMOSlv.lib
-
-  # ------------------------
-  # PVT Corners: Define the PVT corners for simulations
-  # ------------------------
-  # NOTE (legacy, display-only): `pvt_corners` and `tech_spec.pvt_map` above are NOT
-  # consumed by the simulator — they are kept only for backward compatibility / display.
-  # The `pvt:` block below is the real, simulator-driving corner system (Phase 1).
-  pvt_corners :
-    - name: typical_25C_1V2
-      temp: 25
-      corner: tt # this key is defined in the pvt_map of the tech_spec
-      supply: 1.2
-      enable: True
-
   # ------------------------
   # PVT (Phase 1): named corners that actually drive the simulation.
   # `active_corner` picks the single corner the optimizer runs against; it can be

@@ -26,13 +26,6 @@ export interface Testbench {
   params: TbParam[];
 }
 
-/** Legacy display-only corner (from `pvt_corners`). */
-export interface PVTCorner {
-  temp: number;
-  corner: string;
-  supply: number;
-}
-
 // PVT corner system (Phase 1) — the simulator-driving config (`pvt:` block).
 
 export interface ModelInclude {
@@ -115,8 +108,6 @@ export interface ProjectSummary {
   /** Optional pointer to the design's .sch (relative to `ws_root`). */
   schematic?: string | null;
   tech: { name: string; constraints: Record<string, number> };
-  /** Legacy display-only corners. */
-  pvt_corners: PVTCorner[];
   /** PVT corner system (Phase 1). `null` when the project has no `pvt:` block. */
   pvt: PVTConfig | null;
   dut_params: DutParam[];
@@ -374,14 +365,6 @@ export interface WizardTech {
   constraints: ConstraintRow[];
 }
 
-/** Legacy display-only corner row. */
-export interface WizardPVT {
-  name: string;
-  temp: string | number;
-  corner: string;
-  supply: string | number;
-}
-
 // New PVT corner system (Phase 1) — wizard editing shapes. Corners are emitted
 // with inline `model_includes` (no process_bundles) to keep the wizard flat.
 export interface WizardModelInclude {
@@ -468,8 +451,6 @@ export interface WizardOptimizer {
 export interface WizardForm {
   project: WizardProjectInfo;
   tech: WizardTech;
-  /** Legacy display-only corners (kept for round-trip; not simulator-driving). */
-  pvt_corners: WizardPVT[];
   /** PVT corner system (Phase 1) — the simulator-driving config. */
   pvt: WizardPVTConfig;
   dut_params: WizardDutParam[];

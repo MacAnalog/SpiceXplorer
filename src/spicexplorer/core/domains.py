@@ -215,16 +215,9 @@ class TechSpec:
                 self.constraints[key] = parse_value(val)
                 logger.debug(f"Parsed constraint '{key}': '{val}' to {self.constraints[key]}")
 
-@dataclass
-class PVT:
-    temp:   float
-    corner: str
-    supply: float
-
 # ---------- PVT Corner System (Phase 1) ----------
 # These dataclasses make process/voltage/temperature corners first-class so they
-# actually drive the SPICE simulation, superseding the legacy (dead) `tech_spec.pvt_map`
-# and the display-only flat `PVT` list above. They are deliberately PDK-AGNOSTIC: core
+# actually drive the SPICE simulation. They are deliberately PDK-AGNOSTIC: core
 # never interprets `lib_file`/`section` strings — the spice engine emits them verbatim.
 # See PVT_plan.md (Part A) for the full design.
 
@@ -730,7 +723,6 @@ class Project_Setup:
 
     # Custom Data types
     tech_spec: TechSpec
-    pvt_corners: List[PVT]
     dut_params: List[Param]
     testbenches: List[TestbenchParams]
     optimizer_config: OptimizerConfig
@@ -745,7 +737,6 @@ class Project_Setup:
     # to every enabled testbench's netlist once, before the optimization loop — so the
     # chosen corner's `.lib`/temp/supply actually drive the simulation. `None` preserves
     # the legacy behavior (the corner is whatever the testbench `.spice` hardcodes).
-    # The legacy `pvt_corners` / `tech_spec.pvt_map` are left untouched (display-only).
     pvt: Optional[PVTConfig] = None
 
     def __post_init__(self):
@@ -893,9 +884,6 @@ class Project_Setup:
             logger.info(f"\t({i+1}) {tb.name} @ {tb.netlist}")
             if tb.description:
                 logger.info(f"\t- Description: {tb.description}")
-        logger.info(f"⚙️  PVT corners: {len(self.pvt_corners)} corners")
-        for i, pvt in enumerate(self.pvt_corners):
-            logger.info(f"\t({i+1}) Temp: {pvt.temp}°C, Corner: {pvt.corner}, Supply: {pvt.supply}V")
         if self.pvt is not None:
             active = self.pvt.get_active() if self.pvt.get(self.pvt.active_corner) else None
             logger.info(

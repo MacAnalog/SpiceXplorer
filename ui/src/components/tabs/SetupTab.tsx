@@ -359,7 +359,7 @@ export function SetupTab({ appConfig }: Props) {
                     <dd className="m-0 font-mono text-[11px]">
                       {summary.pvt
                         ? `${summary.pvt.active_corner} · ${summary.pvt.corners.length} defined`
-                        : `${summary.pvt_corners.length} (legacy, display-only)`}
+                        : "none (netlist-hardcoded)"}
                     </dd>
                     <dt className="text-muted">testbenches</dt>
                     <dd className="m-0 font-mono text-[11px]">

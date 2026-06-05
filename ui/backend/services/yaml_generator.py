@@ -160,20 +160,6 @@ def _build_tech_spec(form: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _build_pvt(form: Dict[str, Any]) -> List[Dict[str, Any]]:
-    out = []
-    for row in form.get("pvt_corners", []):
-        if not row.get("name"):
-            continue
-        out.append({
-            "name": row["name"],
-            "temp": _coerce_number(row.get("temp")),
-            "corner": row.get("corner", "tt"),
-            "supply": _coerce_number(row.get("supply")),
-        })
-    return out
-
-
 def _build_pvt_block(form: Dict[str, Any]) -> Dict[str, Any] | None:
     """Emit the new `pvt:` block (Phase 1) from the wizard's pvt config.
 
@@ -241,7 +227,6 @@ def build_project_dict(form: Dict[str, Any]) -> Dict[str, Any]:
         "outdir": project.get("outdir", "spice/temp_spice_out"),
         **({"schematic": project["schematic"]} if project.get("schematic") else {}),
         "tech_spec": _build_tech_spec(form),
-        "pvt_corners": _build_pvt(form),
         **({"pvt": _pvt_block} if (_pvt_block := _build_pvt_block(form)) else {}),
         "dut_params": [_build_dut_param(p) for p in form.get("dut_params", []) if p.get("name")],
         "testbenches": [_build_testbench(tb) for tb in form.get("testbenches", []) if tb.get("name")],
@@ -336,15 +321,6 @@ def project_dict_to_form(data: Dict[str, Any]) -> Dict[str, Any]:
     constraints_dict: Dict[str, Any] = tech.get("constraints") or {}
     constraints = [{"key": k, "value": _str_or_blank(v)} for k, v in constraints_dict.items()]
 
-    pvt_rows = []
-    for c in (p.get("pvt_corners") or []):
-        pvt_rows.append({
-            "name": _str_or_blank(c.get("name")),
-            "temp": _str_or_blank(c.get("temp")),
-            "corner": _str_or_blank(c.get("corner")) or "tt",
-            "supply": _str_or_blank(c.get("supply")),
-        })
-
     pvt_form = _pvt_block_to_form(p.get("pvt"))
 
     dut_rows = []
@@ -434,7 +410,6 @@ def project_dict_to_form(data: Dict[str, Any]) -> Dict[str, Any]:
             "name": _str_or_blank(tech.get("name")),
             "constraints": constraints,
         },
-        "pvt_corners": pvt_rows,
         "pvt": pvt_form,
         "dut_params": dut_rows,
         "testbenches": tb_rows,

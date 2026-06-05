@@ -35,18 +35,6 @@ project:
       min_pfet_l : 0.18u
 
   # ------------------------
-  # PVT Corners: Define the PVT corners for simulations
-  # ------------------------
-  # NOTE (legacy, display-only): `pvt_corners` below is NOT consumed by the simulator
-  # — kept only for backward compatibility / display. The `pvt:` block is the real,
-  # simulator-driving corner system (Phase 1).
-  pvt_corners :
-    - name: typical_25C_1V2
-      temp: 25
-      corner: tt
-      supply: 1.5
-
-  # ------------------------
   # PVT (Phase 1): named corners that actually drive the simulation.
   # `active_corner` is the single corner the optimizer runs against (overridable from
   # the UI). The default `tt_27C_1V5` reproduces these testbenches' hardcoded netlists
