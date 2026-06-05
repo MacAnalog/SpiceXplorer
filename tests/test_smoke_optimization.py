@@ -218,6 +218,9 @@ def test_one_optimization_step():
     )
     optimizer = orchestrator.get_optimizer()
     optimizer.parameterize()
+    # optimization_step() calls self.optimizer.ask(); build that object first — the same
+    # contract the optimize() loop, sanity.py, and optimizer_runner all follow.
+    assert optimizer._create_optimizer_obj(), "optimizer object failed to build"
 
     params, score, metadata = optimizer.optimization_step()
 
