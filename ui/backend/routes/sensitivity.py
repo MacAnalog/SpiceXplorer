@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from ui.backend.app_config import default_yaml_path
+from ui.backend.services.num import safe_float as _safe_float
 
 router = APIRouter()
 
@@ -60,14 +61,6 @@ class SensitivityResponse(BaseModel):
     params: list[ParamSensitivity] = []
     error: str | None = None
     elapsed_ms: float | None = None
-
-
-def _safe_float(v: Any) -> float | None:
-    try:
-        x = float(v)
-        return x if math.isfinite(x) else None
-    except (TypeError, ValueError):
-        return None
 
 
 def _parse_device_kind(param_name: str) -> tuple[str, str]:

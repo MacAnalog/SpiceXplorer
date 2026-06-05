@@ -167,7 +167,7 @@ project:
       min_val: 0.1
       max_val: max_vdd
 
-    - name : x_dut_Vb1
+    - name : x_dut_Vb2
       # init : 0.5
       min_val: 0.1
       max_val: max_vdd

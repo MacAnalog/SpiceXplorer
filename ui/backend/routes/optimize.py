@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from ui.backend.app_config import default_yaml_path, preset_checkpoint_paths
 from ui.backend.services import optimizer_runner as runner
+from ui.backend.services.env_probe import probe_env
 
 router = APIRouter()
 
@@ -37,12 +38,29 @@ async def start_run(body: StartRequest, request: Request):
 
     yaml_path = body.yaml_path or str(default_yaml_path())
 
+    # Live and resume runs need real SPICE: refuse cleanly (409) when the
+    # environment can't run it, instead of failing deep in the engine. Replay
+    # needs no PDK, so it is exempt. (The client also gates this; this is the
+    # server-side enforcement so direct/programmatic callers get a clear error.)
+    if not body.replay:
+        env = probe_env()
+        if not env.get("live_runs_enabled", False):
+            raise HTTPException(409, env.get("pdk_detail") or "Live runs disabled: ngspice/PDK unavailable.")
+
     checkpoint_path: Path | None = None
+    replay_len: int | None = None
     if body.replay and body.checkpoint_id:
         presets = preset_checkpoint_paths()
         checkpoint_path = presets.get(body.checkpoint_id)
         if checkpoint_path is None or not checkpoint_path.exists():
             raise HTTPException(404, f"Checkpoint '{body.checkpoint_id}' not found")
+        # Report the row count so the UI's progress denominator is the checkpoint
+        # length, not the unrelated live-run budget (default 200).
+        try:
+            from ui.backend.services.checkpoint_reader import read_checkpoint
+            replay_len = read_checkpoint(checkpoint_path).get("n_iters")
+        except Exception:
+            replay_len = None
 
     # Resume: resolve the checkpoint to continue a live run from (presets or autosaves).
     resume_path: str | None = None
@@ -66,7 +84,7 @@ async def start_run(body: StartRequest, request: Request):
         resume_path=resume_path,
         loop=loop,
     )
-    return {"run_id": run_id, "replay": body.replay, "resumed": resume_path is not None}
+    return {"run_id": run_id, "replay": body.replay, "resumed": resume_path is not None, "n_iters": replay_len}
 
 
 @router.post("/optimize/stop/{run_id}")

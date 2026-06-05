@@ -1,28 +1,21 @@
 """GET /api/config — return app_config.json with resolved paths for the frontend."""
 from fastapi import APIRouter
-from ui.backend.app_config import get_app_config, preset_checkpoint_paths, schematic_svg_path, default_yaml_path
+from ui.backend.app_config import preset_checkpoint_paths, schematic_svg_path, default_yaml_path
+from ui.backend.routes.checkpoint import _infer_score_fn
 
 router = APIRouter()
 
 
 @router.get("/config")
 def get_config():
-    raw = get_app_config()
     checkpoints = []
     for key, path in preset_checkpoint_paths().items():
-        name = path.name.lower()
-        if "sigmoid" in name:
-            score_fn = "relative-sigmoid"
-        elif "relabs" in name or "relativeabs" in name:
-            score_fn = "relative-absolute"
-        else:
-            score_fn = "unknown"
         checkpoints.append({
             "id": key,
             "label": key.replace("_", " ").title(),
             "path": str(path),
             "type": "csv" if path.suffix == ".csv" else "json",
-            "score_fn": score_fn,
+            "score_fn": _infer_score_fn(path),  # single source of truth (also handles "linear")
             "exists": path.exists(),
         })
     return {

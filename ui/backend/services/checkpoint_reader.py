@@ -5,18 +5,9 @@ import math
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
-
-# ---------- helpers ----------
-
-def _safe_float(v: Any) -> float | None:
-    try:
-        x = float(v)
-        return x if math.isfinite(x) else None
-    except (TypeError, ValueError):
-        return None
+from ui.backend.services.num import safe_float as _safe_float
 
 
 # ---------- JSON checkpoint reader ----------
@@ -42,6 +33,10 @@ def read_json_checkpoint(path: Path) -> dict[str, Any]:
 
         fs = entry.fit_summary or {}
         for metric, vals in fs.items():
+            # Some optimizers (e.g. the Bode path) store bare scalars in fit_summary
+            # rather than {"curr_val": ...} dicts — skip those instead of crashing.
+            if not isinstance(vals, dict):
+                continue
             per_metric.setdefault(metric, []).append(_safe_float(vals.get("curr_val")))
 
         for pname, pval in entry.get_params().items():

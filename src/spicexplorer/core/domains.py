@@ -174,7 +174,12 @@ class Param:
     description: Optional[str]
     log_scale: bool = False
     is_integer: bool = False
-    freeze: bool = True
+    # Default False so an omitted `freeze` key means "optimize this param" — this
+    # matches the wizard/parse-to-form default and the historical behavior where
+    # every dut_param was swept. Set `freeze: true` to exclude a param from the
+    # search space (its `val`/`init`, if given, is injected; otherwise the
+    # netlist's own .param default is used).
+    freeze: bool = False
 
     def needs_resolution(self) -> bool:
         return isinstance(self.min_val, str) or isinstance(self.max_val, str) or (self.init is not None and isinstance(self.init, str)) or (self.val is not None and isinstance(self.val, str))
@@ -214,23 +219,6 @@ class Param:
     def has_val(self) -> bool:
         return self.val is not None
     
-
-@dataclass
-class DutParams:
-    params: List[Param]
-
-    def get_frozen_params(self) -> Dict[str, float]:
-        return {p.name: float(p.init) for p in self.params if p.freeze}
-    
-    def list_frozen_params(self) -> List[Param]:
-        return [p for p in self.params if p.freeze]
-    
-    def list_all_params(self) -> List[Param]:
-        return self.params
-    
-    def list_variable_params(self) -> List[Param]:
-        return [p for p in self.params if not p.freeze]
-
 
 @dataclass
 class TestbenchParams:
@@ -316,7 +304,19 @@ class TargetSpec:
                 raise ValueError(f"Invalid error_type '{self.error_type}'. Must be one of {valid_errors}.")
         
         # --- Validate / convert range ---
+        if isinstance(self.range, str):
+            self.range = parse_value(self.range)
         self.range = np.float64(self.range)
+        # An omitted/blank range yields np.float64(None) == NaN, which silently
+        # poisons every relative penalty/reward (the `<= 0` guards in utils do not
+        # catch NaN). Fall back to a sane normalizer, matching score_service.
+        if not np.isfinite(self.range) or self.range <= 0:
+            fallback = np.float64(max(abs(float(self.target)), 1.0))
+            logger.warning(
+                f"Target '{self.name}' has no valid 'range' (got {self.range}); "
+                f"falling back to {fallback} for metric normalization."
+            )
+            self.range = fallback
 
         # --- Tolerance fallback ---
         if isinstance(self.tolerance, str):
@@ -625,6 +625,16 @@ class Project_Setup:
             self.outdir = Path(self.outdir)
         if isinstance(self.schematic, str):
             self.schematic = Path(self.schematic)
+        # Validate dut_param name uniqueness: a duplicate name silently collapses
+        # to a single search dimension in the optimizer (parameters[name] = ...
+        # overwrites), masking a data error. Fail loudly instead.
+        _dut_names = [p.name for p in self.dut_params]
+        _dupes = sorted({n for n in _dut_names if _dut_names.count(n) > 1})
+        if _dupes:
+            raise ValueError(
+                f"Duplicate dut_param name(s) {_dupes} in project '{self.name}'. "
+                "Each DUT parameter must have a unique name."
+            )
         # Log basic info
         logger.info(f"Project '{self.name}' initialized with simulator '{self.simulator}'")
         logger.info(f"\tWorkspace root: {self.ws_root}")
@@ -810,8 +820,11 @@ class OptimizationLogEntry:
 
 class OptimizationLog:
     """Acts like a list of OptimizationLogEntry objects."""
-    def __init__(self, initial_logs: List[OptimizationLogEntry] = []):
-        self.log: List[OptimizationLogEntry] = initial_logs
+    def __init__(self, initial_logs: Optional[List[OptimizationLogEntry]] = None):
+        # Copy (and never share the default) so two default-constructed logs do
+        # not alias the same list — the classic mutable-default trap that leaked
+        # trials across runs/sanity-checks in one backend process.
+        self.log: List[OptimizationLogEntry] = list(initial_logs) if initial_logs is not None else []
 
     def __iter__(self) -> Iterator[OptimizationLogEntry]:
         """Allow iteration over log entries."""
