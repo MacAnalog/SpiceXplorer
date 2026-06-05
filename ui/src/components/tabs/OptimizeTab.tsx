@@ -199,7 +199,10 @@ export function OptimizeTab({ appConfig }: Props) {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3">
+      {/* [&>*]:shrink-0 — children are Panels (overflow-hidden ⇒ flex auto-min-size 0),
+          so without this the flex column crushes them to fit and clips their content
+          (the Manual Sim result + log tails) instead of letting this container scroll. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3 [&>*]:shrink-0">
         {(startError || runError) && (
           <div
             role="alert"

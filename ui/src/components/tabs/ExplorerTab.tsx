@@ -248,7 +248,9 @@ export function ExplorerTab() {
         </Button>
       </Toolbar>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3">
+      {/* [&>*]:shrink-0 — keep Panels (overflow-hidden) from being flex-crushed/clipped;
+          the container scrolls instead. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3 [&>*]:shrink-0">
         {!hasData && (
           <EmptyState bordered minHeight="min-h-32">
             Pick run A and/or B and click Load both to start exploring.

@@ -95,7 +95,10 @@ export function HealthTab() {
         </Button>
       </Toolbar>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3">
+      {/* [&>*]:shrink-0 — Panels (overflow-hidden ⇒ flex auto-min-size 0) would
+          otherwise be crushed to fit and clip their content (trial sim log tails)
+          instead of letting this container scroll. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3 [&>*]:shrink-0">
         {!isApplied && (
           <EmptyState bordered minHeight="min-h-32">
             Apply a project on the Setup tab to enable the health check.
