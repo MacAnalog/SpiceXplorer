@@ -76,3 +76,13 @@ def test_targetspec_explicit_range_preserved():
 def test_compute_error_rejects_nan_coeff():
     with pytest.raises(ValueError):
         compute_error(np.float64(1.0), np.float64(0.0), "relative-absolute", np.float64(np.nan))
+
+
+# --- SCH-2 / BUG-A4: dut_param string `val` must resolve to a number ---------
+def test_dut_param_string_val_is_resolved():
+    proj = Project_Setup.from_yaml(EXAMPLE_YAML)
+    p = proj.dut_params[0]
+    p.val = "0.18u"  # an engineering-string operating point
+    proj.resolve_all_parameter_ranges()
+    assert not isinstance(p.val, str), "dut_param.val should be resolved, not left a string"
+    assert abs(float(p.val) - 0.18e-6) < 1e-15

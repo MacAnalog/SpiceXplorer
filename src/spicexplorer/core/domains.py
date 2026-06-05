@@ -837,6 +837,10 @@ class Project_Setup:
                 logger.debug(f"Resolving ranges for param '{param.name}'")
                 param.resolve_min_max(self.tech_spec.constraints)
                 logger.debug(f"Resolved param '{param.name}': min={param.min_val}, max={param.max_val}, default={param.init}")
+            # Resolve a dut_param's operating-point `val` too (eng-string / constraint ref),
+            # so the Schematic inspector nominal and the project summary don't fall back to
+            # the range midpoint. Mirrors the testbench-param loop below. (SCH-2 / BUG-A4)
+            param.ressolve_val(self.tech_spec.constraints)
 
         logger.info("resolving TESTBENCH parameters...")
         for tb in self.testbenches:
