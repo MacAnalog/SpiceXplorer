@@ -7,6 +7,7 @@ import { useRunStore } from "@/stores/runStore";
 import { useUIStore } from "@/stores/uiStore";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn, formatEng } from "@/lib/utils";
+import { cornerSummary, cornerIncludes } from "@/lib/pvt";
 
 /**
  * Read-only pipeline DAG of the optimization problem, derived entirely from
@@ -101,6 +102,9 @@ export function PipelineView() {
   const freeCount = allParams.filter((p) => !p.freeze).length;
   const enabledTbs = summary.testbenches.filter((t) => t.enable);
 
+  const pvt = summary.pvt;
+  const activeCorner = pvt?.corners.find((c) => c.name === pvt.active_corner) ?? null;
+
   const specPass = (specName: string, goal: string, target: number, tol: number | null) => {
     const v = bestMetrics[specName];
     if (v == null) return null;
@@ -114,6 +118,24 @@ export function PipelineView() {
         the optimizer perturbs the free DUT parameters, each enabled testbench simulates, and the
         target specs score the result. Click a spec to shape its penalty.
       </div>
+
+      {/* PVT corner — a global condition applied to every testbench's netlist before
+          simulation. Shown as a banner because it feeds all testbenches at once. */}
+      {pvt && activeCorner && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-secondary/40 bg-secondary-soft px-3 py-2 text-[11px]">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-secondary">
+            PVT corner
+          </span>
+          <span className="font-mono text-[12px] text-fg">{activeCorner.name}</span>
+          <span className="font-mono text-muted">{cornerSummary(activeCorner)}</span>
+          <span className="font-mono text-[10px] text-faint" title={cornerIncludes(activeCorner)}>
+            {cornerIncludes(activeCorner)}
+          </span>
+          <span className="ml-auto font-mono text-[10px] text-faint">
+            {pvt.corners.length} corner(s) defined · applied to all {enabledTbs.length} testbench(es)
+          </span>
+        </div>
+      )}
 
       <div className="flex items-stretch gap-3">
         {/* Optimizer */}

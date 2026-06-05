@@ -8,6 +8,7 @@ import { useProjectStore } from "@/stores/projectStore";
 import { useWizardStore } from "@/stores/wizardStore";
 import { api } from "@/lib/api";
 import { formatEng } from "@/lib/utils";
+import { cornerSummary, cornerIncludes } from "@/lib/pvt";
 import { EmptyState } from "@/components/ui/empty-state";
 import { selectCn } from "@/components/ui/select";
 import { Thead, Th, Tr, Td } from "@/components/ui/table";
@@ -354,9 +355,11 @@ export function SetupTab({ appConfig }: Props) {
                       {summary.dut_params.filter((p) => p.is_integer).length} int ·{" "}
                       {summary.dut_params.filter((p) => p.freeze).length} frozen
                     </dd>
-                    <dt className="text-muted">pvt corners</dt>
+                    <dt className="text-muted">pvt corner</dt>
                     <dd className="m-0 font-mono text-[11px]">
-                      {summary.pvt_corners.length}
+                      {summary.pvt
+                        ? `${summary.pvt.active_corner} · ${summary.pvt.corners.length} defined`
+                        : `${summary.pvt_corners.length} (legacy, display-only)`}
                     </dd>
                     <dt className="text-muted">testbenches</dt>
                     <dd className="m-0 font-mono text-[11px]">
@@ -414,6 +417,59 @@ export function SetupTab({ appConfig }: Props) {
                   </tbody>
                 </table>
               </Panel>
+
+              {summary.pvt && summary.pvt.corners.length > 0 && (
+                <Panel>
+                  <PanelHeader
+                    title="pvt corners"
+                    mute={`· ${summary.pvt.corners.length}`}
+                    right={
+                      <span className="font-mono text-[10px] text-secondary">
+                        active: {summary.pvt.active_corner}
+                      </span>
+                    }
+                  />
+                  <table className="w-full">
+                    <Thead>
+                      <Th>corner</Th>
+                      <Th>env</Th>
+                      <Th>process</Th>
+                      <Th>on</Th>
+                    </Thead>
+                    <tbody>
+                      {summary.pvt.corners.map((c) => {
+                        const isActive = c.name === summary.pvt!.active_corner;
+                        return (
+                          <Tr key={c.name} highlight={isActive}>
+                            <Td className="font-mono">
+                              {c.name}
+                              {isActive && (
+                                <span className="ml-1 text-[9px] uppercase tracking-wider text-secondary">
+                                  active
+                                </span>
+                              )}
+                            </Td>
+                            <Td className="font-mono text-[10px] text-muted">
+                              {cornerSummary(c)}
+                            </Td>
+                            <Td
+                              className="max-w-[160px] truncate font-mono text-[10px] text-faint"
+                              title={cornerIncludes(c)}
+                            >
+                              {cornerIncludes(c) || "—"}
+                            </Td>
+                            <Td>
+                              <Badge variant={c.enabled ? "ok" : "neutral"}>
+                                {c.enabled ? "yes" : "no"}
+                              </Badge>
+                            </Td>
+                          </Tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </Panel>
+              )}
 
               <Panel>
                 <PanelHeader
