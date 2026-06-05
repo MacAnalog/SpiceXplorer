@@ -43,8 +43,11 @@ def _build_dut_param(row: Dict[str, Any]) -> Dict[str, Any]:
         out["is_integer"] = True
     if row.get("log_scale"):
         out["log_scale"] = True
-    if row.get("freeze") is False:
-        out["freeze"] = False
+    if row.get("freeze"):
+        # Only `freeze: true` must be serialized (False is the dataclass default).
+        # The prior `is False` check inverted this and silently dropped frozen params,
+        # so a frozen DUT param was emitted without `freeze` and then swept as a free var.
+        out["freeze"] = True
     if row.get("init") not in (None, ""):
         out["init"] = _coerce_number(row.get("init"))
     return _drop_empty(out)
@@ -195,15 +198,33 @@ def _build_pvt_block(form: Dict[str, Any]) -> Dict[str, Any] | None:
         if c.get("temp") not in (None, ""):
             corner["temp"] = _coerce_number(c.get("temp"))
         node = (c.get("supply_node") or "").strip()
+        rails: List[Dict[str, Any]] = []
         if node and c.get("supply_value") not in (None, ""):
-            corner["supply"] = {"node": node, "value": _coerce_number(c.get("supply_value"))}
+            rails.append({"node": node, "value": _coerce_number(c.get("supply_value"))})
+        # Re-emit any carried rails 2..N so a multi-rail corner survives the round-trip
+        # instead of being silently collapsed to its first rail (BUG-A6 / WIZ-4).
+        for s in (c.get("extra_supplies") or []):
+            n = (s.get("node") or "").strip()
+            if n and s.get("value") not in (None, ""):
+                rails.append({"node": n, "value": _coerce_number(s.get("value"))})
+        if len(rails) == 1:
+            corner["supply"] = rails[0]
+        elif len(rails) > 1:
+            corner["supplies"] = rails
         corner["enabled"] = bool(c.get("enabled", True))
         corners_out.append(corner)
 
     if not corners_out:
         return None
     active = (pvt.get("active_corner") or "").strip() or corners_out[0]["name"]
-    return {"active_corner": active, "corners": corners_out}
+    block: Dict[str, Any] = {"active_corner": active, "corners": corners_out}
+    # model_lib_root is load-bearing — apply_corner() prepends it to each include's
+    # lib_file — so it must survive the wizard round-trip instead of being dropped.
+    raw_root = pvt.get("model_lib_root")
+    root = raw_root.strip() if isinstance(raw_root, str) else raw_root
+    if root:
+        block["model_lib_root"] = root
+    return block
 
 
 def build_project_dict(form: Dict[str, Any]) -> Dict[str, Any]:
@@ -258,7 +279,7 @@ def _pvt_block_to_form(raw_pvt: Any) -> Dict[str, Any]:
     shape the wizard edits. The wizard models a single supply rail, so only the
     first supply is carried (multi-rail YAML is fully editable in the raw editor).
     """
-    empty = {"active_corner": "", "corners": []}
+    empty = {"active_corner": "", "corners": [], "model_lib_root": ""}
     if not isinstance(raw_pvt, dict):
         return empty
 
@@ -281,6 +302,12 @@ def _pvt_block_to_form(raw_pvt: Any) -> Dict[str, Any]:
             "temp": _str_or_blank(c.get("temp")) or "27",
             "supply_node": _str_or_blank(first.get("node")) or "VDD",
             "supply_value": _str_or_blank(first.get("value")),
+            # Carry rails 2..N losslessly (the wizard edits only the primary rail) so a
+            # round-trip Save doesn't drop a multi-rail corner (BUG-A6 / WIZ-4).
+            "extra_supplies": [
+                {"node": _str_or_blank(s.get("node")), "value": _str_or_blank(s.get("value"))}
+                for s in supplies[1:]
+            ],
             "enabled": _bool(c.get("enabled"), True),
             "includes": [
                 {"lib_file": _str_or_blank(m.get("lib_file")), "section": _str_or_blank(m.get("section"))}
@@ -290,6 +317,9 @@ def _pvt_block_to_form(raw_pvt: Any) -> Dict[str, Any]:
     return {
         "active_corner": _str_or_blank(block.get("active_corner")),
         "corners": corners_out,
+        # Carry model_lib_root through the round-trip (it survives _normalize_pvt_block
+        # untouched); the wizard re-emits it via _build_pvt_block.
+        "model_lib_root": _str_or_blank(block.get("model_lib_root")),
     }
 
 

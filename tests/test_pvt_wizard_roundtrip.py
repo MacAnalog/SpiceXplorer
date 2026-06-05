@@ -59,7 +59,61 @@ def test_project_without_pvt_yields_empty_wizard_pvt():
     raw = yaml.safe_load(
         (REPO_ROOT / "examples/OTA/cascode/ihp-sg13g2/sizing/project_setup.yaml").read_text()
     )
+    # The cascode example now ships a first-class `pvt:` block (commit dc8b6f5) under
+    # `project:`, so drop it here to exercise the genuine no-PVT path independently of how
+    # the example evolves.
+    (raw.get("project") or {}).pop("pvt", None)
     form = project_dict_to_form(raw)
-    assert form["pvt"] == {"active_corner": "", "corners": []}
+    assert form["pvt"] == {"active_corner": "", "corners": [], "model_lib_root": ""}
     # …and generating from it emits no `pvt:` block.
     assert "\npvt:" not in generate_yaml(form)
+
+
+def test_pvt_model_lib_root_survives_wizard_roundtrip():
+    """WIZ-2/BUG-A3: model_lib_root must round-trip through the wizard — it is load-bearing
+    (apply_corner prepends it to each include's lib_file), not display-only."""
+    from ui.backend.services.yaml_generator import _build_pvt_block, _pvt_block_to_form
+
+    root = "/pdk/ihp-sg13g2/libs.tech/ngspice/models"
+    form_pvt = {
+        "active_corner": "tt",
+        "model_lib_root": root,
+        "corners": [
+            {
+                "name": "tt", "temp": "27", "supply_node": "VDD", "supply_value": "1.5",
+                "enabled": True,
+                "includes": [{"lib_file": "cornerMOSlv.lib", "section": "mos_tt"}],
+            }
+        ],
+    }
+    block = _build_pvt_block({"pvt": form_pvt})
+    assert block is not None and block["model_lib_root"] == root  # emitted, not dropped
+    assert _pvt_block_to_form(block)["model_lib_root"] == root      # carried back to the form
+
+
+def test_pvt_multi_rail_supplies_survive_wizard_roundtrip():
+    """WIZ-4/BUG-A6: a corner's rails 2..N must not be silently dropped by the wizard."""
+    from ui.backend.services.yaml_generator import _build_pvt_block, _pvt_block_to_form
+
+    form_pvt = {
+        "active_corner": "tt",
+        "corners": [
+            {
+                "name": "tt", "temp": "27",
+                "supply_node": "VDD", "supply_value": "1.8",
+                "extra_supplies": [{"node": "VDDH", "value": "3.3"}],
+                "enabled": True,
+                "includes": [{"lib_file": "cornerMOSlv.lib", "section": "mos_tt"}],
+            }
+        ],
+    }
+    block = _build_pvt_block({"pvt": form_pvt})
+    rails = block["corners"][0]["supplies"]  # multi-rail → emitted as `supplies` list
+    assert [r["node"] for r in rails] == ["VDD", "VDDH"]
+    assert [float(r["value"]) for r in rails] == [1.8, 3.3]
+
+    back = _pvt_block_to_form(block)["corners"][0]  # …and carried back through the form
+    assert back["supply_node"] == "VDD"
+    assert len(back["extra_supplies"]) == 1
+    assert back["extra_supplies"][0]["node"] == "VDDH"
+    assert float(back["extra_supplies"][0]["value"]) == 3.3

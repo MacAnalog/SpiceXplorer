@@ -24,7 +24,7 @@ const emptyCorner = (n: number): WizardPVTCorner => ({
  */
 export function PVTStep() {
   const { form, setPvtConfig } = useWizardStore();
-  const pvt = form.pvt ?? { active_corner: "", corners: [] };
+  const pvt = form.pvt ?? { active_corner: "", corners: [], model_lib_root: "" };
   const corners = pvt.corners;
 
   const commit = (next: Partial<typeof pvt>) => setPvtConfig({ ...pvt, ...next });
@@ -91,6 +91,19 @@ export function PVTStep() {
                 </option>
               ))}
             </select>
+          </Field>
+        )}
+
+        {corners.length > 0 && (
+          <Field
+            label="Model lib root"
+            hint="Optional dir prepended to each include's lib_file at sim time (blank → use the netlist's .lib search path / PDK env)."
+          >
+            <TextInput
+              value={pvt.model_lib_root ?? ""}
+              placeholder="${PDK_ROOT}/ihp-sg13g2/libs.tech/ngspice/models"
+              onChange={(e) => commit({ model_lib_root: e.target.value })}
+            />
           </Field>
         )}
 

@@ -43,7 +43,7 @@ const defaultForm = (): WizardForm => ({
   },
   tech: { name: "", constraints: [] },
   pvt_corners: [],
-  pvt: { active_corner: "", corners: [] },
+  pvt: { active_corner: "", corners: [], model_lib_root: "" },
   dut_params: [],
   testbenches: [],
   target_specs: [],
