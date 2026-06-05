@@ -44,7 +44,7 @@ def _summarise(project: Project_Setup) -> dict[str, Any]:
             "target": float(s.target),
             "tolerance": float(s.tolerance) if s.tolerance else None,
             "range": float(s.range) if s.range else None,
-            "weight": float(s.weight) if s.weight else 1.0,
+            "weight": float(s.weight) if s.weight is not None else 1.0,
             "error_type": s.error_type.value if hasattr(s.error_type, "value") else str(s.error_type),
             "reward_type": s.reward_type.value if hasattr(s.reward_type, "value") else str(s.reward_type),
             "enable": s.enable,

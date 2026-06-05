@@ -40,7 +40,7 @@ def compute_score(
         value = metric_values.get(spec.name)
         target = float(spec.target)
         tolerance = float(spec.tolerance) if spec.tolerance else abs(0.05 * target)
-        weight = float(spec.weight) if spec.weight else 1.0
+        weight = float(spec.weight) if spec.weight is not None else 1.0
         rang = float(spec.range) if spec.range and spec.range > 0 else max(abs(target), 1.0)
 
         if value is None:
@@ -100,6 +100,10 @@ def compute_score(
 
     return {
         "per_spec": per_spec,
-        "aggregate": {"linear": -total_linear, "sigmoid": -total_sigmoid},
+        # F(x) = Σ wᵢ · P̂ᵢ — the non-negative weighted penalty sum the UI header and the
+        # per-spec columns show. Do NOT negate here: the optimizer's maximize-score
+        # convention lives in the library scorer, not this preview service; negating made
+        # the footer print a negative number under its own "sum of penalties" label.
+        "aggregate": {"linear": total_linear, "sigmoid": total_sigmoid},
         "curve": curve,
     }

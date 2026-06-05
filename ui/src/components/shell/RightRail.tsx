@@ -7,7 +7,7 @@ import { useUIStore } from "@/stores/uiStore";
 import { Stat } from "@/components/ui/stat";
 import { Badge } from "@/components/ui/badge";
 import { SpecChip } from "@/components/ui/spec-chip";
-import { formatEng } from "@/lib/utils";
+import { formatEng, statusForGoal } from "@/lib/utils";
 
 /**
  * Always-on right rail: live run progress + spec status + best params. Hoisted
@@ -37,15 +37,12 @@ export function RightRail() {
     if (!summary) return [];
     return summary.target_specs.map((spec) => {
       const val = bestMetrics[spec.name];
-      const pass =
-        val != null &&
-        (spec.goal === "exceed"
-          ? val >= spec.target
-          : spec.goal === "minimize"
-            ? val <= spec.target
-            : Math.abs(val - spec.target) <= (spec.tolerance ?? Infinity));
+      // Shared tolerance-aware verdict (HealthTab/ExplorerTab use the same), so the rail
+      // can't disagree with other surfaces. The old inline check ignored tolerance for
+      // exceed/minimize and defaulted exact's tolerance to Infinity (too lenient).
+      const verdict = statusForGoal(spec.goal, val, spec.target, spec.tolerance ?? undefined);
       const status: "ok" | "fail" | "neutral" =
-        val == null ? "neutral" : pass ? "ok" : "fail";
+        verdict === "pass" ? "ok" : verdict === "fail" ? "fail" : "neutral";
       const goalSym = spec.goal === "exceed" ? ">" : spec.goal === "minimize" ? "<" : "≈";
       return { spec, val, status, goalSym };
     });
