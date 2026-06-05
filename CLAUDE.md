@@ -110,6 +110,8 @@ Five Zustand stores hold cross-view state: `projectStore` (loaded/applied projec
 
 **Run-config overrides are ephemeral**: OptimizeTab's algorithm/budget/seed are sent to `POST /api/optimize/start` and applied in-memory to the loaded `Project_Setup` (`optimizer_runner._apply_overrides`) — the YAML on disk is never rewritten.
 
+**`dut_param.freeze` defaults to `False`**: an omitted `freeze` key means "optimize this param" — matching the wizard default and the historical sweep-everything behavior. Set `freeze: true` to exclude a param from the search space (`NevergradMixin.parameterize` skips it and injects its `val`/`init`, if given). `Project_Setup.from_yaml()` now also **rejects duplicate `dut_param` names** (they previously collapsed silently to one search dimension). The `freeze_to: <value>` YAML key is still parsed-but-ignored — wiring it up is deferred with the PVT / multi-corner work.
+
 **App-Router typed routes**: `next.config.mjs` sets `typedRoutes: true`, so `router.push("/foo")` needs `"/foo" as Route` (import `type { Route } from "next"`).
 
 ## Key Files for Common Tasks

@@ -6,6 +6,8 @@ Scope: the Python library (`src/spicexplorer`), the FastAPI backend (`ui/backend
 
 ---
 
+> **✅ Status (2026-06).** Cleaned up in branch `dev/ui`: deleted dead `formatNumber` (#3) and the dead `DutParams` class (BUG-38); removed dead `uiStore` fields `compareRunA`/`compareRunB`/`setCompare`/`setSelectedRunId` (#4); consolidated `_safe_float` into `ui/backend/services/num.py` (#6); `config.py` now reuses `_infer_score_fn`, fixing the `"linear"` divergence (#7); extracted `_target_specs_from_yaml` (#11); renamed the duplicate `x_dut_Vb1`→`x_dut_Vb2` + `from_yaml` now rejects duplicates (#13). **Deferred** (cosmetic, behavior-changing, or needs sign-off): `bottomTab` collapse (#14), shared `goalSym` glyph + FE pass/fail dedup (#8/#9/#10), `score_service` penalty-helper (#12), `CheckpointMeta.n_iters` (#5), legacy SVG schematic route (#15), and `newcas_demo_runner.py` / the RL subtree (#1/#2 — product sign-off). Verified by `pytest`/`ruff`/`tsc`/`eslint`/`build`.
+
 ## Dead code
 
 ### 1. `newcas_demo_runner.py` — fully orphaned parallel implementation of the backend data flow

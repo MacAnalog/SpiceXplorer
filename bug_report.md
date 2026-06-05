@@ -6,6 +6,8 @@
 
 > **Repo state.** This audit spanned commits `c937bb3` → `844f8b4` ("wizard save path + Apply for uploaded YAML") → `a11aa05` ("example PVT support added to yaml"), the current `HEAD` on `dev/ui`. `a11aa05` changed only the example YAML (no code), and `844f8b4` only fixed Apply *button-enablement* for uploaded YAML — **BUG-03 was re-verified against current HEAD and still reproduces** (the content branch still returns `yaml_path: ""`). Cited `file:line` anchors were captured during the run; a few may be ±a couple of lines after those two commits, but every referenced symbol still exists.
 
+> **✅ Fix status (2026-06).** **37 of the 39** confirmed bugs are **fixed in branch `dev/ui`**, verified by `pytest` (+7 new regression tests in `tests/test_audit_fixes.py`), `ruff`, `tsc`, `eslint` (0 warnings) and `next build`. Per-bug checklist: [TODO.md](TODO.md) §11. Two exceptions: **BUG-01** ships only the graceful-degradation half (a "symbols unavailable" banner) — full symbol rendering needs the PDK xschem symbol library vendored into the backend image (infra); **BUG-35**'s `pvt_map`/`pvt_corners` parsing is **deferred with the PVT work** (its `freeze`/default half is fixed). The 4 rejected candidates were intentionally left unchanged.
+
 ## Webapp map
 
 The map below is the shared reference for the rest of this report. SpiceXplorer's

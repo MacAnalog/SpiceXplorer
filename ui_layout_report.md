@@ -15,6 +15,8 @@ The two **confirmed reported symptoms** are:
 
 ---
 
+> **✅ Status (2026-06).** Fixed in branch `dev/ui`: **RC-1** (`w-full min-w-0` on `inputCn`, `min-w-0` on `Field` and `selectCn` — deliberately kept `selectCn` off `w-full` so toolbar selects don't stretch) resolves the reported PVT Supply-column overflow and the input-heavy steps (RC-2 largely subsumed); **RC-3** (`min-w-0`/`shrink-0` truncation in `StudioLeftRail` + `StatusBar`); **RC-4** (`overflow-x-auto whitespace-nowrap [&>*]:shrink-0` on `TabStrip` + `StatusBar` footer). The Sanity Check "clipped-no-scroll" symptom was confirmed **not** a source CSS defect (intact height/scroll chain) — most likely a stale `ui/.next` build, so no code change was made. Verified by `tsc`/`eslint`/`next build`.
+
 ## Global root causes
 
 The findings below collapse into four cross-cutting rules. Fix these at the source and most
