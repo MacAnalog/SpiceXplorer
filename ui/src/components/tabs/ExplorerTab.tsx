@@ -23,10 +23,16 @@ function goalSym(g: string): string {
   return g === "exceed" ? ">" : g === "minimize" ? "<" : "≈";
 }
 
-function bestOf(values: number[], goal: string): number | null {
+function bestOf(values: number[], goal: string, target?: number | string | null): number | null {
   if (!values.length) return null;
   // reduce, not Math.min(...values): spreading a long run's array as call
   // arguments overflows the stack (RangeError) above ~65k points.
+  if (goal === "exact" && target != null && Number.isFinite(Number(target))) {
+    // "Best" for an exact target is the sample CLOSEST to it — not the max, which an
+    // outlier (e.g. 120° for a 60°±10° phase-margin spec) would otherwise win.
+    const t = Number(target);
+    return values.reduce((m, v) => (Math.abs(v - t) < Math.abs(m - t) ? v : m), values[0]);
+  }
   return values.reduce((m, v) => (goal === "minimize" ? (v < m ? v : m) : v > m ? v : m), values[0]);
 }
 
@@ -188,14 +194,23 @@ export function ExplorerTab() {
   const envelopeRows = enabledSpecs.map((s) => {
     const aVals = runA?.per_metric[s.name]?.filter((v): v is number => v != null) ?? [];
     const bVals = runB?.per_metric[s.name]?.filter((v): v is number => v != null) ?? [];
-    const aBest = bestOf(aVals, s.goal);
-    const bBest = bestOf(bVals, s.goal);
+    const aBest = bestOf(aVals, s.goal, s.target);
+    const bBest = bestOf(bVals, s.goal, s.target);
     // Only a true head-to-head (both runs loaded, values differ) has a winner.
     // A tie, or only one run loaded, is neutral — previously ties silently went
     // to B and a single run was always declared the winner.
     let winner: "A" | "B" | null = null;
     if (aBest != null && bBest != null && aBest !== bBest) {
-      winner = (s.goal === "minimize" ? aBest < bBest : aBest > bBest) ? "A" : "B";
+      const t = Number(s.target);
+      if (s.goal === "exact" && Number.isFinite(t)) {
+        // Closest-to-target wins; equidistant-but-different samples (e.g. 50 vs 70 for
+        // target 60) are a neutral tie, not an arbitrary "B".
+        const da = Math.abs(aBest - t);
+        const db = Math.abs(bBest - t);
+        winner = da === db ? null : da < db ? "A" : "B";
+      } else {
+        winner = (s.goal === "minimize" ? aBest < bBest : aBest > bBest) ? "A" : "B";
+      }
     }
     return { spec: s, aBest, bBest, winner };
   });
@@ -492,8 +507,8 @@ export function ExplorerTab() {
                       const bVals = runB?.per_metric[s.name]?.filter(
                         (v): v is number => v != null,
                       );
-                      const aBest = aVals?.length ? bestOf(aVals, s.goal) : null;
-                      const bBest = bVals?.length ? bestOf(bVals, s.goal) : null;
+                      const aBest = aVals?.length ? bestOf(aVals, s.goal, s.target) : null;
+                      const bBest = bVals?.length ? bestOf(bVals, s.goal, s.target) : null;
                       const aPass = passesSpec(s, aBest);
                       const bPass = passesSpec(s, bBest);
                       return (
