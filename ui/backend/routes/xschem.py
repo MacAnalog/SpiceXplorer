@@ -44,14 +44,69 @@ def _xschem_share_dirs() -> list[Path]:
     return out
 
 
-@lru_cache(maxsize=1)
-def _pdk_xschem_dir() -> Path | None:
+def _discover_pdk_xschem_dir() -> Path | None:
+    """Locate the PDK's xschem symbol library, using the SAME root discovery as the
+    env probe so the symbol search path can never be a strict subset of the sim PDK
+    path (the cause of "symbols render but sims work" — device symbols turning into
+    red "?" placeholders while ``pdk_ok: true``).
+
+    For every candidate PDK root (``PDK_ROOT`` / ``PDK`` / ``IHP_PDK_ROOT`` /
+    ``app_config.pdk_root``) it matches both layouts:
+      - ``<root>/libs.tech/xschem``         (root already points at the tech dir)
+      - ``<root>/<tech>/libs.tech/xschem``  (root is the parent of named tech dirs)
+    where ``tech`` comes from ``$PDK`` and the env-probe default tech name. The old
+    implementation required BOTH ``PDK_ROOT`` and ``PDK`` and only tried the second
+    layout, so a ``PDK_ROOT``-only (or ``IHP_PDK_ROOT`` / app-config) deployment lost
+    the PDK from the resolver path while the probe still reported the PDK present.
+    """
+    roots: list[Path] = []
+    techs: list[str] = []
+    try:
+        from ui.backend.services.env_probe import _PDK_TECH, _candidate_pdk_roots
+
+        roots.extend(p for _, p in _candidate_pdk_roots())
+        techs.append(_PDK_TECH)
+    except Exception:  # noqa: BLE001 — env_probe is optional; fall back to raw env below.
+        pass
     pdk_root = os.environ.get("PDK_ROOT")
-    pdk = os.environ.get("PDK")
-    if not pdk_root or not pdk:
-        return None
-    path = Path(pdk_root) / pdk / "libs.tech" / "xschem"
-    return path if path.exists() else None
+    if pdk_root:
+        roots.append(Path(pdk_root).expanduser())
+    pdk = os.environ.get("PDK")  # conventional tech name, e.g. "ihp-sg13g2"
+    if pdk:
+        techs.insert(0, pdk)
+
+    seen: set[Path] = set()
+    for root in roots:
+        if root in seen:
+            continue
+        seen.add(root)
+        direct = root / "libs.tech" / "xschem"
+        if direct.is_dir():
+            return direct
+        for tech in techs:
+            cand = root / tech / "libs.tech" / "xschem"
+            if cand.is_dir():
+                return cand
+    return None
+
+
+_pdk_xschem_dir_cached: Path | None = None
+
+
+def _pdk_xschem_dir() -> Path | None:
+    """Locate the PDK xschem dir, memoizing only a SUCCESSFUL result.
+
+    Unlike a plain ``lru_cache``, a ``None`` (PDK not yet reachable at first call) is
+    never frozen — so a late-exported ``PDK`` env var or a PDK mounted after startup is
+    picked up on the next call without a process restart.
+    """
+    global _pdk_xschem_dir_cached
+    if _pdk_xschem_dir_cached is not None and _pdk_xschem_dir_cached.is_dir():
+        return _pdk_xschem_dir_cached
+    found = _discover_pdk_xschem_dir()
+    if found is not None:
+        _pdk_xschem_dir_cached = found
+    return found
 
 
 def _search_roots(base_dir: Path | None) -> list[Path]:
