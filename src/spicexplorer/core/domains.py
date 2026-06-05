@@ -128,6 +128,63 @@ def resolve_reference(value: Union[str, float, int], constraints: Dict[str, np.f
         return np.float64(constraints[value])
     return parse_value(value)
 
+def _normalize_pvt_block(proj: dict) -> None:
+    """Desugar the raw `pvt:` YAML block in-place into the canonical `PVTConfig` shape.
+
+    The author-facing YAML allows convenient sugar that does NOT map 1:1 onto the
+    dataclasses; this expands it before dacite ever sees it:
+
+      • `process_bundles:` (reusable named include lists) are inlined into each
+        corner's `model_includes`, then dropped — they are sugar, not a retained field.
+      • a corner's `process: <bundle>` reference is replaced by the bundle's
+        `model_includes` (inline `model_includes:` is kept as-is for one-off corners).
+      • a singular `supply: {node, value}` is widened to `supplies: [...]` so the schema
+        extends to multi-rail designs without breaking.
+      • numeric env fields (`temp`, supply `value`, `params` values) are coerced via
+        `parse_value`, so engineering strings ("1V2" style "1.2", "900m") and ints work.
+
+    No-op if `proj` has no `pvt` key. Raises ValueError on a dangling bundle reference.
+    """
+    pvt = proj.get("pvt")
+    if not isinstance(pvt, dict):
+        return
+
+    bundles: Dict[str, list] = pvt.pop("process_bundles", None) or {}
+
+    def _coerce_includes(raw_list) -> list:
+        out = []
+        for inc in raw_list or []:
+            out.append({"lib_file": str(inc["lib_file"]), "section": str(inc["section"])})
+        return out
+
+    corners = pvt.get("corners") or []
+    for corner in corners:
+        # process bundle reference  →  concrete model_includes
+        bundle_ref = corner.pop("process", None)
+        if bundle_ref is not None and "model_includes" not in corner:
+            if bundle_ref not in bundles:
+                raise ValueError(
+                    f"PVT corner '{corner.get('name', '?')}' references unknown process "
+                    f"bundle '{bundle_ref}'. Defined bundles: {sorted(bundles)}."
+                )
+            corner["model_includes"] = _coerce_includes(bundles[bundle_ref])
+        elif "model_includes" in corner:
+            corner["model_includes"] = _coerce_includes(corner["model_includes"])
+
+        # singular `supply` sugar  →  `supplies: [...]`
+        single_supply = corner.pop("supply", None)
+        if single_supply is not None and "supplies" not in corner:
+            corner["supplies"] = [single_supply]
+
+        # numeric coercion (env)
+        if "temp" in corner:
+            corner["temp"] = float(parse_value(corner["temp"]))
+        for s in corner.get("supplies", []) or []:
+            if "value" in s:
+                s["value"] = float(parse_value(s["value"]))
+        if corner.get("params"):
+            corner["params"] = {k: float(parse_value(v)) for k, v in corner["params"].items()}
+
 def safe_from_dict(cls, data: dict, logger: logging.Logger, config: Config = Config(cast=[Enum])):
     try:
         return from_dict(data_class=cls, data=data, config=config)
@@ -163,6 +220,75 @@ class PVT:
     temp:   float
     corner: str
     supply: float
+
+# ---------- PVT Corner System (Phase 1) ----------
+# These dataclasses make process/voltage/temperature corners first-class so they
+# actually drive the SPICE simulation, superseding the legacy (dead) `tech_spec.pvt_map`
+# and the display-only flat `PVT` list above. They are deliberately PDK-AGNOSTIC: core
+# never interprets `lib_file`/`section` strings — the spice engine emits them verbatim.
+# See PVT_plan.md (Part A) for the full design.
+
+@dataclass
+class ModelInclude:
+    """One generic model-library include: an opaque (file, section) pair.
+
+    The spice engine emits this as `.lib <lib_file> <section>` (ngspice); core never
+    enumerates valid files or sections. PDK-specific tokens (e.g. `cornerMOSlv.lib`,
+    `mos_tt`) live only in the YAML, never in core.
+    """
+    lib_file: str
+    section: str
+
+@dataclass
+class SupplyOverride:
+    """A supply-rail override: the `.param` name to set and its value (volts)."""
+    node: str
+    value: float
+
+@dataclass
+class Corner:
+    """A fully-resolved PVT corner: process model includes + environment.
+
+    `model_includes` is always the expanded, ordered include list — a YAML
+    `process: <bundle>` reference is resolved into this list at load time (see
+    `_normalize_pvt_block`), so core only ever sees concrete includes.
+    """
+    name: str
+    model_includes: List[ModelInclude] = field(default_factory=list)
+    temp: float = 27.0
+    supplies: List[SupplyOverride] = field(default_factory=list)
+    params: Dict[str, float] = field(default_factory=dict)
+    enabled: bool = True
+
+@dataclass
+class PVTConfig:
+    """Top-level PVT configuration: a set of named corners + which one is active.
+
+    Phase 1 drives the optimizer against the single `active_corner`. Multi-corner
+    aggregation (running every `enabled_corners()`) is deferred to Phase 2.
+    """
+    active_corner: str
+    corners: List[Corner] = field(default_factory=list)
+    model_lib_root: Optional[str] = None
+
+    def get(self, name: str) -> Optional["Corner"]:
+        for c in self.corners:
+            if c.name == name:
+                return c
+        return None
+
+    def get_active(self) -> "Corner":
+        corner = self.get(self.active_corner)
+        if corner is None:
+            available = [c.name for c in self.corners]
+            raise ValueError(
+                f"active_corner '{self.active_corner}' not found among defined "
+                f"corners {available}."
+            )
+        return corner
+
+    def enabled_corners(self) -> List["Corner"]:
+        return [c for c in self.corners if c.enabled]
 
 @dataclass
 class Param:
@@ -615,6 +741,13 @@ class Project_Setup:
     # Consumed by the UI's Schematic viewer to pre-select the main `.sch`.
     schematic: Path | str | None = None
 
+    # PVT corner system (Phase 1). When present, the optimizer applies `pvt.get_active()`
+    # to every enabled testbench's netlist once, before the optimization loop — so the
+    # chosen corner's `.lib`/temp/supply actually drive the simulation. `None` preserves
+    # the legacy behavior (the corner is whatever the testbench `.spice` hardcodes).
+    # The legacy `pvt_corners` / `tech_spec.pvt_map` are left untouched (display-only).
+    pvt: Optional[PVTConfig] = None
+
     def __post_init__(self):
         # correct path types
         if isinstance(self.ws_root, str):
@@ -669,6 +802,10 @@ class Project_Setup:
                 ws = yaml_dir / ws
             proj['ws_root'] = str(ws.resolve())
             logger.debug(f"Resolved ws_root → {proj['ws_root']}")
+
+            # Desugar the optional `pvt:` block (expand process bundles, widen
+            # singular `supply`, coerce numerics) before dacite maps it to PVTConfig.
+            _normalize_pvt_block(proj)
 
             project = safe_from_dict(cls, proj, logger, config=DECITE_CONFIG)
             
@@ -755,6 +892,16 @@ class Project_Setup:
         logger.info(f"⚙️  PVT corners: {len(self.pvt_corners)} corners")
         for i, pvt in enumerate(self.pvt_corners):
             logger.info(f"\t({i+1}) Temp: {pvt.temp}°C, Corner: {pvt.corner}, Supply: {pvt.supply}V")
+        if self.pvt is not None:
+            active = self.pvt.get_active() if self.pvt.get(self.pvt.active_corner) else None
+            logger.info(
+                f"🌡️  PVT (active): '{self.pvt.active_corner}' "
+                f"({len(self.pvt.corners)} defined, {len(self.pvt.enabled_corners())} enabled)"
+            )
+            if active is not None:
+                _libs = ", ".join(f"{m.lib_file}:{m.section}" for m in active.model_includes)
+                _sup = ", ".join(f"{s.node}={s.value}V" for s in active.supplies)
+                logger.info(f"\t→ temp={active.temp}°C  supplies=[{_sup}]  includes=[{_libs}]")
         logger.info(f"🔧 Tech Spec: {len(self.tech_spec.constraints)} constraints")
         for k, v in self.tech_spec.constraints.items():
             logger.info(f"\t• {k}: {v:.2e}")

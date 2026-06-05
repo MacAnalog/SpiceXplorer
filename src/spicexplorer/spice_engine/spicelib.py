@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 import torch
 import numpy as np
@@ -16,9 +17,14 @@ from spicelib import SimRunner, RawRead, SpiceEditor, AscEditor
 from spicelib.simulators.ngspice_simulator import NGspiceSimulator
 
 # For typing
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict, Tuple, Any, TYPE_CHECKING
 from spicelib.sim.run_task   import RunTask   as SpicelibRunTaskClass
 from spicelib.editor.base_editor import ParameterNotFoundError, ComponentNotFoundError
+
+if TYPE_CHECKING:
+    # Import only for type checkers — a runtime import would be circular
+    # (core.domains imports the spice_engine package).
+    from spicexplorer.core.domains import Corner
 
 from spicexplorer.logging import setup_loggers
 
@@ -312,7 +318,70 @@ class NGSpice_Wrapper:
                 logger.debug(f"... Parameter {key} set to {value:.3e}")
         logger.debug("✅  All parameters updated successfully")
         return True
-    
+
+    def _strip_matching_instructions(self, pattern: str) -> bool:
+        """Remove every netlist line whose start matches `pattern` (case-insensitive).
+
+        A thin wrapper over the editor's `remove_Xinstruction` that first checks for a
+        match, so we avoid spicelib emitting a misleading ERROR log when there is
+        nothing to strip (the common case on the first corner apply).
+        """
+        if self.editor is None:
+            raise RuntimeError("Editor not initialized")
+        regex = re.compile(pattern, re.IGNORECASE)
+        if any(isinstance(ln, str) and regex.match(ln) for ln in self.editor.netlist):
+            self.editor.remove_Xinstruction(pattern)
+            return True
+        return False
+
+    def apply_corner(self, corner: "Corner", model_lib_root: str | None = None) -> None:
+        """Apply a PVT `Corner` to this testbench's netlist editor (one-time setup).
+
+        Concretely, for the chosen corner this:
+          1. strips the netlist's hardcoded `.lib <file> <section>` selection for each
+             library the corner references, then re-adds the corner's selection
+             (ordered, cross-family) — so a `tt` netlist can be switched to `ss`/`ff`;
+          2. sets the simulation temperature authoritatively via `.options temp=<val>`
+             (a bare `.param temp` does NOT change ngspice's actual temperature);
+          3. overrides supply rails and any extra per-corner `.param`s.
+
+        This is the ONLY ngspice-specific corner-emission seam: a future simulator
+        backend (e.g. Spectre `include`/`section`) overrides this method. It is
+        idempotent — re-applying a corner replaces rather than accumulates directives.
+
+        :param corner: the resolved `core.domains.Corner` to apply.
+        :param model_lib_root: optional directory prepended to each `lib_file`, so a
+            corner is portable across machines. `None` keeps the netlist's own `.lib`
+            search path / PDK env (current behavior).
+        """
+        if self.editor is None:
+            raise RuntimeError("Editor not initialized; cannot apply corner")
+        ed = self.editor
+        log = self.logger
+        log.info(f"🌡️  Applying PVT corner '{corner.name}' to testbench '{self.testbench_name}'")
+
+        # (1) process model includes — strip the prior selection for the same library
+        #     file (path-agnostic: matches a bare basename or a full path), then add ours.
+        for inc in corner.model_includes:
+            basename = re.escape(Path(inc.lib_file).name)
+            self._strip_matching_instructions(rf"^\s*\.lib\s+\S*{basename}\s+\S+")
+            path = inc.lib_file if not model_lib_root else str(Path(model_lib_root) / inc.lib_file)
+            ed.add_instruction(f".lib {path} {inc.section}")
+            log.info(f"\t🧩 .lib {path} {inc.section}")
+
+        # (2) temperature — authoritative directive; strip any prior injected one first.
+        self._strip_matching_instructions(r"^\s*\.options?\s+temp\s*=")
+        ed.add_instruction(f".options temp={corner.temp}")
+        log.info(f"\t🌡️  .options temp={corner.temp}")
+
+        # (3) environment overrides — supplies then extra params (override `.param` defaults).
+        for s in corner.supplies:
+            ed.set_parameter(s.node, s.value)
+            log.info(f"\t🔌 .param {s.node}={s.value}")
+        for k, v in corner.params.items():
+            ed.set_parameter(k, v)
+            log.info(f"\t⚙️  .param {k}={v}")
+
     def run_sanity_check(self, use_editor: bool = True, sim_execution_t: Sim_Execution_Type = Sim_Execution_Type.RUN_NOW, clean_up_after: bool = True) -> bool:
         logger = self.logger
 

@@ -474,7 +474,25 @@ class Spice_Base_Optimizer(Base_Optimizer):
             self.spicelib_wrappers[tb.name].update_params(parameterization=tb_params)
             logger.info(f"parameter update is compeleted for testbench {tb.name}")
         # ----------------------------------------
-    
+        # Apply the active PVT corner (Phase 1) — one-time netlist preparation.
+        # When `pvt` is configured, the chosen corner's `.lib`/temp/supply are applied
+        # to every (enabled) testbench wrapper ONCE here, before the optimization loop;
+        # each subsequent trial inherits it because the SpiceEditor state persists.
+        # When `pvt` is None this is a no-op and the corner is whatever the netlist
+        # hardcodes (legacy behavior). The optimize loop, scorer, and simulate_circuit
+        # are deliberately untouched.
+        # ----------------------------------------
+        pvt = getattr(self.setup_obj, "pvt", None)
+        if pvt is not None:
+            corner = pvt.get_active()
+            logger.info(
+                f"🌡️  Applying PVT corner '{corner.name}' to "
+                f"{len(self.spicelib_wrappers)} testbench(es)"
+            )
+            for tb_name, wrapper in self.spicelib_wrappers.items():
+                wrapper.apply_corner(corner, model_lib_root=pvt.model_lib_root)
+        # ----------------------------------------
+
     # --- Helper Methods (only in child class) ---
     def simulate_circuit(self, parameterization: Dict[str, float]) -> Dict[str, RawRead]:
         logger.debug("Simulating the circuit with the given parameterization")
