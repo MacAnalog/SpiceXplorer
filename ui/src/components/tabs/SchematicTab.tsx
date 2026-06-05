@@ -57,6 +57,17 @@ export function SchematicTab() {
   }, [isApplied, summary?.schematic, summary?.ws_root]);
   const lastAutoLoadedRef = useRef<string | null>(null);
 
+  // Surface PDK-missing degradation: count device symbols that failed to resolve
+  // (rendered as red "?" placeholders) — usually because the xschem symbol
+  // library / PDK isn't reachable by the backend, instead of failing silently.
+  const missingSymbolCount = useMemo(() => {
+    if (!current) return 0;
+    const refs = new Set(current.parsed.instances.map((i) => i.symref));
+    let missing = 0;
+    for (const ref of refs) if (!symbols.has(ref)) missing += 1;
+    return missing;
+  }, [current, symbols]);
+
   /** Parse text, resolve every referenced symbol, probe navigable subcircuits, then commit. */
   const loadFromContent = useCallback(
     async (
@@ -303,8 +314,10 @@ export function SchematicTab() {
           <label className="flex items-center gap-2 text-xs text-muted">
             Open
             <select
+              aria-label="Open schematic"
               className="rounded border border-border bg-bg px-2 py-1 text-fg"
               value={current?.path ?? ""}
+              disabled={loading}
               onChange={(e) => {
                 const f = projectFiles.find((p) => p.path === e.target.value);
                 if (f) {
@@ -366,6 +379,14 @@ export function SchematicTab() {
           {error && (
             <div className="absolute left-3 top-3 max-w-md rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
               {error}
+            </div>
+          )}
+
+          {current && missingSymbolCount > 0 && (
+            <div className="pointer-events-none absolute bottom-3 left-3 max-w-md rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+              {missingSymbolCount} symbol{missingSymbolCount === 1 ? "" : "s"} unavailable — device
+              bodies show as placeholders. The xschem symbol library (PDK) is not reachable by the
+              backend on this machine.
             </div>
           )}
 

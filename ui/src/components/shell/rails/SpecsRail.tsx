@@ -37,15 +37,20 @@ export function SpecsRail() {
           <button
             key={s.name}
             type="button"
+            disabled={!s.enable}
             onClick={() => {
               setSelectedSpec(s.name);
               router.push("/scoring" as Route);
             }}
-            title={`${s.name} — shape this spec's score`}
+            title={
+              s.enable
+                ? `${s.name} — shape this spec's score`
+                : `${s.name} — disabled (not in the objective)`
+            }
             className={cn(
               "flex w-full items-center justify-between gap-2 rounded px-1.5 py-1 text-left transition",
               active ? "bg-primary-soft text-primary" : "hover:bg-hairline",
-              !s.enable && "opacity-50",
+              !s.enable && "cursor-not-allowed opacity-50",
             )}
           >
             <span className="truncate text-[11px]">{s.name}</span>

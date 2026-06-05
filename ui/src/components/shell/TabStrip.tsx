@@ -20,7 +20,7 @@ export function TabStrip() {
     <nav
       role="tablist"
       aria-label="Views"
-      className="flex h-10 shrink-0 items-stretch gap-0.5 border-b border-border bg-panel px-2"
+      className="flex h-10 shrink-0 items-stretch gap-0.5 overflow-x-auto whitespace-nowrap border-b border-border bg-panel px-2 [&>*]:shrink-0"
     >
       {PRIMARY_VIEWS.map((view) => {
         const Icon = view.icon;

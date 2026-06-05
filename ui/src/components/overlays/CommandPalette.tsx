@@ -30,7 +30,7 @@ export function CommandPalette() {
   const { commandOpen, openCommand, closeCommand, setSelectedSpec, openRun, openWizard } =
     useUIStore();
   const { summary, isApplied } = useProjectStore();
-  const { history, isRunning, stopRun } = useRunStore();
+  const { history, isRunning, stopRun, rerun } = useRunStore();
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -63,7 +63,10 @@ export function CommandPalette() {
           id: `spec:${spec.name}`,
           group: "Jump to spec",
           label: spec.name,
-          hint: "score shaping",
+          // A disabled spec isn't shown in Score Shaping, so deep-linking it
+          // would silently no-op — mark it non-actionable.
+          hint: spec.enable ? "score shaping" : "disabled",
+          disabled: !spec.enable,
           run: () => {
             setSelectedSpec(spec.name);
             go("/scoring");
@@ -72,16 +75,24 @@ export function CommandPalette() {
       }
     }
 
-    // Jump to run (focus a past run)
+    // Jump to run (focus a past run). Replay records can be re-loaded (rerun
+    // re-opens the SSE stream and repopulates the charts); live records have no
+    // reloadable event data, so they only get the rail highlight.
     for (const r of history) {
+      const replayable = r.kind === "replay" && !!r.checkpointId;
       cmds.push({
         id: `run:${r.id}`,
         group: "Jump to run",
         label: r.label,
-        hint: r.bestScore != null ? `best ${r.bestScore.toExponential(2)}` : r.kind,
+        hint: replayable
+          ? r.bestScore != null
+            ? `replay · best ${r.bestScore.toExponential(2)}`
+            : "replay"
+          : "live (view-only)",
         run: () => {
           openRun(r.id);
           go("/optimize");
+          if (replayable) void rerun(r);
         },
       });
     }
@@ -104,7 +115,7 @@ export function CommandPalette() {
     });
 
     return cmds;
-  }, [go, summary, isApplied, history, isRunning, setSelectedSpec, openRun, openWizard, stopRun]);
+  }, [go, summary, isApplied, history, isRunning, setSelectedSpec, openRun, openWizard, stopRun, rerun]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

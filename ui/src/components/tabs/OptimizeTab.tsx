@@ -12,7 +12,6 @@ import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Toolbar, ToolbarLabel, ToolbarSpacer } from "@/components/shell/Toolbar";
 import { Separator } from "@/components/ui/separator";
-import { Segmented } from "@/components/ui/segmented";
 import { selectCn } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { AppConfig } from "@/types/api";
@@ -20,8 +19,6 @@ import type { AppConfig } from "@/types/api";
 interface Props {
   appConfig: AppConfig | null;
 }
-
-type ScoreFn = "sigmoid" | "linear";
 
 /**
  * Optimize view — run configuration + convergence charts. Phase 2 moved the
@@ -34,12 +31,11 @@ type ScoreFn = "sigmoid" | "linear";
  */
 export function OptimizeTab({ appConfig }: Props) {
   const { summary, isApplied } = useProjectStore();
-  const { isReplay, isRunning, events, startRun, stopRun } = useRunStore();
+  const { isReplay, isRunning, events, startRun, stopRun, runError } = useRunStore();
   const env = useUIStore((s) => s.env);
   const runConfig = useUIStore((s) => s.runConfig);
   const setRunConfig = useUIStore((s) => s.setRunConfig);
 
-  const [scoreFn, setScoreFn] = useState<ScoreFn>("sigmoid");
   const [replayCheckpoint, setReplayCheckpoint] = useState<string>("");
   const [selectedMetric, setSelectedMetric] = useState<string>("");
   const [startError, setStartError] = useState<string | null>(null);
@@ -67,7 +63,8 @@ export function OptimizeTab({ appConfig }: Props) {
       try {
         const res = await api.startRun({ replay: true, checkpoint_id: replayCheckpoint });
         const ckptLabel = appConfig?.preset_checkpoints.find((c) => c.id === replayCheckpoint)?.label;
-        startRun(res.run_id, res.replay, runConfig.budget, {
+        // Use the checkpoint length as the progress denominator, not the live budget.
+        startRun(res.run_id, res.replay, res.n_iters ?? runConfig.budget, {
           kind: "replay",
           label: `Replay · ${ckptLabel ?? replayCheckpoint}`,
           checkpointId: replayCheckpoint,
@@ -138,16 +135,6 @@ export function OptimizeTab({ appConfig }: Props) {
           className={selectCn("sm") + " w-[72px]"}
         />
 
-        <ToolbarLabel>score</ToolbarLabel>
-        <Segmented<ScoreFn>
-          value={scoreFn}
-          onChange={setScoreFn}
-          options={[
-            { value: "sigmoid", label: "sigmoid" },
-            { value: "linear", label: "linear" },
-          ]}
-        />
-
         <Separator />
 
         <ToolbarLabel>demo replay</ToolbarLabel>
@@ -195,12 +182,12 @@ export function OptimizeTab({ appConfig }: Props) {
       )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3">
-        {startError && (
+        {(startError || runError) && (
           <div
             role="alert"
             className="rounded-md border border-danger bg-danger-soft px-3 py-2 text-xs text-danger"
           >
-            {startError}
+            {startError ?? runError}
           </div>
         )}
 

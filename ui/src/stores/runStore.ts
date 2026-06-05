@@ -83,6 +83,8 @@ interface RunStore {
   currentIter: number;
   /** Checkpoints autosaved during the active run (live, cumulative). */
   checkpoints: CheckpointEvent[];
+  /** Last error surfaced by the run (mid-stream {error} event or a lost connection). */
+  runError: string | null;
   history: RunRecord[];
 
   /** Begin a run: reset state, capture meta, open the SSE stream for `id`. */
@@ -112,6 +114,7 @@ const INITIAL = {
   bestParams: {} as Record<string, number>,
   currentIter: 0,
   checkpoints: [] as CheckpointEvent[],
+  runError: null as string | null,
 };
 
 export const useRunStore = create<RunStore>((set, get) => ({
@@ -119,6 +122,13 @@ export const useRunStore = create<RunStore>((set, get) => ({
   history: loadHistory(),
 
   startRun: (id, replay, budget, meta) => {
+    // If a prior run is still in flight, tell the backend to stop it so we don't
+    // orphan its optimizer thread/queue when this run supersedes it (e.g. clicking
+    // a history replay mid-run).
+    const prev = get();
+    if (prev.isRunning && prev.runId && prev.runId !== id) {
+      api.stopRun(prev.runId).catch(() => {});
+    }
     closeStream();
     activeMeta = {
       kind: meta?.kind ?? (replay ? "replay" : "live"),
@@ -135,12 +145,20 @@ export const useRunStore = create<RunStore>((set, get) => ({
       bestParams: {},
       currentIter: 0,
       checkpoints: [],
+      runError: null,
     });
 
-    es = new EventSource(api.streamUrl(id));
-    es.onmessage = (ev) => {
+    const source = new EventSource(api.streamUrl(id));
+    es = source;
+    source.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data) as SSEEvent;
+        if (data.error) {
+          // A mid-run failure (ngspice/PDK/parameterize error). Surface it; the
+          // backend follows with a done event that drives finishRun().
+          set({ runError: String(data.error) });
+          return;
+        }
         if (data.done) {
           get().finishRun();
           return;
@@ -155,7 +173,16 @@ export const useRunStore = create<RunStore>((set, get) => ({
         /* ignore malformed keepalive lines */
       }
     };
-    es.onerror = () => {
+    source.onerror = () => {
+      // Only a CLOSED connection is fatal. While CONNECTING the browser is
+      // auto-reconnecting; calling finishRun()->closeStream() here would cancel
+      // that reconnect and turn a transient blip into a permanent stop (orphaning
+      // the still-running backend optimizer).
+      if (source.readyState !== EventSource.CLOSED) return;
+      if (es !== source) return; // a newer run already replaced this stream
+      const { runId, isReplay } = get();
+      if (runId && !isReplay) api.stopRun(runId).catch(() => {});
+      set({ runError: "Connection to the run stream was lost." });
       get().finishRun();
     };
   },

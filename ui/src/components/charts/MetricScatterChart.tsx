@@ -26,12 +26,15 @@ function feasibleRect(
   goalY: string,
 ): Partial<Plotly.Shape> | null {
   if (targetX == null || targetY == null || pts.length === 0) return null;
-  const xs = pts.map((p) => p.x);
-  const ys = pts.map((p) => p.y);
-  const xmin = Math.min(...xs);
-  const xmax = Math.max(...xs);
-  const ymin = Math.min(...ys);
-  const ymax = Math.max(...ys);
+  // for-loop min/max, not Math.min(...xs): a long run's point array overflows
+  // the call stack when spread as arguments.
+  let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+  for (const p of pts) {
+    if (p.x < xmin) xmin = p.x;
+    if (p.x > xmax) xmax = p.x;
+    if (p.y < ymin) ymin = p.y;
+    if (p.y > ymax) ymax = p.y;
+  }
   const x0 = goalX === "minimize" ? xmin : targetX;
   const x1 = goalX === "minimize" ? targetX : xmax;
   const y0 = goalY === "minimize" ? ymin : targetY;

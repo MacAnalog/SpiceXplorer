@@ -581,10 +581,11 @@ function transformPoint(p: { x: number; y: number }, inst: Instance): { x: numbe
   let x = p.x, y = p.y;
   if (inst.flip) x = -x;
   const r = inst.rotate;
-  // xschem rotates CW: (x, y) -> (-y, x) per 90°.
+  // Must match instanceTransform's SVG `rotate(-rot*90)` so symbol-body geometry
+  // and its text labels stay co-located: rotate(-90) maps (x, y) -> (y, -x).
   for (let i = 0; i < r; i++) {
-    const nx = -y;
-    const ny = x;
+    const nx = y;
+    const ny = -x;
     x = nx;
     y = ny;
   }

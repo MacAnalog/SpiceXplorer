@@ -25,53 +25,56 @@ export function ScoreShapingTab() {
   // Deep-link target set by the ⌘K palette ("Jump to spec").
   const uiSelectedSpec = useUIStore((s) => s.selectedSpec);
   const [selectedSpec, setSelectedSpec] = useState<string>("");
-  const [metricValue, setMetricValue] = useState<number>(0);
+  // Per-spec "try" values (each defaults to its target). The WHOLE vector is
+  // sent to /api/score so the aggregate F(x) and the per-spec breakdown reflect
+  // all specs simultaneously — not just the one in the slider.
+  const [values, setValues] = useState<Record<string, number>>({});
   const [scoreData, setScoreData] = useState<ScoreResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const consumedDeepLink = useRef<string | null>(null);
 
   const enabledSpecs = useMemo(
     () => summary?.target_specs.filter((s) => s.enable) ?? [],
     [summary],
   );
 
+  // Seed the value map (and default selection) when a project loads.
   useEffect(() => {
-    if (!summary) return;
-    const first = enabledSpecs[0];
-    if (first && !selectedSpec) {
-      setSelectedSpec(first.name);
-      setMetricValue(first.target);
-    }
-  }, [summary, enabledSpecs, selectedSpec]);
+    if (!summary || enabledSpecs.length === 0) return;
+    setValues((prev) => {
+      const next = { ...prev };
+      for (const s of enabledSpecs) if (!(s.name in next)) next[s.name] = s.target;
+      return next;
+    });
+    setSelectedSpec((cur) => cur || enabledSpecs[0].name);
+  }, [summary, enabledSpecs]);
 
-  // Honor a ⌘K deep-link: focus the requested spec + reset the try-value.
+  // Honor a ⌘K / rail / pipeline deep-link — but only ONCE per distinct target,
+  // so it doesn't fight the dropdown (which previously snapped back every pick).
   useEffect(() => {
-    if (!uiSelectedSpec) return;
+    if (!uiSelectedSpec || consumedDeepLink.current === uiSelectedSpec) return;
     const match = enabledSpecs.find((s) => s.name === uiSelectedSpec);
-    if (match && match.name !== selectedSpec) {
+    if (match) {
+      consumedDeepLink.current = uiSelectedSpec;
       setSelectedSpec(match.name);
-      setMetricValue(match.target);
     }
-  }, [uiSelectedSpec, enabledSpecs, selectedSpec]);
+  }, [uiSelectedSpec, enabledSpecs]);
 
-  const handleSpecChange = (specName: string) => {
-    setSelectedSpec(specName);
-    const spec = enabledSpecs.find((s) => s.name === specName);
-    if (spec) setMetricValue(spec.target);
-  };
+  const handleSpecChange = (specName: string) => setSelectedSpec(specName);
+
+  const setSpecValue = (specName: string, value: number) =>
+    setValues((prev) => ({ ...prev, [specName]: value }));
 
   const computeScore = useCallback(
-    (specName: string, value: number) => {
+    (vals: Record<string, number>, specName: string) => {
       if (!yamlPath || !specName) return;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(async () => {
         setLoading(true);
         try {
-          const result = await api.computeScore(
-            yamlPath,
-            { [specName]: value },
-            specName,
-          );
+          // Full vector of current values; selected_spec only drives the curve.
+          const result = await api.computeScore(yamlPath, vals, specName);
           setScoreData(result);
         } finally {
           setLoading(false);
@@ -82,8 +85,8 @@ export function ScoreShapingTab() {
   );
 
   useEffect(() => {
-    computeScore(selectedSpec, metricValue);
-  }, [selectedSpec, metricValue, computeScore]);
+    if (selectedSpec) computeScore(values, selectedSpec);
+  }, [values, selectedSpec, computeScore]);
 
   if (!isApplied || !summary) {
     return (
@@ -103,6 +106,7 @@ export function ScoreShapingTab() {
       ? currentSpec.range
       : Math.max(Math.abs(currentSpec?.target ?? 1), 1) * 0.5;
   const target = currentSpec?.target ?? 0;
+  const metricValue = values[selectedSpec] ?? target;
   const sliderMin = target - 3 * range;
   const sliderMax = target + 3 * range;
 
@@ -126,6 +130,7 @@ export function ScoreShapingTab() {
       <Toolbar>
         <ToolbarLabel>spec</ToolbarLabel>
         <select
+          aria-label="Select target spec"
           value={selectedSpec}
           onChange={(e) => handleSpecChange(e.target.value)}
           className={selectCn("sm")}
@@ -184,7 +189,7 @@ export function ScoreShapingTab() {
                     min={sliderMin}
                     max={sliderMax}
                     step={(sliderMax - sliderMin) / 200}
-                    onChange={setMetricValue}
+                    onChange={(v) => setSpecValue(selectedSpec, v)}
                     markerValue={target}
                     markerLabel="target"
                   />
