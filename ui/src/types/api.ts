@@ -275,6 +275,8 @@ export interface SanityCheckResponse {
   pdk_ok: boolean | null;
   /** Human-readable PDK verdict for the diagnostics panel. */
   pdk_detail: string | null;
+  /** PVT corner the trial ran at (null when the project has no `pvt:` block). */
+  active_corner: string | null;
 }
 
 // Manual single simulation — evaluate ONE chosen design point (POST /api/simulate/once)

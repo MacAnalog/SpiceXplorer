@@ -130,11 +130,11 @@ export const api = {
 
   schematicUrl: () => `${BASE}/api/schematic`,
 
-  sanityCheck: (yaml_path: string) =>
+  sanityCheck: (yaml_path: string, active_corner?: string) =>
     req<SanityCheckResponse>("/api/sanity-check", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ yaml_path }),
+      body: JSON.stringify({ yaml_path, active_corner }),
     }),
 
   // Manual single simulation — evaluate ONE chosen design point (live SPICE — needs PDK).

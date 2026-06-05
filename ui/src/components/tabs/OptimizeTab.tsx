@@ -14,6 +14,8 @@ import { Toolbar, ToolbarLabel, ToolbarSpacer } from "@/components/shell/Toolbar
 import { Separator } from "@/components/ui/separator";
 import { selectCn } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/empty-state";
+import { CornerSelect } from "@/components/pvt/CornerSelect";
+import { ManualSimPanel } from "@/components/pvt/ManualSimPanel";
 import type { AppConfig } from "@/types/api";
 
 interface Props {
@@ -135,6 +137,22 @@ export function OptimizeTab({ appConfig }: Props) {
           className={selectCn("sm") + " w-[72px]"}
         />
 
+        {summary?.pvt && summary.pvt.corners.length > 0 && (
+          <>
+            <ToolbarLabel>corner</ToolbarLabel>
+            <div className="w-[210px]">
+              <CornerSelect
+                corners={summary.pvt.corners}
+                value={runConfig.activeCorner}
+                defaultCorner={summary.pvt.active_corner}
+                onChange={(name) => setRunConfig({ activeCorner: name })}
+                disabled={isRunning}
+                aria-label="PVT corner to optimize against"
+              />
+            </div>
+          </>
+        )}
+
         <Separator />
 
         <ToolbarLabel>demo replay</ToolbarLabel>
@@ -254,6 +272,10 @@ export function OptimizeTab({ appConfig }: Props) {
             </PanelBody>
           </Panel>
         </div>
+
+        {/* Manual sim — design-centric "evaluate THIS point" (checkpoint or hand-entered),
+            sharing the optimizer's evaluate() primitive. PDK-gated like live runs. */}
+        {isApplied && <ManualSimPanel />}
       </div>
     </>
   );

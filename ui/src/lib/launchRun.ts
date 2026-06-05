@@ -41,12 +41,15 @@ async function startLive(resumeCheckpointId?: string): Promise<LaunchResult> {
       budget: runConfig.budget,
       algorithm: runConfig.algorithm,
       seed: runConfig.seed ?? undefined,
+      active_corner: runConfig.activeCorner ?? undefined,
       autosave_every: runConfig.autosaveEvery ?? undefined,
       resume_checkpoint_id: resumeCheckpointId,
     });
     startRun(res.run_id, res.replay, runConfig.budget, {
       kind: "live",
-      label: `${resumeCheckpointId ? "Resume" : "Live"} · ${runConfig.algorithm}`,
+      label: `${resumeCheckpointId ? "Resume" : "Live"} · ${runConfig.algorithm}${
+        runConfig.activeCorner ? ` · ${runConfig.activeCorner}` : ""
+      }`,
     });
     return { ok: true };
   } catch (err) {

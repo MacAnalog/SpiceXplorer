@@ -13,6 +13,8 @@ export interface RunConfig {
   seed: number | null;
   /** Autosave a cumulative checkpoint every N trials (null = end-only). */
   autosaveEvery: number | null;
+  /** PVT corner to optimize against (null = the project's YAML active_corner). */
+  activeCorner: string | null;
 }
 
 export const DEFAULT_RUN_CONFIG: RunConfig = {
@@ -20,6 +22,7 @@ export const DEFAULT_RUN_CONFIG: RunConfig = {
   budget: 200,
   seed: null,
   autosaveEvery: null,
+  activeCorner: null,
 };
 
 /** Selectable Nevergrad algorithms (canonical list for the Run config UI). */
