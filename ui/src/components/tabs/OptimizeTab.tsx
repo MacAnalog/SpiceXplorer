@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useRunStore } from "@/stores/runStore";
-import { useUIStore, RUN_ALGORITHMS } from "@/stores/uiStore";
+import { useUIStore } from "@/stores/uiStore";
 import { api } from "@/lib/api";
 import { launchLiveRun } from "@/lib/launchRun";
 import { COLORS } from "@/components/charts/PlotlyChart";
@@ -15,7 +15,6 @@ import { Separator } from "@/components/ui/separator";
 import { selectCn } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CornerSelect } from "@/components/pvt/CornerSelect";
-import { ManualSimPanel } from "@/components/pvt/ManualSimPanel";
 import type { AppConfig } from "@/types/api";
 
 interface Props {
@@ -110,21 +109,6 @@ export function OptimizeTab({ appConfig }: Props) {
   return (
     <>
       <Toolbar>
-        <ToolbarLabel>algorithm</ToolbarLabel>
-        <select
-          aria-label="Optimization algorithm"
-          value={runConfig.algorithm}
-          onChange={(e) => setRunConfig({ algorithm: e.target.value })}
-          disabled={isRunning}
-          className={selectCn("sm")}
-        >
-          {RUN_ALGORITHMS.map((a) => (
-            <option key={a} value={a}>
-              {a}
-            </option>
-          ))}
-        </select>
-
         <ToolbarLabel>budget</ToolbarLabel>
         <input
           aria-label="Run budget (iterations)"
@@ -276,9 +260,6 @@ export function OptimizeTab({ appConfig }: Props) {
           </Panel>
         </div>
 
-        {/* Manual sim — design-centric "evaluate THIS point" (checkpoint or hand-entered),
-            sharing the optimizer's evaluate() primitive. PDK-gated like live runs. */}
-        {isApplied && <ManualSimPanel />}
       </div>
     </>
   );

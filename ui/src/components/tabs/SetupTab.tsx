@@ -12,9 +12,8 @@ import { cornerSummary, cornerIncludes } from "@/lib/pvt";
 import { EmptyState } from "@/components/ui/empty-state";
 import { selectCn } from "@/components/ui/select";
 import { Thead, Th, Tr, Td } from "@/components/ui/table";
-import { Segmented } from "@/components/ui/segmented";
+import { SubTabStrip } from "@/components/shell/SubTabStrip";
 import { Toolbar, ToolbarSpacer } from "@/components/shell/Toolbar";
-import { Separator } from "@/components/ui/separator";
 import type { AppConfig } from "@/types/api";
 import { WizardShell } from "@/components/wizard/WizardShell";
 
@@ -158,16 +157,16 @@ export function SetupTab({ appConfig }: Props) {
 
   return (
     <>
+      <SubTabStrip<SetupMode>
+        aria-label="Setup mode"
+        value={mode}
+        onChange={setMode}
+        tabs={[
+          { id: "load", label: "Load / Edit YAML" },
+          { id: "wizard", label: "Create Wizard" },
+        ]}
+      />
       <Toolbar>
-        <Segmented
-          value={mode}
-          onChange={(m) => setMode(m as SetupMode)}
-          options={[
-            { value: "load", label: "Load / Edit YAML" },
-            { value: "wizard", label: "Create Wizard" },
-          ]}
-        />
-        <Separator />
         {mode === "load" ? (
           <>
             {appConfig && (

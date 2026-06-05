@@ -72,12 +72,20 @@ function downsample(values: number[]): number[] {
   return Array.from({ length: SPARK_POINTS }, (_, i) => clean[Math.round(i * step)]);
 }
 
+/** One raw SpiceXplorer-library log line streamed during the active run. */
+export interface RunLogLine {
+  text: string;
+  level: string;
+}
+
 interface RunStore {
   runId: string | null;
   isRunning: boolean;
   isReplay: boolean;
   budget: number;
   events: SSEEvent[];
+  /** Raw library log lines for the ACTIVE run (reset each run; per-run). */
+  logLines: RunLogLine[];
   bestMetrics: Record<string, number>;
   bestParams: Record<string, number>;
   currentIter: number;
@@ -90,6 +98,8 @@ interface RunStore {
   /** Begin a run: reset state, capture meta, open the SSE stream for `id`. */
   startRun: (id: string, replay: boolean, budget: number, meta?: Partial<ActiveMeta>) => void;
   pushEvent: (e: SSEEvent) => void;
+  /** Append a raw library log line for the active run (capped for perf). */
+  pushLog: (text: string, level: string) => void;
   /** Record an autosaved checkpoint + refresh the on-disk checkpoint list. */
   pushCheckpoint: (c: CheckpointEvent) => void;
   /** Stream ended on its own (done/error) — record to history, close locally. */
@@ -110,6 +120,7 @@ const INITIAL = {
   isReplay: false,
   budget: 0,
   events: [] as SSEEvent[],
+  logLines: [] as RunLogLine[],
   bestMetrics: {} as Record<string, number>,
   bestParams: {} as Record<string, number>,
   currentIter: 0,
@@ -141,6 +152,7 @@ export const useRunStore = create<RunStore>((set, get) => ({
       isReplay: replay,
       budget,
       events: [],
+      logLines: [],
       bestMetrics: {},
       bestParams: {},
       currentIter: 0,
@@ -166,6 +178,10 @@ export const useRunStore = create<RunStore>((set, get) => ({
         if (data.heartbeat) return;
         if (data.checkpoint) {
           get().pushCheckpoint(data.checkpoint);
+          return;
+        }
+        if (data.log != null) {
+          get().pushLog(data.log, data.level ?? "INFO");
           return;
         }
         get().pushEvent(data);
@@ -213,6 +229,13 @@ export const useRunStore = create<RunStore>((set, get) => ({
           }
         : state.bestParams;
       return { events, bestMetrics, bestParams, currentIter: e.iter ?? state.currentIter };
+    }),
+
+  pushLog: (text, level) =>
+    set((state) => {
+      // Cap the buffer so a long run can't grow it unbounded (keep the tail).
+      const next = [...state.logLines, { text, level }];
+      return { logLines: next.length > 2000 ? next.slice(-2000) : next };
     }),
 
   pushCheckpoint: (c) => {

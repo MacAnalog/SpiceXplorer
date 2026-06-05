@@ -31,13 +31,41 @@ export function ScoreShapingTab() {
   const [values, setValues] = useState<Record<string, number>>({});
   const [scoreData, setScoreData] = useState<ScoreResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  // Ephemeral per-spec edits (what-if). Each edit is a partial patch keyed by spec
+  // name; raw strings are kept so eng-values ("250u") pass straight to the backend's
+  // parse_value. Local state ⇒ resets on unmount — never written to YAML.
+  const [specEdits, setSpecEdits] = useState<
+    Record<string, Partial<Record<"target" | "tolerance" | "range" | "weight" | "goal" | "enable", string | number | boolean>>>
+  >({});
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const consumedDeepLink = useRef<string | null>(null);
 
+  // Specs with the user's ephemeral edits merged in, so the slider range, target
+  // marker, dropdown labels, and breakdown all reflect what the score call sees.
+  const effectiveSpecs = useMemo<TargetSpec[]>(() => {
+    const all = summary?.target_specs ?? [];
+    return all.map((s) => {
+      const e = specEdits[s.name];
+      if (!e) return s;
+      const num = (v: string | number | boolean | undefined, fallback: number | null) =>
+        v === undefined || v === "" ? fallback : Number(v);
+      return {
+        ...s,
+        target: e.target !== undefined && e.target !== "" ? Number(e.target) : s.target,
+        tolerance: num(e.tolerance, s.tolerance),
+        range: num(e.range, s.range),
+        weight: e.weight !== undefined && e.weight !== "" ? Number(e.weight) : s.weight,
+        goal: (e.goal as TargetSpec["goal"]) ?? s.goal,
+        enable: e.enable !== undefined ? Boolean(e.enable) : s.enable,
+      };
+    });
+  }, [summary, specEdits]);
+
   const enabledSpecs = useMemo(
-    () => summary?.target_specs.filter((s) => s.enable) ?? [],
-    [summary],
+    () => effectiveSpecs.filter((s) => s.enable),
+    [effectiveSpecs],
   );
+  const hasEdits = Object.keys(specEdits).length > 0;
 
   // Seed the value map (and default selection) when a project loads.
   useEffect(() => {
@@ -67,14 +95,22 @@ export function ScoreShapingTab() {
     setValues((prev) => ({ ...prev, [specName]: value }));
 
   const computeScore = useCallback(
-    (vals: Record<string, number>, specName: string) => {
+    (
+      vals: Record<string, number>,
+      specName: string,
+      overrides: Record<string, Record<string, string | number | boolean>>,
+    ) => {
       if (!yamlPath || !specName) return;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(async () => {
         setLoading(true);
         try {
           // Full vector of current values; selected_spec only drives the curve.
-          const result = await api.computeScore(yamlPath, vals, specName);
+          // specOverrides carry the ephemeral what-if spec edits (never persisted).
+          const result = await api.computeScore(yamlPath, vals, {
+            selectedSpec: specName,
+            specOverrides: Object.keys(overrides).length ? overrides : undefined,
+          });
           setScoreData(result);
         } finally {
           setLoading(false);
@@ -85,8 +121,8 @@ export function ScoreShapingTab() {
   );
 
   useEffect(() => {
-    if (selectedSpec) computeScore(values, selectedSpec);
-  }, [values, selectedSpec, computeScore]);
+    if (selectedSpec) computeScore(values, selectedSpec, specEdits);
+  }, [values, selectedSpec, specEdits, computeScore]);
 
   if (!isApplied || !summary) {
     return (
@@ -98,7 +134,7 @@ export function ScoreShapingTab() {
     );
   }
 
-  const currentSpec: TargetSpec | undefined = enabledSpecs.find(
+  const currentSpec: TargetSpec | undefined = effectiveSpecs.find(
     (s) => s.name === selectedSpec,
   );
   const range =
@@ -135,9 +171,10 @@ export function ScoreShapingTab() {
           onChange={(e) => handleSpecChange(e.target.value)}
           className={selectCn("sm")}
         >
-          {enabledSpecs.map((s) => (
+          {effectiveSpecs.map((s) => (
             <option key={s.name} value={s.name}>
               {s.name} · {goalSym(s.goal)} {formatEng(s.target)}
+              {s.enable ? "" : " (off)"}
             </option>
           ))}
         </select>
@@ -147,6 +184,15 @@ export function ScoreShapingTab() {
           target ± 3 × {formatEng(range)}
         </span>
         <ToolbarSpacer />
+        {hasEdits && (
+          <button
+            type="button"
+            onClick={() => setSpecEdits({})}
+            className="text-[11px] text-primary hover:underline"
+          >
+            Reset edits
+          </button>
+        )}
         <span className="font-mono text-[11px] text-muted">
           POST /api/score · 150ms debounce
         </span>
@@ -156,8 +202,29 @@ export function ScoreShapingTab() {
         className="grid min-h-0 flex-1 gap-3 overflow-auto p-3"
         style={{ gridTemplateColumns: "1.5fr 1fr" }}
       >
-        {/* Left: penalty chart + slider + callout */}
+        {/* Left: spec editor + penalty chart + slider + callout */}
         <div className="flex min-w-0 flex-col gap-2.5">
+          {currentSpec && (
+            <SpecEditor
+              spec={currentSpec}
+              edit={specEdits[currentSpec.name]}
+              onChange={(patch) =>
+                setSpecEdits((prev) => {
+                  const name = currentSpec.name;
+                  const merged = { ...prev[name], ...patch };
+                  // Drop keys set back to "" / undefined so a fully-reverted spec
+                  // disappears from the override map (and "Reset edits" hides).
+                  for (const k of Object.keys(merged) as (keyof typeof merged)[]) {
+                    if (merged[k] === "" || merged[k] === undefined) delete merged[k];
+                  }
+                  const next = { ...prev };
+                  if (Object.keys(merged).length === 0) delete next[name];
+                  else next[name] = merged;
+                  return next;
+                })
+              }
+            />
+          )}
           <Panel>
             <PanelHeader
               title="penalty curve"
@@ -306,6 +373,98 @@ export function ScoreShapingTab() {
         </Panel>
       </div>
     </>
+  );
+}
+
+type SpecEditPatch = Partial<
+  Record<"target" | "tolerance" | "range" | "weight" | "goal" | "enable", string | number | boolean>
+>;
+
+/**
+ * Inline editor for the selected spec's shaping-relevant fields. Edits are
+ * EPHEMERAL (what-if): they feed the score preview via spec_overrides and are never
+ * written to the YAML — reloading or re-applying the project discards them. Numeric
+ * fields stay as raw strings (uncontrolled by the merged number) so engineering
+ * values like "250u" pass straight through to the backend's parse_value; a blank
+ * field reverts that one override.
+ */
+function SpecEditor({
+  spec,
+  edit,
+  onChange,
+}: {
+  spec: TargetSpec;
+  edit: SpecEditPatch | undefined;
+  onChange: (patch: SpecEditPatch) => void;
+}) {
+  // Show the raw edit string if present, else the project's value (so the field is
+  // pre-filled and editable). enable/goal come from the merged effective spec.
+  const fieldVal = (key: "target" | "tolerance" | "range" | "weight", base: number | null) => {
+    const e = edit?.[key];
+    if (e !== undefined) return String(e);
+    return base != null ? String(base) : "";
+  };
+
+  // Inlined (not a nested component) so editing one field doesn't remount the
+  // inputs and steal focus on every keystroke.
+  const numFields: { label: string; key: "target" | "tolerance" | "range" | "weight"; base: number | null }[] = [
+    { label: "target", key: "target", base: spec.target },
+    { label: "tolerance", key: "tolerance", base: spec.tolerance },
+    { label: "range", key: "range", base: spec.range },
+    { label: "weight", key: "weight", base: spec.weight },
+  ];
+
+  return (
+    <Panel>
+      <PanelHeader
+        title="edit spec"
+        mute="· what-if · not saved to YAML"
+        right={
+          <label className="flex items-center gap-1.5 text-[11px] text-muted">
+            <input
+              type="checkbox"
+              checked={spec.enable}
+              onChange={(e) => onChange({ enable: e.target.checked })}
+              aria-label={`${spec.name} enabled`}
+            />
+            enabled
+          </label>
+        }
+      />
+      <PanelBody className="flex flex-wrap items-end gap-2.5">
+        {numFields.map((f) => (
+          <label key={f.key} className="flex flex-col gap-1">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted">
+              {f.label}
+            </span>
+            <input
+              aria-label={`${spec.name} ${f.label}`}
+              type="text"
+              placeholder="—"
+              value={fieldVal(f.key, f.base)}
+              onChange={(e) => onChange({ [f.key]: e.target.value })}
+              className={selectCn("xs") + " w-[88px]"}
+            />
+          </label>
+        ))}
+        <label className="flex flex-col gap-1">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted">goal</span>
+          <select
+            aria-label={`${spec.name} goal`}
+            value={spec.goal}
+            onChange={(e) => onChange({ goal: e.target.value })}
+            className={selectCn("xs")}
+          >
+            <option value="exceed">exceed (≥)</option>
+            <option value="minimize">minimize (≤)</option>
+            <option value="exact">exact (≈)</option>
+          </select>
+        </label>
+        <span className="pb-1.5 font-mono text-[10px] text-faint">
+          eng values ok (250u); blank reverts
+        </span>
+      </PanelBody>
+    </Panel>
   );
 }
 

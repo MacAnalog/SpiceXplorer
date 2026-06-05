@@ -28,6 +28,9 @@ export const DEFAULT_RUN_CONFIG: RunConfig = {
 /** Selectable Nevergrad algorithms (canonical list for the Run config UI). */
 export const RUN_ALGORITHMS = ["LhsDE", "LHSSearch", "LogBFGSCMAPlus"] as const;
 
+/** Bottom-panel tabs: the structured optimizer summary, and the raw library log. */
+export type BottomTab = "log" | "rawlog";
+
 /**
  * Studio UI store — owns cross-view *navigation/selection* and shared
  * session data (app config, environment probe). Route (the URL) owns "which
@@ -47,7 +50,7 @@ interface UIStore {
   // Panels (always-on shell surfaces)
   rightOpen: boolean;
   bottomOpen: boolean;
-  bottomTab: "log";
+  bottomTab: BottomTab;
 
   // Overlays
   commandOpen: boolean;
@@ -63,7 +66,7 @@ interface UIStore {
   openRun: (id: string) => void;
   toggleRight: () => void;
   toggleBottom: () => void;
-  setBottomTab: (tab: "log") => void;
+  setBottomTab: (tab: BottomTab) => void;
   openCommand: () => void;
   closeCommand: () => void;
   openWizard: () => void;

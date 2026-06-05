@@ -190,6 +190,9 @@ export interface SSEEvent {
   done?: boolean;
   error?: string;
   heartbeat?: boolean;
+  /** A raw SpiceXplorer-library log line (per-run), with its level for coloring. */
+  log?: string;
+  level?: string;
 }
 
 // Checkpoints

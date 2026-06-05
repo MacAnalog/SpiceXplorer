@@ -1,5 +1,18 @@
 # SpiceXplorer UI — ★ Studio Integration Plan
 
+> **UPDATE (2026-06, nav restructure).** The shell's two top-level nav surfaces used to render the
+> *same* views (vertical ActivityBar + horizontal TabStrip) — pure redundancy. The horizontal
+> top-level `TabStrip` was **removed**; the **ActivityBar is now the sole top-level nav**, split into
+> a primary group (Setup, Score Shaping, Optimize, Explore, Schematic) and a utility group above the
+> Health gear (Pipeline, **Manual Sim**). The emptied tab-strip styling was repurposed into a generic,
+> state-driven **`SubTabStrip`** that each view mounts in its own toolbar for in-view sub-tabs (only
+> Setup's Load/Wizard uses it today; single-section views render none). **Manual Sim** moved out of
+> OptimizeTab into its own `/manual` view (`tabs/ManualSimTab`). The Optimize toolbar's **algorithm
+> dropdown was dropped** (algorithm is set in project setup/wizard; the override still ships from the
+> YAML default via `_apply_overrides`). Score Shaping gained **ephemeral target-spec editing**
+> (`SpecEditor` → `spec_overrides` in the `/api/score` payload → `apply_spec_overrides`; preview-only,
+> never persisted, not threaded into live runs). See `CLAUDE.md` for the as-built rules.
+
 > **STATUS (mostly built — this doc is now historical/reference).** Phases 0–5 are implemented and
 > committed on `dev/ui`: env probe + PDK degradation, the App-Router Studio shell, right rail +
 > bottom panel + store-hosted SSE, run history, the ⌘K command palette + wizard launch, and the

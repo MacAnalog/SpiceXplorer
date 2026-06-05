@@ -264,6 +264,19 @@ class PVTConfig:
     corners: List[Corner] = field(default_factory=list)
     model_lib_root: Optional[str] = None
 
+    def __post_init__(self):
+        # Reject duplicate corner names: `get()`/`get_active()` return the FIRST
+        # match, so a duplicate silently shadows the later corner (and the UI's
+        # corner picker would key React rows on a non-unique name). Fail loudly,
+        # mirroring the dut_param uniqueness check in Project_Setup.__post_init__.
+        names = [c.name for c in self.corners]
+        dupes = sorted({n for n in names if names.count(n) > 1})
+        if dupes:
+            raise ValueError(
+                f"Duplicate PVT corner name(s) {dupes}. "
+                "Each PVT corner must have a unique name."
+            )
+
     def get(self, name: str) -> Optional["Corner"]:
         for c in self.corners:
             if c.name == name:

@@ -1,5 +1,11 @@
 # UI Layout Audit — Part 4 (Layout Agent)
 
+> **STALE NOTE (2026-06):** this audit predates the nav restructure. The horizontal top `TabStrip`
+> was removed (the vertical ActivityBar is now the sole top-level nav; in-view sub-tabs use the new
+> `SubTabStrip`), Manual Sim moved to its own `/manual` view, and the Optimize toolbar lost its
+> algorithm dropdown. Line anchors referencing `TabStrip.tsx` or OptimizeTab's algorithm `<select>`
+> no longer resolve. See `CLAUDE.md` for the current shell layout.
+
 **Scope:** CSS / layout / sizing / overflow / scroll only. This report does **not** cover data
 flow, state, accessibility semantics, or visual styling beyond what causes content to be clipped,
 mis-sized, or to overflow. Every claim is anchored to `file:line` in the **current working tree at

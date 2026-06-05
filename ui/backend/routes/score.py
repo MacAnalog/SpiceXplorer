@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from spicexplorer.core.domains import Project_Setup
-from ui.backend.services.score_service import compute_score
+from ui.backend.services.score_service import apply_spec_overrides, compute_score
 
 router = APIRouter()
 
@@ -27,11 +27,16 @@ class ScoreRequest(BaseModel):
     metric_values: dict[str, float]
     selected_spec: str | None = None
     n_curve_points: int = 200
+    # Ephemeral per-spec edits (Score Shaping "what-if"): spec name → partial dict of
+    # {target, tolerance, weight, range, goal, enable}. Applied to the freshly-loaded
+    # project before scoring; never written back to the YAML.
+    spec_overrides: dict[str, dict] | None = None
 
 
 @router.post("/score")
 def score_endpoint(body: ScoreRequest):
     project = _get_project(body.yaml_path)
+    apply_spec_overrides(project, body.spec_overrides)
     result = compute_score(
         project,
         body.metric_values,

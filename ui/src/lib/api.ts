@@ -21,6 +21,24 @@ import type {
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+// SSE must NOT go through the Next.js rewrite proxy: that proxy buffers
+// `text/event-stream` responses (ignoring the backend's `X-Accel-Buffering: no`),
+// so per-trial events arrive in one delayed burst instead of live — making a
+// running optimization look frozen. Regular fetches stay same-origin (proxied) for
+// portability, but the EventSource connects DIRECTLY to the backend origin.
+//
+//  • Explicit NEXT_PUBLIC_API_URL set → use it (already a direct backend origin).
+//  • Same-origin mode (empty BASE) → derive the backend origin from the current
+//    page host + the backend port, so it works wherever the browser runs
+//    (localhost, a LAN IP, an SSH-forwarded host). CORS allows any localhost:<port>.
+const BACKEND_PORT = process.env.NEXT_PUBLIC_BACKEND_PORT ?? "8000";
+
+function streamBase(): string {
+  if (BASE) return BASE;
+  if (typeof window === "undefined") return "";
+  return `${window.location.protocol}//${window.location.hostname}:${BACKEND_PORT}`;
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, init);
   if (!res.ok) {
@@ -68,13 +86,23 @@ export const api = {
   computeScore: (
     yaml_path: string,
     metric_values: Record<string, number>,
-    selected_spec?: string,
-    n_curve_points = 200,
+    opts: {
+      selectedSpec?: string;
+      nCurvePoints?: number;
+      /** Ephemeral per-spec edits (what-if); never written to YAML. */
+      specOverrides?: Record<string, Record<string, string | number | boolean>>;
+    } = {},
   ) =>
     req<ScoreResponse>("/api/score", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ yaml_path, metric_values, selected_spec, n_curve_points }),
+      body: JSON.stringify({
+        yaml_path,
+        metric_values,
+        selected_spec: opts.selectedSpec,
+        n_curve_points: opts.nCurvePoints ?? 200,
+        spec_overrides: opts.specOverrides,
+      }),
     }),
 
   // Optimization run
@@ -102,7 +130,7 @@ export const api = {
   stopRun: (run_id: string) =>
     req<{ ok: boolean }>(`/api/optimize/stop/${run_id}`, { method: "POST" }),
 
-  streamUrl: (run_id: string) => `${BASE}/api/optimize/stream/${run_id}`,
+  streamUrl: (run_id: string) => `${streamBase()}/api/optimize/stream/${run_id}`,
 
   // Checkpoints
   listCheckpoints: () =>
@@ -142,7 +170,8 @@ export const api = {
   // `point`; omitted → best). `active_corner` optionally overrides the PVT corner.
   simulateOnce: (body: {
     yaml_path: string;
-    params?: Record<string, number>;
+    // Values may be eng-strings ("250u") or numbers; parsed server-side.
+    params?: Record<string, string | number>;
     checkpoint_id?: string;
     point?: number;
     active_corner?: string;

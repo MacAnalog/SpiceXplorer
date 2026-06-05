@@ -8,6 +8,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Stat } from "@/components/ui/stat";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Segmented } from "@/components/ui/segmented";
 import { Thead, Th, Tr, Td } from "@/components/ui/table";
 import { selectCn } from "@/components/ui/select";
@@ -88,11 +89,12 @@ export function ManualSimPanel() {
         active_corner: corner ?? undefined,
       };
       if (mode === "manual") {
-        const params: Record<string, number> = {};
+        // Send raw strings; the backend parses engineering values ("250u", "0.18u")
+        // via parse_value, so we don't coerce (and don't reject) here.
+        const params: Record<string, string> = {};
         for (const [k, v] of Object.entries(values)) {
           if (v.trim() === "") continue;
-          const n = Number(v);
-          if (Number.isFinite(n)) params[k] = n;
+          params[k] = v.trim();
         }
         body.params = params;
       } else {
@@ -113,6 +115,16 @@ export function ManualSimPanel() {
     () => Object.fromEntries(specs.map((s) => [s.name, s])),
     [specs],
   );
+
+  // Standalone-view guard: deep-linking to /manual without an applied project
+  // shows the empty state rather than a bare control row with no params.
+  if (!isApplied || !summary) {
+    return (
+      <EmptyState bordered minHeight="min-h-60">
+        Apply a project first to evaluate a design point.
+      </EmptyState>
+    );
+  }
 
   return (
     <Panel>
@@ -234,7 +246,9 @@ export function ManualSimPanel() {
                     <Td className="text-right">
                       <input
                         aria-label={`Value for ${p.name}`}
-                        type="number"
+                        type="text"
+                        inputMode="text"
+                        placeholder="e.g. 250u"
                         value={values[p.name] ?? ""}
                         onChange={(e) =>
                           setValues((v) => ({ ...v, [p.name]: e.target.value }))

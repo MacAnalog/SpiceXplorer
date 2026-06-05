@@ -33,8 +33,10 @@ router = APIRouter()
 
 class SimulateOnceRequest(BaseModel):
     yaml_path: str
-    # Mode B — explicit engineering-real param vector (partial dict allowed).
-    params: dict[str, float] | None = None
+    # Mode B — explicit param vector (partial dict allowed). Values may be plain
+    # numbers OR engineering strings ("250u", "0.18u"); both are parsed server-side
+    # via the project DSL's parse_value, so the UI can pass raw user input.
+    params: dict[str, str | float] | None = None
     # Mode A — resolve the vector from a stored checkpoint instead.
     checkpoint_id: str | None = None
     point: int | None = None  # index into the checkpoint; None → best (argmax score)
@@ -120,7 +122,7 @@ def _validate_params(project, params: dict[str, float], warnings: list[str]) -> 
 
 
 def _run_single_sim(req: SimulateOnceRequest) -> dict[str, Any]:
-    from spicexplorer.core.domains import Project_Setup
+    from spicexplorer.core.domains import Project_Setup, parse_value
     from spicexplorer.optimization.stochastic.nevergrad import Nevergrad_Spice_Single_Objective
     from ui.backend.routes.sanity import _tail_log
     from ui.backend.services.env_probe import probe_pdk
@@ -147,7 +149,12 @@ def _run_single_sim(req: SimulateOnceRequest) -> dict[str, Any]:
     # 2 — resolve the param vector (Mode A vs Mode B)
     try:
         if req.params is not None:
-            params = {k: float(v) for k, v in req.params.items()}
+            params = {}
+            for k, v in req.params.items():
+                try:
+                    params[k] = float(parse_value(v))
+                except (ValueError, TypeError):
+                    return _fail(f"Could not parse value for '{k}': {v!r}")
         elif req.checkpoint_id:
             params = _resolve_params_from_checkpoint(req.checkpoint_id, req.point, warnings)
         else:

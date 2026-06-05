@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { useUIStore } from "@/stores/uiStore";
 import { useRunStore } from "@/stores/runStore";
 import { useProjectStore } from "@/stores/projectStore";
-import { PRIMARY_VIEWS, SETTINGS_VIEW } from "@/components/shell/nav";
+import { ALL_VIEWS } from "@/components/shell/nav";
 import { cn } from "@/lib/utils";
 
 interface Command {
@@ -44,7 +44,7 @@ export function CommandPalette() {
     const cmds: Command[] = [];
 
     // Switch view
-    for (const v of [...PRIMARY_VIEWS, SETTINGS_VIEW]) {
+    for (const v of ALL_VIEWS) {
       const locked = !!v.requiresProject && !isApplied;
       cmds.push({
         id: `view:${v.id}`,
@@ -140,12 +140,12 @@ export function CommandPalette() {
         closeCommand();
         return;
       }
-      // ⌘1..7 switch view — but not while typing in an input/editor.
-      if (mod && /^[1-7]$/.test(e.key)) {
+      // ⌘1..8 switch view — but not while typing in an input/editor.
+      if (mod && /^[1-8]$/.test(e.key)) {
         const target = e.target as HTMLElement | null;
         const tag = target?.tagName?.toLowerCase();
         if (tag === "input" || tag === "textarea" || target?.isContentEditable) return;
-        const view = [...PRIMARY_VIEWS, SETTINGS_VIEW].find((v) => v.shortcut === e.key);
+        const view = ALL_VIEWS.find((v) => v.shortcut === e.key);
         if (view && !(view.requiresProject && !isApplied)) {
           e.preventDefault();
           go(view.path);

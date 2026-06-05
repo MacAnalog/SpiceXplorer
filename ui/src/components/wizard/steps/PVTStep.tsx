@@ -29,8 +29,25 @@ export function PVTStep() {
 
   const commit = (next: Partial<typeof pvt>) => setPvtConfig({ ...pvt, ...next });
 
+  // Names that collide (case-sensitive, trimmed) — the backend rejects these on
+  // generate/save (PVTConfig.__post_init__), so flag them inline as you type too.
+  const dupNames = new Set<string>();
+  {
+    const seen = new Set<string>();
+    for (const c of corners) {
+      const n = c.name.trim();
+      if (!n) continue;
+      if (seen.has(n)) dupNames.add(n);
+      seen.add(n);
+    }
+  }
+
   const addCorner = () => {
-    const c = emptyCorner(corners.length + 1);
+    // Pick the lowest unused corner_N (length+1 collides after a deletion).
+    const taken = new Set(corners.map((c) => c.name));
+    let n = corners.length + 1;
+    while (taken.has(`corner_${n}`)) n += 1;
+    const c = emptyCorner(n);
     const next = [...corners, c];
     commit({ corners: next, active_corner: pvt.active_corner || c.name });
   };
@@ -126,6 +143,9 @@ export function PVTStep() {
             <div className="grid grid-cols-[1.4fr_0.7fr_0.8fr_0.8fr] gap-2">
               <Field label="Name">
                 <TextInput value={c.name} placeholder="tt_27C_1V8" onChange={(e) => updateCorner(i, { name: e.target.value })} />
+                {dupNames.has(c.name.trim()) && (
+                  <span className="text-[10px] text-red-600">Duplicate name — must be unique.</span>
+                )}
               </Field>
               <Field label="Temp (°C)">
                 <TextInput type="number" value={c.temp} onChange={(e) => updateCorner(i, { temp: e.target.value })} />

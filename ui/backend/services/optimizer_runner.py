@@ -16,6 +16,34 @@ from ui.backend.services.num import safe_float as _safe_float
 logger = logging.getLogger(__name__)
 
 
+class _QueueLogHandler(logging.Handler):
+    """Stream the SpiceXplorer library's own log records to a run's SSE queue.
+
+    Attached to the ``spicexplorer`` logger for the lifetime of ONE run (added at
+    run start, removed in `finally`), so the raw, human-readable library log is
+    delivered per-run as ``{"log", "level"}`` SSE events alongside the structured
+    per-trial events. The frontend renders it in a dedicated bottom-panel tab.
+    """
+
+    def __init__(self, state: "RunState"):
+        super().__init__(level=logging.INFO)
+        self._state = state
+        # Mirror the library's console/file formatter so the streamed lines look
+        # identical to the log file the user already likes.
+        self.setFormatter(logging.Formatter(
+            fmt="%(asctime)s - %(name)s: [%(levelname)s] %(message)s",
+            datefmt="%H:%M:%S",
+        ))
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            line = self.format(record)
+            event = {"log": line, "level": record.levelname}
+            asyncio.run_coroutine_threadsafe(self._state.queue.put(event), self._state.loop)
+        except Exception:  # never let logging break the run
+            pass
+
+
 @dataclass
 class RunState:
     run_id: str
@@ -253,6 +281,14 @@ def _apply_overrides(
 def _run_live(state: RunState, project_path: str) -> None:
     kind = "resumed" if state.resume_path else "live"
     logger.info("[run %s] starting %s run — project: %s", state.run_id[:8], kind, project_path)
+    # Stream the SpiceXplorer library's own log to this run's SSE queue (per-run:
+    # attached now, detached in `finally`). Ensure the library logger has at least
+    # one handler/level so records are produced even if setup_loggers never ran.
+    lib_logger = logging.getLogger("spicexplorer")
+    if lib_logger.level == logging.NOTSET or lib_logger.level > logging.INFO:
+        lib_logger.setLevel(logging.INFO)
+    log_handler = _QueueLogHandler(state)
+    lib_logger.addHandler(log_handler)
     try:
         logger.info("[run %s] loading project YAML", state.run_id[:8])
         project = Project_Setup.from_yaml(project_path)
@@ -319,6 +355,7 @@ def _run_live(state: RunState, project_path: str) -> None:
             state.queue.put({"error": str(e)}), state.loop
         )
     finally:
+        lib_logger.removeHandler(log_handler)
         state.done = True
         asyncio.run_coroutine_threadsafe(state.queue.put(None), state.loop)
 

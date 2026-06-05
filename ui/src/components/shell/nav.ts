@@ -1,9 +1,10 @@
 // Single source of truth for Studio navigation.
 //
-// The shell renders three navigation surfaces — the vertical ActivityBar, the
-// horizontal TabStrip, and (later) the per-activity left rail — all driven from
-// this one list so a view is added/renamed in exactly one place. Routes live
-// under the `(studio)` App-Router group, so each view has a real URL.
+// The shell's top-level nav is the vertical ActivityBar (the redundant horizontal
+// TabStrip was removed; views now render their own in-view sub-tabs). The
+// ActivityBar and the per-activity left rail are both driven from this one list so
+// a view is added/renamed in exactly one place. Routes live under the `(studio)`
+// App-Router group, so each view has a real URL.
 import {
   Wrench,
   SlidersHorizontal,
@@ -11,6 +12,7 @@ import {
   Compass,
   CircuitBoard,
   Workflow,
+  FlaskConical,
   Activity,
   type LucideIcon,
 } from "lucide-react";
@@ -22,6 +24,7 @@ export type StudioViewId =
   | "compare"
   | "schematic"
   | "pipeline"
+  | "manual"
   | "health";
 
 /**
@@ -33,7 +36,7 @@ export type RailKind = "runs" | "specs" | "outline";
 
 export interface StudioView {
   id: StudioViewId;
-  /** Full label (TabStrip, tooltips). */
+  /** Full label (ActivityBar tooltips, command palette). */
   label: string;
   /** App-Router path under the (studio) group. */
   path: string;
@@ -42,22 +45,35 @@ export interface StudioView {
   shortcut: string;
   /**
    * When true the view needs an applied project to be useful, so the
-   * ActivityBar/TabStrip render it disabled until `isApplied`. Mirrors the
-   * pre-Studio Topbar gating (optimize + shaping were locked until applied).
+   * ActivityBar renders it disabled until `isApplied`. Mirrors the pre-Studio
+   * Topbar gating (optimize + shaping were locked until applied).
    */
   requiresProject?: boolean;
   /** Which left-rail variant this view shows (defaults to "runs" if unset). */
   rail: RailKind;
 }
 
-/** Primary views — shown as TabStrip tabs and the top of the ActivityBar. */
+/**
+ * Primary workflow views — the top group of the ActivityBar (the sole top-level
+ * nav since the redundant horizontal TabStrip was removed). Each view renders its
+ * own in-view sub-tabs (see SubTabStrip) instead of a shared top tab bar.
+ */
 export const PRIMARY_VIEWS: StudioView[] = [
   { id: "setup", label: "Setup", path: "/setup", icon: Wrench, shortcut: "1", rail: "outline" },
   { id: "scoring", label: "Score Shaping", path: "/scoring", icon: SlidersHorizontal, shortcut: "2", requiresProject: true, rail: "specs" },
   { id: "optimize", label: "Optimize", path: "/optimize", icon: Zap, shortcut: "3", requiresProject: true, rail: "runs" },
   { id: "compare", label: "Explore", path: "/compare", icon: Compass, shortcut: "4", rail: "runs" },
   { id: "schematic", label: "Schematic", path: "/schematic", icon: CircuitBoard, shortcut: "5", rail: "outline" },
+];
+
+/**
+ * Utility views — the bottom group of the ActivityBar, just above the Health gear.
+ * Secondary tools (read-only Pipeline, one-shot Manual Sim) kept apart from the
+ * primary workflow so the main flow reads top-to-bottom uninterrupted.
+ */
+export const UTILITY_VIEWS: StudioView[] = [
   { id: "pipeline", label: "Pipeline", path: "/pipeline", icon: Workflow, shortcut: "6", requiresProject: true, rail: "specs" },
+  { id: "manual", label: "Manual Sim", path: "/manual", icon: FlaskConical, shortcut: "7", requiresProject: true, rail: "runs" },
 ];
 
 /** Settings/diagnostics — reached via the ActivityBar gear (the Health check). */
@@ -66,11 +82,11 @@ export const SETTINGS_VIEW: StudioView = {
   label: "Health",
   path: "/health",
   icon: Activity,
-  shortcut: "7",
+  shortcut: "8",
   rail: "outline",
 };
 
-export const ALL_VIEWS: StudioView[] = [...PRIMARY_VIEWS, SETTINGS_VIEW];
+export const ALL_VIEWS: StudioView[] = [...PRIMARY_VIEWS, ...UTILITY_VIEWS, SETTINGS_VIEW];
 
 /** Resolve the active view from a pathname (e.g. "/optimize" -> optimize view). */
 export function viewForPath(pathname: string): StudioView | undefined {
