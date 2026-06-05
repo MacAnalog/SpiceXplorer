@@ -28,6 +28,8 @@ class RunState:
     checkpoint_id: str | None = None
     algorithm: str | None = None
     seed: int | None = None
+    # Ephemeral PVT corner override (applied in-memory to project.pvt.active_corner).
+    active_corner: str | None = None
     # Checkpointing: autosave cadence (trials) and an optional checkpoint to
     # resume from (load_checkpoint + optimize(keep_history=True)).
     autosave_every: int | None = None
@@ -48,11 +50,16 @@ def _prune_finished_runs() -> None:
 
 # ---------- live optimizer ----------
 
-def _build_spicelib_wrappers(project: Project_Setup):
+def _build_spicelib_wrappers(project: Project_Setup, output_subdir: str | None = None):
     from pathlib import Path
     from spicexplorer.spice_engine import NGSpice_Wrapper, Sim_Execution_Type
 
     output_folder = Path(project.ws_root) / Path(project.outdir)
+    # An optional subfolder isolates these wrappers' outputs from a concurrent live
+    # run — the wrapper constructor rmtree's its output_folder, so a manual sim
+    # sharing ws_root/outdir would otherwise clobber a running optimization.
+    if output_subdir:
+        output_folder = output_folder / output_subdir
     sim_execution_t = Sim_Execution_Type.RUN_AND_WAIT
     path_to_simulator = Path(project.simulator)
 
@@ -200,13 +207,14 @@ def _apply_overrides(
     budget: int | None,
     algorithm: str | None,
     seed: int | None,
+    active_corner: str | None = None,
 ) -> None:
     """Apply ephemeral run-config overrides to the in-memory project.
 
     These mutate the loaded Project_Setup only — the YAML on disk is untouched —
-    so the Run popover's algorithm/budget/seed actually take effect on a live run
-    (previously they were silently ignored; the optimizer always used the YAML's
-    optimizer_config).
+    so the Run popover's algorithm/budget/seed (and the PVT corner) actually take
+    effect on a live run (previously they were silently ignored; the optimizer
+    always used the YAML's optimizer_config).
     """
     cfg = project.optimizer_config
     if budget and budget > 0 and budget != cfg.budget:
@@ -218,6 +226,18 @@ def _apply_overrides(
     if seed is not None and seed != cfg.random_seed:
         logger.info("[run %s] override seed %s -> %s", run_id[:8], cfg.random_seed, seed)
         cfg.random_seed = seed
+    # PVT corner switch (operating mode (ii)): same in-memory, never-rewrite-YAML
+    # pattern. Only applies when the project actually defines a `pvt:` block and the
+    # requested corner exists; an unknown corner is logged and ignored (the YAML's
+    # active_corner stays in effect) rather than failing the run.
+    if active_corner and project.pvt is not None and active_corner != project.pvt.active_corner:
+        if project.pvt.get(active_corner) is not None:
+            logger.info("[run %s] override active_corner %s -> %s",
+                        run_id[:8], project.pvt.active_corner, active_corner)
+            project.pvt.active_corner = active_corner
+        else:
+            logger.warning("[run %s] requested active_corner '%s' not defined; keeping '%s'",
+                           run_id[:8], active_corner, project.pvt.active_corner)
 
 
 def _run_live(state: RunState, project_path: str) -> None:
@@ -232,6 +252,7 @@ def _run_live(state: RunState, project_path: str) -> None:
             budget=state.budget,
             algorithm=state.algorithm,
             seed=state.seed,
+            active_corner=state.active_corner,
         )
         wrappers = _build_spicelib_wrappers(project)
         stream_cls = _streaming_optimizer_class(state)
@@ -330,6 +351,7 @@ def start_run(
     budget: int = 200,
     algorithm: str | None = None,
     seed: int | None = None,
+    active_corner: str | None = None,
     autosave_every: int | None = None,
     resume_path: str | None = None,
     loop: asyncio.AbstractEventLoop,
@@ -346,6 +368,7 @@ def start_run(
         checkpoint_id=checkpoint_id,
         algorithm=algorithm,
         seed=seed,
+        active_corner=active_corner,
         autosave_every=autosave_every,
         resume_path=resume_path,
     )

@@ -80,9 +80,32 @@ def _summarise(project: Project_Setup) -> dict[str, Any]:
             ],
         })
 
+    # Legacy display-only corners (kept for backward compat).
     pvt = []
     for corner in project.pvt_corners:
         pvt.append({"temp": corner.temp, "corner": corner.corner, "supply": corner.supply})
+
+    # PVT corner system (Phase 1) — the simulator-driving config. `None` when the
+    # project has no `pvt:` block (legacy / netlist-hardcoded corner).
+    pvt_config: dict[str, Any] | None = None
+    if project.pvt is not None:
+        pvt_config = {
+            "active_corner": project.pvt.active_corner,
+            "model_lib_root": project.pvt.model_lib_root,
+            "corners": [
+                {
+                    "name": c.name,
+                    "enabled": c.enabled,
+                    "temp": float(c.temp),
+                    "supplies": [{"node": s.node, "value": float(s.value)} for s in c.supplies],
+                    "model_includes": [
+                        {"lib_file": m.lib_file, "section": m.section} for m in c.model_includes
+                    ],
+                    "params": {k: float(v) for k, v in c.params.items()},
+                }
+                for c in project.pvt.corners
+            ],
+        }
 
     return {
         "name": project.name,
@@ -96,6 +119,7 @@ def _summarise(project: Project_Setup) -> dict[str, Any]:
             "constraints": {k: float(v) for k, v in project.tech_spec.constraints.items()},
         },
         "pvt_corners": pvt,
+        "pvt": pvt_config,
         "dut_params": dut_params,
         "testbenches": testbenches,
         "optimizer": {

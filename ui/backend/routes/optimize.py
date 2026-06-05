@@ -25,6 +25,9 @@ class StartRequest(BaseModel):
     # YAML on disk is never rewritten). Ignored for replay runs.
     algorithm: str | None = None
     seed: int | None = None
+    # PVT corner to optimize against (must match a corner in the project's `pvt:`
+    # block). None keeps the YAML's active_corner.
+    active_corner: str | None = None
     # Checkpointing (live runs only). autosave_every writes a cumulative
     # checkpoint every N trials; resume_checkpoint_id continues a prior run from
     # a saved checkpoint (load_checkpoint + optimize(keep_history=True)).
@@ -80,6 +83,7 @@ async def start_run(body: StartRequest, request: Request):
         budget=body.budget,
         algorithm=body.algorithm,
         seed=body.seed,
+        active_corner=body.active_corner,
         autosave_every=body.autosave_every,
         resume_path=resume_path,
         loop=loop,

@@ -20,7 +20,7 @@ _REPO_ROOT = Path(__file__).parent.parent.parent
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from ui.backend.routes import config, project, score, optimize, checkpoint, schematic, sanity, netlist, xschem, env, sensitivity
+from ui.backend.routes import config, project, score, optimize, checkpoint, schematic, sanity, netlist, xschem, env, sensitivity, simulate
 
 
 @asynccontextmanager
@@ -57,6 +57,7 @@ app.include_router(netlist.router, prefix="/api")
 app.include_router(xschem.router, prefix="/api")
 app.include_router(env.router, prefix="/api")
 app.include_router(sensitivity.router, prefix="/api")
+app.include_router(simulate.router, prefix="/api")
 
 
 @app.get("/health")

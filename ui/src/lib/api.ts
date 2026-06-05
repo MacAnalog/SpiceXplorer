@@ -11,6 +11,7 @@ import type {
   EnvelopeEntry,
   ScatterPoint,
   SanityCheckResponse,
+  SimulateOnceResponse,
   NetlistParseResponse,
   GenerateProjectResponse,
   ParseProjectResponse,
@@ -85,6 +86,8 @@ export const api = {
     /** Ephemeral live-run overrides (ignored for replay). */
     algorithm?: string;
     seed?: number;
+    /** PVT corner to optimize against (must match a corner in the project's `pvt:`). */
+    active_corner?: string;
     /** Autosave a cumulative checkpoint every N trials (live only). */
     autosave_every?: number;
     /** Resume a live run from a saved checkpoint (load + keep_history). */
@@ -132,6 +135,22 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ yaml_path }),
+    }),
+
+  // Manual single simulation — evaluate ONE chosen design point (live SPICE — needs PDK).
+  // Mode B: pass `params` (engineering-real). Mode A: pass `checkpoint_id` (+ optional
+  // `point`; omitted → best). `active_corner` optionally overrides the PVT corner.
+  simulateOnce: (body: {
+    yaml_path: string;
+    params?: Record<string, number>;
+    checkpoint_id?: string;
+    point?: number;
+    active_corner?: string;
+  }) =>
+    req<SimulateOnceResponse>("/api/simulate/once", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     }),
 
   // Finite-difference sensitivity of one spec to DUT params (live SPICE — needs PDK).

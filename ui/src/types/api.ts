@@ -26,10 +26,38 @@ export interface Testbench {
   params: TbParam[];
 }
 
+/** Legacy display-only corner (from `pvt_corners`). */
 export interface PVTCorner {
   temp: number;
   corner: string;
   supply: number;
+}
+
+// PVT corner system (Phase 1) — the simulator-driving config (`pvt:` block).
+
+export interface ModelInclude {
+  lib_file: string;
+  section: string;
+}
+
+export interface SupplyOverride {
+  node: string;
+  value: number;
+}
+
+export interface PVTCornerDef {
+  name: string;
+  enabled: boolean;
+  temp: number;
+  supplies: SupplyOverride[];
+  model_includes: ModelInclude[];
+  params: Record<string, number>;
+}
+
+export interface PVTConfig {
+  active_corner: string;
+  model_lib_root: string | null;
+  corners: PVTCornerDef[];
 }
 
 export interface TargetSpec {
@@ -87,7 +115,10 @@ export interface ProjectSummary {
   /** Optional pointer to the design's .sch (relative to `ws_root`). */
   schematic?: string | null;
   tech: { name: string; constraints: Record<string, number> };
+  /** Legacy display-only corners. */
   pvt_corners: PVTCorner[];
+  /** PVT corner system (Phase 1). `null` when the project has no `pvt:` block. */
+  pvt: PVTConfig | null;
   dut_params: DutParam[];
   testbenches: Testbench[];
   optimizer: {
@@ -243,6 +274,33 @@ export interface SanityCheckResponse {
   /** Whether the IHP PDK device models resolved (false on a PDK-less machine). */
   pdk_ok: boolean | null;
   /** Human-readable PDK verdict for the diagnostics panel. */
+  pdk_detail: string | null;
+}
+
+// Manual single simulation — evaluate ONE chosen design point (POST /api/simulate/once)
+
+export interface SimulateSpecMetric {
+  curr_val: number | null;
+  score: number | null;
+}
+
+export interface SimulateOnceResponse {
+  ok: boolean;
+  score: number | null;
+  /** Per-spec measured value + per-spec score, keyed by spec name. */
+  metrics: Record<string, SimulateSpecMetric>;
+  /** The engineering-real param vector actually injected. */
+  params_used: Record<string, number>;
+  /** PVT corner the point was evaluated at (null if the project has no `pvt:`). */
+  active_corner: string | null;
+  /** Non-fatal advisories (out-of-range value, unknown param, unknown corner, …). */
+  warnings: string[];
+  log_files: Record<string, string>;
+  log_tails: Record<string, string>;
+  error: string | null;
+  elapsed_ms: number | null;
+  elapsed_ms_load: number | null;
+  pdk_ok: boolean | null;
   pdk_detail: string | null;
 }
 
