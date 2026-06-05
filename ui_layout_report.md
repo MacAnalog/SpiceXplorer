@@ -1,253 +1,258 @@
 # UI Layout Audit — Part 4 (Layout Agent)
 
-**Scope:** CSS / layout / sizing / overflow / scroll only. This report does **not** cover
-data flow, state, accessibility semantics, or visual styling beyond what causes content to be
-clipped, mis-sized, or to overflow. Every claim is anchored to `file:line` in the current
-working tree (branch `dev/ui`). Investigation only — no code was modified.
+**Scope:** CSS / layout / sizing / overflow / scroll only. This report does **not** cover data
+flow, state, accessibility semantics, or visual styling beyond what causes content to be clipped,
+mis-sized, or to overflow. Every claim is anchored to `file:line` in the **current working tree at
+HEAD** (branch `feat/pvt`).
 
-The two **confirmed reported symptoms** are:
+**Round constraints.** This is a **static-analysis** planning round — no app/docker/live-sim was
+run on the server. The report says what *should* be done; **no application code was modified.** A
+prior audit on the older `dev/ui` branch already fixed several of the issues it found; this pass
+re-derives everything against HEAD and only reports what is **still present**. Anything that would
+require a running browser to confirm is marked *needs runtime verification (deferred — no live UI on
+server this round)*.
 
-1. **PVTStep horizontal overflow** — the Supply column is cut off in the new-project wizard.
-   Root cause: [Global RC-1](#rc-1) + [RC-2](#rc-2). See [PVT findings](#pvt-corners-step).
-2. **Sanity Check logs "clipped, no scroll"** — see [Health / Sanity Check](#health--sanity-check).
-   The height chain is actually **intact** in source; the log surface *does* get a scrollbar.
-   This is most likely a **stale `.next` build**, not a CSS defect. Details below.
+**What changed since the prior audit (verified at HEAD).** Three of the prior audit's global fixes
+have landed and are confirmed in source, so they are **not** re-reported as active:
+
+- `inputCn` now ships `w-full min-w-0` ([wizard-controls.tsx:4-13](ui/src/components/wizard/wizard-controls.tsx#L4)) and `Field` now ships `min-w-0` ([wizard-controls.tsx:24](ui/src/components/wizard/wizard-controls.tsx#L24)) — so **text** inputs shrink with their track. This is why the input-only wizard grids no longer overflow as badly as the prior report claimed.
+- Commit **42dd636** added `[&>*]:shrink-0` to the three flex-column scroll tabs — confirmed present at [OptimizeTab.tsx:205](ui/src/components/tabs/OptimizeTab.tsx#L205), [HealthTab.tsx:101](ui/src/components/tabs/HealthTab.tsx#L101), [ExplorerTab.tsx:253](ui/src/components/tabs/ExplorerTab.tsx#L253). The prior "Sanity Check logs clipped, no scroll" symptom is **resolved by source** (see [Health](#health--sanity-check)).
+- `selectCn` carries `min-w-0` ([select.tsx:11-21](ui/src/components/ui/select.tsx#L11)).
+
+The residual issues below are the ones that **survive** those fixes — chiefly the wizard grids that
+still use bare `fr` tracks and mix `<input type="number">`, plus a `<select>` mis-sizing and one
+rail-table clip.
 
 ---
 
-> **✅ Status (2026-06).** Fixed in branch `dev/ui`: **RC-1** (`w-full min-w-0` on `inputCn`, `min-w-0` on `Field` and `selectCn` — deliberately kept `selectCn` off `w-full` so toolbar selects don't stretch) resolves the reported PVT Supply-column overflow and the input-heavy steps (RC-2 largely subsumed); **RC-3** (`min-w-0`/`shrink-0` truncation in `StudioLeftRail` + `StatusBar`); **RC-4** (`overflow-x-auto whitespace-nowrap [&>*]:shrink-0` on `TabStrip` + `StatusBar` footer). The Sanity Check "clipped-no-scroll" symptom was confirmed **not** a source CSS defect (intact height/scroll chain) — most likely a stale `ui/.next` build, so no code change was made. Verified by `tsc`/`eslint`/`next build`.
-
 ## Global root causes
 
-The findings below collapse into four cross-cutting rules. Fix these at the source and most
-per-tab instances disappear.
+Fix these at the source and most per-tab instances disappear. They are ordered by leverage.
 
-<a id="rc-1"></a>
-### RC-1 — Wizard inputs have no intrinsic shrink (`w-full` / `min-w-0` missing)
+<a id="grc-1"></a>
+### GRC-1 — Explicit grid tracks default to a `min-content` floor; nothing uses `minmax(0,…fr)`
 
-`TextInput` renders a bare `<input>` with only `inputCn(...)` applied, and `inputCn` adds **no**
-`w-full` and **no** `min-w-0`:
+Every explicit-track grid in the wizard declares bare `fr`/`auto` columns (e.g.
+[PVTStep.tsx:113](ui/src/components/wizard/steps/PVTStep.tsx#L113) `grid-cols-[1.4fr_0.7fr_0.8fr_0.8fr]`).
+CSS treats a bare `Nfr` track as `minmax(auto, Nfr)`, and the `auto` floor pins each track to its
+content's **min-content** width. A track can therefore grow *wider* than its `fr` share, and the
+row's total can exceed the container — the classic "grid child overflows parent." A grep across
+`ui/src` finds **zero** uses of `minmax(0,…)`, so **no** grid opts out of this floor. The robust fix
+the whole wizard is missing is `minmax(0,Nfr)` on the `fr` tracks (and/or `min-w-0` on the grid
+container itself).
 
-- [wizard-controls.tsx:4-11](ui/src/components/wizard/wizard-controls.tsx#L4) — `inputCn` (no width, no min-width)
-- [wizard-controls.tsx:30-32](ui/src/components/wizard/wizard-controls.tsx#L30) — `TextInput` just spreads `inputCn(props.className)`
-- [select.tsx:11-18](ui/src/components/ui/select.tsx#L11) — `selectCn` likewise has no `w-full`/`min-w-0`. The `Select` wrapper only adds `w-full` when a `label` prop is passed ([select.tsx:38](ui/src/components/ui/select.tsx#L38)); every wizard step uses the **bare** `selectCn(...)` on a raw `<select>`, so it never gets `w-full`.
+*Affects:* PVTStep, TestbenchesStep params, OptimizerStep `optimizer_kwargs`, PDKRulesStep.
 
-A flex/grid item's **automatic minimum size** equals its `min-content` width, and for a form
-control that is its default intrinsic size: roughly **~20ch (≈180px)** for a text input, and
-**the longest `<option>` label** for a `<select>`. So any multi-column grid that drops these
-controls into `fr` tracks **cannot shrink a track below ~180px** — the row's minimum width
-exceeds the (already narrow) wizard form column and overflows to the right.
+<a id="grc-2"></a>
+### GRC-2 — `<input type="number">` keeps UA spinner chrome that `min-w-0` on the input does not strip from track sizing
 
-**Standard fix:** make `inputCn` / `selectCn` default to `w-full min-w-0` (and add `min-w-0` to
-`Field`). One edit fixes every step.
+`inputCn` correctly sets `w-full min-w-0` on every `TextInput`, which tames **text** inputs in a
+shrinking track. But a `<input type="number">` keeps a **UA-imposed intrinsic minimum** (the
+up/down spinner) that inflates the **grid track's** `min-content` floor even when the input element
+itself carries `min-w-0`. Combined with GRC-1, this is what actually pushes the rightmost number
+column past the card edge. The grids that overflow worst are precisely the ones mixing number inputs
+into narrow `fr` tracks — PVT Temp/Supply-V ([PVTStep.tsx:118](ui/src/components/wizard/steps/PVTStep.tsx#L118), [:124](ui/src/components/wizard/steps/PVTStep.tsx#L124)) and OptimizerStep budget/seed ([OptimizerStep.tsx:114](ui/src/components/wizard/steps/OptimizerStep.tsx#L114), [:117](ui/src/components/wizard/steps/OptimizerStep.tsx#L117)).
 
-<a id="rc-2"></a>
-### RC-2 — The wizard form column is half (or quarter) width
+<a id="grc-3"></a>
+### GRC-3 — Only `DutParamsStep` adopted the `overflow-x-auto` + `min-w-[Npx]` escape hatch; sibling steps did not
 
-The wizard body is a hard `1fr 1fr` grid, so the form sits in **~50%** of the overlay:
+`DutParamsStep` wraps its 8-column grid in `overflow-x-auto` and gives the grid a hard
+`min-w-[860px]` ([DutParamsStep.tsx:93-94](ui/src/components/wizard/steps/DutParamsStep.tsx#L93), repeated on each row at [:105](ui/src/components/wizard/steps/DutParamsStep.tsx#L105)), so when the half-width wizard form column is too narrow the grid **scrolls horizontally** instead of clipping. **PVTStep** (the newest step), **TestbenchesStep**, **OptimizerStep**, and **PDKRulesStep** never received this treatment, so their multi-column grids have **no horizontal-overflow handling at all**. This inconsistency is exactly why DUT params are fine but PVT corners clip — the reference pattern to copy already exists in the tree.
 
-- [WizardShell.tsx:147](ui/src/components/wizard/WizardShell.tsx#L147) — `<div className="grid min-h-0 flex-1 gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>` (form left, live-YAML Monaco right).
+<a id="grc-4"></a>
+### GRC-4 — `selectCn()` intentionally omits `w-full`, so `<select>` fields don't fill their grid track
 
-In **SetupTab wizard mode** the `WizardShell` is itself the **left cell** of SetupTab's own
-`1fr 1fr` grid, nesting it two levels deep — the form column becomes **~25%** of the viewport:
+[select.tsx:11-21](ui/src/components/ui/select.tsx#L11) sets `min-w-0` but **deliberately not**
+`w-full` (comment: would stretch toolbar selects). In the wizard step forms (TargetSpecsStep,
+OptimizerStep, BasicInfoStep) the `<select>`s are placed in grid `<Field>` cells alongside `w-full`
+`TextInput`s but are **not** given an explicit `w-full`, so they render narrower than sibling inputs
+and shrink to content width — a **mis-sizing / visual-misalignment**, not overflow. Where `w-full`
+*is* needed it is added ad hoc (`RunControl`, `CornerSelect`, and the `Select` wrapper's labeled
+branch at [select.tsx:41](ui/src/components/ui/select.tsx#L41)), which is easy to forget.
 
-- [SetupTab.tsx:237-244](ui/src/components/tabs/SetupTab.tsx#L237) — outer grid `gridTemplateColumns: showSummary && summary ? "1fr 1fr" : "1fr"`
-- [SetupTab.tsx:303-305](ui/src/components/tabs/SetupTab.tsx#L303) — wizard mode renders `WizardShell` in `<div className="flex min-h-0 min-w-0 flex-col">`
+<a id="grc-5"></a>
+### GRC-5 — `Panel` always sets `overflow-hidden` (flex auto-min-size 0) — already mitigated where it bit, by 42dd636
 
-Any wizard step laid out as if it had full width therefore overflows. The **only** step that
-defends against this is `DutParamsStep`, which wraps its rows in `overflow-x-auto` and gives the
-grid a fixed `min-w-[860px]`:
-
-- [DutParamsStep.tsx:93-94](ui/src/components/wizard/steps/DutParamsStep.tsx#L93) — `<div className="overflow-x-auto"> <div className="grid min-w-[860px] ...">` — **the safe pattern.**
-
-Every other step (PVT, PDK Rules, Testbench params, Basic Info, Target Specs) lacks this and
-overflows. The overflow is then **clipped on the right** by `Panel`'s `overflow-hidden`:
-
-- [panel.tsx:4-13](ui/src/components/ui/panel.tsx#L4) — `Panel` is `overflow-hidden rounded-md border ...`.
-
-**Standard fix:** apply RC-1 (so tracks shrink to `fr` and no scroll is needed), **or** mirror
-`DutParamsStep` (wrap in `overflow-x-auto` + a `min-w-[...]`).
-
-<a id="rc-3"></a>
-### RC-3 — Flex-child truncation without `min-w-0`
-
-Several header rows place a `truncate` span next to a fixed sibling inside `flex ... justify-between`
-**without** `min-w-0` on the truncating span. A flex item won't shrink below its content unless
-it (or an ancestor) carries `min-w-0`, so the ellipsis never engages — the span keeps its full
-width and pushes/overflows its sibling.
-
-- [StudioLeftRail.tsx:26-31](ui/src/components/shell/StudioLeftRail.tsx#L26) — `truncate` name span at :27, no `min-w-0`; sibling badge at :28 not `shrink-0`.
-- [StatusBar.tsx:49](ui/src/components/shell/StatusBar.tsx#L49) — `truncate` project span, no `min-w-0`.
-
-The rails that **did** add `min-w-0 flex-1` truncate correctly and are the reference pattern:
-`RunsRail`, `SpecsRail`, `OutlineRail`, and the SchematicTab breadcrumb
-([SchematicTab.tsx:289](ui/src/components/tabs/SchematicTab.tsx#L289)).
-
-**Standard fix:** add `min-w-0` to the truncating span and `shrink-0` to the fixed sibling.
-
-<a id="rc-4"></a>
-### RC-4 — Strip/bar rows with no horizontal-overflow handling
-
-The `Toolbar` is the **correct** reference: `flex-nowrap overflow-x-auto whitespace-nowrap [&>*]:shrink-0`
-keeps controls on one line and scrolls when narrow:
-
-- [Toolbar.tsx:9-24](ui/src/components/shell/Toolbar.tsx#L9) — the pattern to copy.
-
-But the **TabStrip** nav and the **StatusBar** footer do **not** adopt it — no `overflow-x-auto`,
-items not `whitespace-nowrap`/`shrink-0`. On a narrow center column (left rail 200px + right rail
-+ both activity bars open) their labels **wrap** (breaking the fixed `h-10`/`h-6` and clipping the
-second line) or the row overflows with no scrollbar.
-
-- [TabStrip.tsx:20-23](ui/src/components/shell/TabStrip.tsx#L20) — `<nav ... className="flex h-10 shrink-0 items-stretch gap-0.5 ... px-2">`
-- [StatusBar.tsx:45](ui/src/components/shell/StatusBar.tsx#L45) — `<footer className="flex h-6 shrink-0 items-center gap-3 ... px-3">`
-
-**Standard fix:** adopt the Toolbar pattern on both bars.
+[panel.tsx:8](ui/src/components/ui/panel.tsx#L8) hard-codes `overflow-hidden` on every `<Panel>`.
+In a `flex flex-col` scroll container an `overflow-hidden` child gets an automatic flex min-size of
+0, so the column algorithm crushes the Panel to fit the viewport and the Panel clips its own
+spillover (log tails, tables) instead of letting the container scroll. This was the single mechanism
+behind the entire **clipped-no-scroll** family (Health trial logs, Optimize Manual Sim logs,
+Explorer envelope/spec tables). The fix idiom is `[&>*]:shrink-0` on the flex-col scroll container,
+which forces children to natural height so the **container** scrolls. **Commit 42dd636 applied it to
+all three affected flex tabs and it is present and correct at HEAD** — see the [Health](#health--sanity-check),
+[Optimize](#optimize), and [Compare/Explore](#compare--explore) sections. **No active
+clipped-no-scroll regression remains in those tabs.** The grid-based tabs (Setup, Score Shaping) are
+immune because grid items default to `min-height:auto`, not 0, so they were correctly left out of
+that change.
 
 ---
 
 ## Findings by tab
 
-### Wizard
+### New-project Wizard
 
-#### PVT Corners step
+#### PVT Corners step — main corner grid (reported repro)
 
-> Maps to **RC-1 + RC-2**. This is **reported symptom #1.**
+> Maps to **GRC-1 + GRC-2 + GRC-3.** This is the reported "Supply column cut off" symptom.
 
 - **Component:** [PVTStep.tsx](ui/src/components/wizard/steps/PVTStep.tsx)
-- **Offending container:** the corner grid — header `<div className="grid grid-cols-[1.4fr_0.8fr_0.8fr_0.8fr_auto] gap-2 ...">` at [PVTStep.tsx:27](ui/src/components/wizard/steps/PVTStep.tsx#L27), rows at [PVTStep.tsx:32](ui/src/components/wizard/steps/PVTStep.tsx#L32), holding **4 `TextInput`** (Name, Temp `type=number`, Corner, Supply `type=number step=0.1`) at [PVTStep.tsx:33-36](ui/src/components/wizard/steps/PVTStep.tsx#L33) plus a trash button.
+- **Offending container:** [PVTStep.tsx:113](ui/src/components/wizard/steps/PVTStep.tsx#L113) — `<div className="grid grid-cols-[1.4fr_0.7fr_0.8fr_0.8fr] gap-2">` holding Name ([:115](ui/src/components/wizard/steps/PVTStep.tsx#L115)), **Temp `type=number`** ([:118](ui/src/components/wizard/steps/PVTStep.tsx#L118)), Supply node ([:121](ui/src/components/wizard/steps/PVTStep.tsx#L121)), **Supply (V) `type=number`** ([:124](ui/src/components/wizard/steps/PVTStep.tsx#L124)), inside the `p-3` corner card ([:98](ui/src/components/wizard/steps/PVTStep.tsx#L98)).
 - **Failure mode:** horizontal-overflow → clipped on the right.
-- **Root cause:** the 4 inputs have no `w-full`/`min-w-0` (RC-1), so each track's auto-minimum ≈ the input's ~180px intrinsic width; 4×~180 + button + gaps far exceeds the half/quarter-width wizard form column (RC-2). There is **no** `overflow-x-auto` wrapper and **no** `min-w-[...]` on the grid (unlike `DutParamsStep`). The overflow is clipped on the right by the enclosing `Panel` `overflow-hidden` — so the rightmost **Supply (0.8fr)** column is cut off.
-- **Fix direction:** mirror `DutParamsStep` (wrap both grids in `overflow-x-auto`, give the grid a `min-w-[520px]`-ish floor). **Better root fix:** add `w-full min-w-0` to `TextInput` via `inputCn` (RC-1) so the `fr` tracks can shrink and no horizontal scroll is needed at all.
+- **Root cause:** the 4-column grid uses bare `fr` tracks (no `minmax(0,…)`, GRC-1), the grid container has no `min-w-0`, and there is **no** `overflow-x-auto` wrapper (unlike DutParamsStep, GRC-3). Two of the four cells are `<input type="number">` whose UA spinner inflates each track's `min-content` floor (GRC-2) even though `inputCn` already sets `min-w-0`. Inside the **half-width** wizard form column (`WizardShell` body is `1fr 1fr` at [WizardShell.tsx:147](ui/src/components/wizard/WizardShell.tsx#L147)) the four track minimums sum past the corner card and the rightmost **Supply (V)** column is pushed off the right edge; the spillover is clipped by `Panel`'s `overflow-hidden` ([panel.tsx:8](ui/src/components/ui/panel.tsx#L8), GRC-5). Confirmed present at HEAD (the step was added in a15b420). It is **worse in SetupTab "Create Wizard" mode**, where `WizardShell` is itself the left cell of SetupTab's own `1fr 1fr` grid ([SetupTab.tsx:243](ui/src/components/tabs/SetupTab.tsx#L243)), nesting the form into ~25% of viewport width.
+- **Fix direction (highest leverage in this tab):** lowest-risk is to **mirror DutParamsStep** — wrap the grid in `overflow-x-auto` and give it a hard `min-w-[Npx]` (GRC-3). Alternatively, switch the tracks to `minmax(0,1.4fr) minmax(0,0.7fr) minmax(0,0.8fr) minmax(0,0.8fr)` and add `min-w-0` to the grid (GRC-1); since two cells are number inputs, also consider letting the row wrap on narrow widths (e.g. drop to `grid-cols-2`) so the spinner floors stop competing for one line.
 
-##### PVT in SetupTab wizard mode (same defect, worse)
+#### PVT Corners step — model-includes grid
 
-- **Container:** the same PVT grid, nested in SetupTab's left cell ([SetupTab.tsx:303](ui/src/components/tabs/SetupTab.tsx#L303)) whose child `WizardShell` is itself `1fr 1fr` ([WizardShell.tsx:147](ui/src/components/wizard/WizardShell.tsx#L147)) — so the row sits in ~**25%** of viewport width.
-- **Failure mode:** horizontal-overflow (more severe).
-- **Root cause:** identical to above; nesting two `1fr 1fr` grids confirms the defect is in **PVTStep**, not the host.
-- **Fix direction:** the single PVTStep fix resolves both the overlay and the SetupTab host context.
+> Maps to **GRC-1.** Lower severity (text-only).
 
-#### PDK Rules step
+- **Component:** [PVTStep.tsx](ui/src/components/wizard/steps/PVTStep.tsx)
+- **Offending container:** [PVTStep.tsx:153](ui/src/components/wizard/steps/PVTStep.tsx#L153) — `<div className="grid grid-cols-[1fr_1fr_auto] gap-2">` (lib_file / section / remove), nested inside the already-narrow `bg-zinc-50 p-2` includes box ([:134](ui/src/components/wizard/steps/PVTStep.tsx#L134)) inside the corner card.
+- **Failure mode:** horizontal-overflow (low severity).
+- **Root cause:** bare `fr` tracks (GRC-1) with no `minmax(0,…)`. Both data cells are `TextInput` (so `inputCn`'s `min-w-0` mostly saves it), but the `auto` floor plus the fixed `auto` trash-button column leave no slack at minimum width — same class as the main grid, lower severity.
+- **Fix direction:** `minmax(0,1fr) minmax(0,1fr) auto`, or rely on the same `overflow-x-auto` wrapper if the whole step is wrapped (consistent with the GRC-1/GRC-3 fix).
 
-> Maps to **RC-1 + RC-2.**
+#### Testbenches step — per-testbench params grid
 
-- **Component:** [PDKRulesStep.tsx](ui/src/components/wizard/steps/PDKRulesStep.tsx)
-- **Offending container:** `<div className="grid grid-cols-[1fr_1fr_auto] gap-2">` at [PDKRulesStep.tsx:52](ui/src/components/wizard/steps/PDKRulesStep.tsx#L52) with two `TextInput` at [:53-54](ui/src/components/wizard/steps/PDKRulesStep.tsx#L53) plus a trash button. (The `Technology name` field at [:31-33](ui/src/components/wizard/steps/PDKRulesStep.tsx#L31) is single-column and lower-risk.)
-- **Failure mode:** horizontal-overflow → clipped.
-- **Root cause:** two inputs with no `w-full`/`min-w-0` → two ~180px track minimums + button; borderline in a half-width column, overflows the quarter-width SetupTab-wizard column. No `overflow-x` wrapper. Clipped by `Panel overflow-hidden`.
-- **Fix direction:** add `w-full min-w-0` to the inputs (preferably via `inputCn`), optionally wrap in `overflow-x-auto`.
-
-#### Testbenches step — per-testbench params table
-
-> Maps to **RC-1 + RC-2.**
+> Maps to **GRC-1 + GRC-3.** Medium-low severity (text-only).
 
 - **Component:** [TestbenchesStep.tsx](ui/src/components/wizard/steps/TestbenchesStep.tsx)
-- **Offending container:** `<div className="grid grid-cols-[1.4fr_1fr_1.6fr_auto] ...">` — header at [TestbenchesStep.tsx:131](ui/src/components/wizard/steps/TestbenchesStep.tsx#L131), rows at [:135](ui/src/components/wizard/steps/TestbenchesStep.tsx#L135), Name/Value/Description `TextInput` at [:137-141](ui/src/components/wizard/steps/TestbenchesStep.tsx#L137).
-- **Failure mode:** horizontal-overflow → clipped.
-- **Root cause:** three inputs without `w-full`/`min-w-0` (the 1.6fr Description input is widest) give a row min-width well over the half-width wizard column; no `overflow-x-auto`, no `min-w-[...]`. Same class as PVT.
-- **Fix direction:** mirror `DutParamsStep` (`overflow-x-auto` + `min-w-[...]`) or apply RC-1.
+- **Offending container:** the params grid `grid-cols-[1.4fr_1fr_1.6fr_auto]` — header at [TestbenchesStep.tsx:131](ui/src/components/wizard/steps/TestbenchesStep.tsx#L131), rows at [:135](ui/src/components/wizard/steps/TestbenchesStep.tsx#L135), Name/Value/Description `TextInput`s at [:137-141](ui/src/components/wizard/steps/TestbenchesStep.tsx#L137).
+- **Failure mode:** horizontal-overflow.
+- **Root cause:** 4-column `fr`/`auto` grid with no `minmax(0,…)`, no `min-w-0` on the grid, and no overflow-x wrapper (GRC-1, GRC-3). All-text inputs shrink acceptably via `inputCn`, but a long Description value (the 1.6fr track) plus the fixed `auto` remove column can still drive the row past the half-width form column.
+- **Fix direction:** apply `minmax(0,…fr)` to the three `fr` tracks, or wrap in `overflow-x-auto` with a `min-w-[Npx]` like DutParamsStep.
+- *(The testbench top fields at [TestbenchesStep.tsx:94](ui/src/components/wizard/steps/TestbenchesStep.tsx#L94) `grid grid-cols-2` are text-only with `col-span-2` on the long fields — low risk now that `inputCn`/`Field` carry `min-w-0`.)*
 
-#### Testbenches step (top fields) + Basic Info step
+#### Optimizer step — `optimizer_kwargs` grid + number-input rows
 
-> Maps to **RC-1 + RC-2.**
+> Maps to **GRC-1 + GRC-2.** Lower severity than PVT (fewer columns).
 
-- **Components:** [TestbenchesStep.tsx](ui/src/components/wizard/steps/TestbenchesStep.tsx), [BasicInfoStep.tsx](ui/src/components/wizard/steps/BasicInfoStep.tsx)
-- **Offending container:** `grid grid-cols-2` of `Field` wrappers — [TestbenchesStep.tsx:94](ui/src/components/wizard/steps/TestbenchesStep.tsx#L94) (`grid grid-cols-2 gap-3 p-3`) and [BasicInfoStep.tsx:13](ui/src/components/wizard/steps/BasicInfoStep.tsx#L13) (`grid grid-cols-2 gap-3 p-4`). Basic Info's `Simulator` cell is a bare `selectCn("sm")` `<select>` at [BasicInfoStep.tsx:21-29](ui/src/components/wizard/steps/BasicInfoStep.tsx#L21).
-- **Failure mode:** horizontal-overflow → clipped.
-- **Root cause:** `Field` ([wizard-controls.tsx:20-28](ui/src/components/wizard/wizard-controls.tsx#L20)) is `flex flex-col` with **no `min-w-0`**, and its `TextInput`/`<select>` children have no `w-full`, so each grid column's min = the control's intrinsic ~180px (RC-1). Two such columns can exceed the narrow wizard form column. Clipped by `Panel overflow-hidden`.
-- **Fix direction:** add `min-w-0` to `Field` and `w-full min-w-0` to the form controls (best via `inputCn`/`selectCn` so all steps inherit it).
+- **Component:** [OptimizerStep.tsx](ui/src/components/wizard/steps/OptimizerStep.tsx)
+- **Offending containers:** the `optimizer_kwargs` grid `grid-cols-[1.2fr_1.6fr_auto]` — header at [OptimizerStep.tsx:162](ui/src/components/wizard/steps/OptimizerStep.tsx#L162), rows at [:166](ui/src/components/wizard/steps/OptimizerStep.tsx#L166); and the page-level `grid grid-cols-2` ([:66](ui/src/components/wizard/steps/OptimizerStep.tsx#L66)) hosting six `<input type="number">` (budget/seed at [:114](ui/src/components/wizard/steps/OptimizerStep.tsx#L114), [:117](ui/src/components/wizard/steps/OptimizerStep.tsx#L117); lin/log bounds at [:123-124](ui/src/components/wizard/steps/OptimizerStep.tsx#L123) and [:129-130](ui/src/components/wizard/steps/OptimizerStep.tsx#L129)).
+- **Failure mode:** mis-sizing / crowding (the kwargs row can also overflow).
+- **Root cause:** the kwargs grid uses bare `fr` (GRC-1). On the 2-column page grid the number-input spinner floor (GRC-2) crowds the two number columns toward the edge in the narrow form column. Lower severity than PVT because it is only 2 columns and the kwargs rows are text-only.
+- **Fix direction:** use `minmax(0,…fr)` on the kwargs grid; the page `grid-cols-2` is fine once GRC-2 is mitigated (consider `appearance-none` to drop the number spinners, or accept the existing `min-w-0`).
 
-#### Target Specs step — expanded spec editor
+#### PDK Rules step — constraints grid
 
-> Maps to **RC-1 + RC-2.** Highest selector-width risk (long `<option>` labels).
+> Maps to **GRC-1.** Lowest severity of the step grids.
 
-- **Component:** [TargetSpecsStep.tsx](ui/src/components/wizard/steps/TargetSpecsStep.tsx)
-- **Offending container:** `<div className="grid grid-cols-3 gap-3 border-t ...">` at [TargetSpecsStep.tsx:102](ui/src/components/wizard/steps/TargetSpecsStep.tsx#L102) of `Field` cells holding `TextInput` + bare `selectCn("sm")` `<select>`s (Testbench, Sim type, Goal, Error type, Reward type — [:104-133](ui/src/components/wizard/steps/TargetSpecsStep.tsx#L104)).
-- **Failure mode:** horizontal-overflow → clipped by the spec card border + `Panel`.
-- **Root cause:** three columns whose track-minimum equals the **widest control content** — and a `<select>`'s `min-content` is its **longest option label**. The option lists are long: `error_type` includes `relative-exponential`, `sim_type` includes `noise_spectrum` ([:11-14](ui/src/components/wizard/steps/TargetSpecsStep.tsx#L11)). With no `w-full`/`min-w-0` (RC-1), three of these in a half/quarter-width column overflow.
-- **Fix direction:** give selects/inputs `w-full min-w-0` and `Field` `min-w-0`; optionally drop to 2 columns at narrow widths.
+- **Component:** [PDKRulesStep.tsx](ui/src/components/wizard/steps/PDKRulesStep.tsx)
+- **Offending container:** [PDKRulesStep.tsx:52](ui/src/components/wizard/steps/PDKRulesStep.tsx#L52) — `<div className="grid grid-cols-[1fr_1fr_auto] gap-2">` with two `TextInput`s ([:53-54](ui/src/components/wizard/steps/PDKRulesStep.tsx#L53)) plus a fixed remove column.
+- **Failure mode:** horizontal-overflow (borderline).
+- **Root cause:** bare `fr` (GRC-1), no `min-w-0` on the grid, no overflow-x wrapper. Two text inputs + the `auto` remove column; `inputCn`'s `min-w-0` keeps it mostly in bounds — same root pattern as the others, lowest severity.
+- **Fix direction:** switch to `minmax(0,1fr) minmax(0,1fr) auto` for consistency with the global fix.
 
-#### DutParams step — REFERENCE (no defect)
+#### All select-bearing steps — `<select>` does not fill its `<Field>` cell
 
-- [DutParamsStep.tsx:93-94 / :105](ui/src/components/wizard/steps/DutParamsStep.tsx#L93) — wraps the rows in `overflow-x-auto` and pins `min-w-[860px]` on both the header and each row grid. This is the **correct** pattern; listed so the other steps can copy it. No change.
+> Maps to **GRC-4.** Mis-sizing, not overflow.
 
----
+- **Components:** [TargetSpecsStep.tsx](ui/src/components/wizard/steps/TargetSpecsStep.tsx), [OptimizerStep.tsx](ui/src/components/wizard/steps/OptimizerStep.tsx), [BasicInfoStep.tsx](ui/src/components/wizard/steps/BasicInfoStep.tsx)
+- **Offending elements:** `<select className={selectCn("sm")}>` inside grid `<Field>` cells — TargetSpecsStep [:105](ui/src/components/wizard/steps/TargetSpecsStep.tsx#L105), [:111](ui/src/components/wizard/steps/TargetSpecsStep.tsx#L111), [:116](ui/src/components/wizard/steps/TargetSpecsStep.tsx#L116), [:125](ui/src/components/wizard/steps/TargetSpecsStep.tsx#L125), [:130](ui/src/components/wizard/steps/TargetSpecsStep.tsx#L130); OptimizerStep [:69](ui/src/components/wizard/steps/OptimizerStep.tsx#L69), [:82](ui/src/components/wizard/steps/OptimizerStep.tsx#L82), [:94](ui/src/components/wizard/steps/OptimizerStep.tsx#L94), [:102](ui/src/components/wizard/steps/OptimizerStep.tsx#L102); BasicInfoStep [:22](ui/src/components/wizard/steps/BasicInfoStep.tsx#L22).
+- **Failure mode:** mis-sizing (under-sizing / visual misalignment within the grid).
+- **Root cause:** `selectCn` sets `min-w-0` but intentionally not `w-full` ([select.tsx:13-15 comment](ui/src/components/ui/select.tsx#L13), GRC-4). These selects sit in grid cells next to `w-full` `TextInput`s but are not given an explicit `w-full`, so they shrink to content width and render narrower / misaligned against their sibling inputs (visible inside the 3-column TargetSpecs editor at [TargetSpecsStep.tsx:102](ui/src/components/wizard/steps/TargetSpecsStep.tsx#L102), where text fields and selects share a row).
+- **Fix direction:** add `w-full` at each wizard `<select>` call site (`selectCn("sm") + " w-full"`, the pattern `RunControl`/`CornerSelect` already use), or add a `w-full` opt-in variant to `selectCn` for in-form fields. *(Visual severity needs runtime verification — deferred, no live UI this round.)*
 
-### Shell
+#### DutParamsStep — REFERENCE (no defect)
 
-#### TabStrip (all views)
-
-> Maps to **RC-4.**
-
-- **Component:** [TabStrip.tsx](ui/src/components/shell/TabStrip.tsx)
-- **Offending container:** `<nav role="tablist" className="flex h-10 shrink-0 items-stretch gap-0.5 border-b border-border bg-panel px-2">` at [TabStrip.tsx:20-23](ui/src/components/shell/TabStrip.tsx#L20) with the per-view tab `<button>`s at [:30-50](ui/src/components/shell/TabStrip.tsx#L30) (each `flex items-center gap-1.5 px-3` with an icon + label).
-- **Failure mode:** horizontal-overflow / wrap-and-clip.
-- **Root cause:** the nav has **no `overflow-x-auto`**; tab buttons are not `whitespace-nowrap` or `shrink-0`. When the center column is narrow the labels exceed the width — flex wraps the label text (breaking the fixed `h-10` and clipping the second line) or overflows with no scrollbar.
-- **Fix direction:** apply the Toolbar pattern — `flex-nowrap overflow-x-auto whitespace-nowrap [&>*]:shrink-0` on the nav.
-
-#### StatusBar (all views)
-
-> Maps to **RC-4** (and RC-3 for the project span).
-
-- **Component:** [StatusBar.tsx](ui/src/components/shell/StatusBar.tsx)
-- **Offending container:** `<footer className="flex h-6 shrink-0 items-center gap-3 border-t border-border bg-panel px-3 ...">` at [StatusBar.tsx:45](ui/src/components/shell/StatusBar.tsx#L45) with view label ([:46](ui/src/components/shell/StatusBar.tsx#L46)), project span ([:49](ui/src/components/shell/StatusBar.tsx#L49)), run-progress span ([:54-67](ui/src/components/shell/StatusBar.tsx#L54)), a `flex-1` spacer ([:69](ui/src/components/shell/StatusBar.tsx#L69)), panel toggles, and the env pill ([:96-103](ui/src/components/shell/StatusBar.tsx#L96)).
-- **Failure mode:** horizontal-overflow; the far-right env pill can be pushed off-screen.
-- **Root cause:** only the project span has `truncate` ([:49](ui/src/components/shell/StatusBar.tsx#L49)) but it lacks `min-w-0`, so it won't actually shrink (RC-3); the other spans are not nowrap-protected and the footer has no `overflow-x-auto`/`overflow-hidden` (RC-4).
-- **Fix direction:** add `min-w-0` to the truncating span (and `overflow-hidden` to the footer), make fixed pills `shrink-0`; optionally `overflow-x-auto whitespace-nowrap` like the Toolbar.
-
-#### StudioLeftRail (all views)
-
-> Maps to **RC-3.**
-
-- **Component:** [StudioLeftRail.tsx](ui/src/components/shell/StudioLeftRail.tsx)
-- **Offending container:** project header `<div className="flex items-center justify-between rounded px-1.5 py-1 text-fg">` at [StudioLeftRail.tsx:26](ui/src/components/shell/StudioLeftRail.tsx#L26) with a `truncate` name span at [:27](ui/src/components/shell/StudioLeftRail.tsx#L27) next to an `active`/`draft` badge at [:28-30](ui/src/components/shell/StudioLeftRail.tsx#L28).
-- **Failure mode:** mis-sizing — long project name fails to ellipsize.
-- **Root cause:** the `truncate` span has no `min-w-0`, and the sibling badge is not `shrink-0`; a flex item won't shrink below content without `min-w-0`, so a long name widens past the 200px rail (the rail itself is fixed `w-[200px]` at [:23](ui/src/components/shell/StudioLeftRail.tsx#L23)) or pushes the badge.
-- **Fix direction:** add `min-w-0` to the name span and `shrink-0` to the badge (matches the working `RunsRail`/`SpecsRail` pattern).
+- [DutParamsStep.tsx:93-94](ui/src/components/wizard/steps/DutParamsStep.tsx#L93) wraps the 8-column rows in `overflow-x-auto` and pins `min-w-[860px]` on both header and each row grid ([:105](ui/src/components/wizard/steps/DutParamsStep.tsx#L105)). This is the **correct** pattern; listed so the other steps can copy it. No change.
 
 ---
 
-### Schematic
+### Setup
 
-#### Breadcrumb — REFERENCE (no defect)
+#### Create-Wizard mode — Monaco height chain may not receive a definite height
 
-- **Component:** [SchematicTab.tsx](ui/src/components/tabs/SchematicTab.tsx)
-- **Container:** `<div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap text-xs text-muted">` at [SchematicTab.tsx:289](ui/src/components/tabs/SchematicTab.tsx#L289).
-- **Status:** correctly handled (`min-w-0 flex-1 overflow-x-auto whitespace-nowrap`). Listed only to confirm it is **not** a defect — it is the exact pattern `TabStrip` and `StatusBar` should copy.
+> Mis-sizing. **Needs runtime verification (deferred — no live UI on server this round).**
+
+- **Component:** [SetupTab.tsx](ui/src/components/tabs/SetupTab.tsx) → [WizardShell.tsx](ui/src/components/wizard/WizardShell.tsx)
+- **Offending container:** when `mode !== "load"` the wizard renders inside `<div className="flex min-h-0 min-w-0 flex-col">` at [SetupTab.tsx:304](ui/src/components/tabs/SetupTab.tsx#L304) — this wrapper has **no `h-full` / `flex-1`**, and it is a **grid item** of the container at [SetupTab.tsx:238-244](ui/src/components/tabs/SetupTab.tsx#L238) (`grid min-h-0 flex-1 overflow-auto`, auto-sized rows). `WizardShell`'s root is `flex h-full min-h-0 flex-col` ([WizardShell.tsx:108](ui/src/components/wizard/WizardShell.tsx#L108)) and its body is `grid min-h-0 flex-1` ([WizardShell.tsx:147](ui/src/components/wizard/WizardShell.tsx#L147)) feeding two Monaco editors with `height="100%"` ([WizardShell.tsx:187](ui/src/components/wizard/WizardShell.tsx#L187), and the load-mode Monaco at [SetupTab.tsx:267](ui/src/components/tabs/SetupTab.tsx#L267)).
+- **Failure mode:** mis-sizing — Monaco `height="100%"` needs an unbroken chain of *definite* heights; with no definite height flowing from the auto-sized grid row into the no-`h-full` wrapper, the `100%` editors can collapse to their `loading` min-height instead of filling.
+- **Root cause:** a broken definite-height chain at the [SetupTab.tsx:304](ui/src/components/tabs/SetupTab.tsx#L304) wrapper. **Lower confidence:** the grid item *does* stretch via the default `align-items: stretch`, so it may render acceptably; this is a sizing risk, not a clip — confirm visually.
+- **Fix direction:** give the wizard a definite height to distribute — add `h-full` (or `flex-1`) to the [SetupTab.tsx:304](ui/src/components/tabs/SetupTab.tsx#L304) wrapper so `WizardShell`'s `h-full` resolves against a stretched grid item; OR make the wizard branch not depend on `h-full` (intrinsic `min-height` on the Monaco columns).
+
+#### Load/Edit mode — REFERENCE (verified safe)
+
+- [SetupTab.tsx:238-244](ui/src/components/tabs/SetupTab.tsx#L238) is a **grid** (`grid min-h-0 flex-1 gap-3 overflow-auto p-3`), not a flex column, so the `Panel` `overflow-hidden` auto-min-size-0 crush that hit the three flex tabs does **not** apply here (grid items default to `min-height:auto` and size the row to content; the container scrolls). The left Monaco `Panel` ([:248](ui/src/components/tabs/SetupTab.tsx#L248)) deliberately uses `flex min-h-0 flex-col` + `height="100%"` ([:267](ui/src/components/tabs/SetupTab.tsx#L267)) to fill the grid-row height. This is correctly left out of the 42dd636 change. No action.
 
 ---
+
+### Optimize
+
+> **Previously reported, now fixed (verified at HEAD).** Maps to **GRC-5.**
+
+- **Component:** [OptimizeTab.tsx](ui/src/components/tabs/OptimizeTab.tsx) (Manual Sim region)
+- **Container:** [OptimizeTab.tsx:205](ui/src/components/tabs/OptimizeTab.tsx#L205) — `flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3 [&>*]:shrink-0`.
+- **Original failure mode:** clipped-no-scroll — `ManualSimPanel`'s per-spec result + ngspice log tails rendered below the fold and were unreachable (Panel-auto-min-size-0 crush, GRC-5).
+- **Status:** **resolved.** Commit 42dd636 added `[&>*]:shrink-0` here so each Panel keeps natural height and the container scrolls; the commit message and in-browser note confirm the Manual Sim logs are reachable. The accompanying explanatory comment is at [OptimizeTab.tsx:202-204](ui/src/components/tabs/OptimizeTab.tsx#L202). **No action needed.**
 
 ### Health / Sanity Check
 
-> **Reported symptom #2.** Verdict: **not a source CSS defect** — the height/scroll chain is intact.
+> **Previously reported ("logs clipped, no scroll"), now fixed (verified at HEAD).** Maps to **GRC-5.**
 
 - **Component:** [HealthTab.tsx](ui/src/components/tabs/HealthTab.tsx)
-- **Containers in the chain:**
-  - StudioShell wraps the center children in `flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden` at [StudioShell.tsx:47](ui/src/components/shell/StudioShell.tsx#L47) and again at [:49](ui/src/components/shell/StudioShell.tsx#L49).
-  - The HealthTab page body is `flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3` at [HealthTab.tsx:80](ui/src/components/tabs/HealthTab.tsx#L80).
-  - The ngspice log `<pre>` is `max-h-60 overflow-auto ...` at [HealthTab.tsx:208](ui/src/components/tabs/HealthTab.tsx#L208) and [:307](ui/src/components/tabs/HealthTab.tsx#L307), each inside a `<details>` ([:198](ui/src/components/tabs/HealthTab.tsx#L198), [:294](ui/src/components/tabs/HealthTab.tsx#L294)).
-- **Failure mode (as reported):** clipped-no-scroll. **Verified:** the chain is **NOT broken** — every level has `min-h-0` and the page body is `overflow-auto`, so the view **does** get a vertical scrollbar when output exceeds the viewport, and the log `<pre>` is itself `max-h-60 overflow-auto` (it scrolls internally). The classic broken-`min-h-0` trap is **absent** here.
-- **Root cause:** none in current CSS. The only residual nit is cosmetic — the page body uses `overflow-auto` (both axes) where `overflow-y-auto` is the intent; the real long-content surface is the inner `<pre>`, which scrolls correctly. If a clip is observed at runtime it is **not explained by the source** — the most likely culprit is a **stale `.next` production build** shadowing the dev chunks (a documented hazard in `CLAUDE.md`: "Stale `.next` cache ... Delete `ui/.next` before restarting after a build").
-- **Fix direction:** no structural change required for scrolling. Optionally switch the page body to `overflow-y-auto` for intent clarity. **If the clip reproduces, delete `ui/.next` and rebuild before touching any CSS** — the chain is already correct.
+- **Container:** [HealthTab.tsx:101](ui/src/components/tabs/HealthTab.tsx#L101) — `flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3 [&>*]:shrink-0` (explanatory comment at [:98](ui/src/components/tabs/HealthTab.tsx#L98)).
+- **Original failure mode:** clipped-no-scroll — the children are `Panel`s; `Panel`'s `overflow-hidden` ([panel.tsx:8](ui/src/components/ui/panel.tsx#L8)) gave each a flex auto-min-size of 0, the column crushed it, and the trial-sim-log tails fell below the fold with no scrollbar.
+- **Status:** **resolved.** 42dd636 added `[&>*]:shrink-0` to this container too (the fix was **not** limited to Manual Sim — its commit explicitly named HealthTab). Each individual log tail is bounded by an inner `<pre className="max-h-60 overflow-auto …">` at [HealthTab.tsx:238](ui/src/components/tabs/HealthTab.tsx#L238) and [:337](ui/src/components/tabs/HealthTab.tsx#L337); the outer container now scrolls to reach them. The reported repro is resolved by source. **No action needed.**
+
+### Compare / Explore
+
+> **Previously reported, now fixed (verified at HEAD).** Maps to **GRC-5.**
+
+- **Component:** [ExplorerTab.tsx](ui/src/components/tabs/ExplorerTab.tsx)
+- **Container:** [ExplorerTab.tsx:253](ui/src/components/tabs/ExplorerTab.tsx#L253) — `flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3 [&>*]:shrink-0` (comment at [:251](ui/src/components/tabs/ExplorerTab.tsx#L251)).
+- **Original failure mode:** clipped-no-scroll — the envelope/spec-summary `Panel`s (each with its own inner `min-h-0 flex-1 overflow-auto` table) could be flex-crushed by the same GRC-5 mechanism.
+- **Status:** **resolved** by the same 42dd636 `[&>*]:shrink-0`. **No action needed.**
 
 ---
 
-### Pipeline
+### Studio shell (all views)
 
-> Maps to **RC-2-adjacent** (fixed `min-w` track), but low severity — it scrolls.
+#### Right rail — Best-params table values cannot wrap/ellipsize
 
-- **Component:** [PipelineView.tsx](ui/src/components/tabs/PipelineView.tsx)
-- **Offending container:** the DAG row `<div className="flex items-stretch gap-3">` at [PipelineView.tsx:118](ui/src/components/tabs/PipelineView.tsx#L118) with 4 `Column`s — each `flex min-w-[180px] flex-1` at [:27](ui/src/components/tabs/PipelineView.tsx#L27) — interleaved with 3 `Arrow`s, inside the page body `<div className="flex min-h-0 flex-1 flex-col overflow-auto p-4">` at [:111](ui/src/components/tabs/PipelineView.tsx#L111).
-- **Failure mode:** horizontal-overflow → **scrolls** (low severity).
-- **Root cause:** 4 columns at `min-w-[180px]` + arrows + gaps give a row minimum ~800px; on a narrow center column this exceeds the width. **Mitigated** because the parent ([:111](ui/src/components/tabs/PipelineView.tsx#L111)) is `overflow-auto` and `Node` titles use `truncate` ([:72](ui/src/components/tabs/PipelineView.tsx#L72)) — so this is a scroll, not a clip.
-- **Fix direction:** acceptable as-is. If horizontal scroll is undesired, lower `min-w-[180px]` or allow columns to wrap; keep the parent `overflow-auto`.
+> Horizontal-overflow / silent clip. Lower severity. **Needs runtime verification (deferred — no live UI on server this round)** to confirm a real param name actually clips.
+
+- **Component:** [RightRail.tsx](ui/src/components/shell/RightRail.tsx)
+- **Offending container:** the Best-params `<table className="w-full text-xs">` at [RightRail.tsx:128](ui/src/components/shell/RightRail.tsx#L128); the key `<td className="… font-mono …">` at [:132](ui/src/components/shell/RightRail.tsx#L132) and value `<td>` at [:133](ui/src/components/shell/RightRail.tsx#L133) have **no** `truncate` / `break-all` / `max-w-0`. The wrapping div at [:127](ui/src/components/shell/RightRail.tsx#L127) is `overflow-hidden rounded border`, inside a fixed `w-[300px]` aside ([:57](ui/src/components/shell/RightRail.tsx#L57)).
+- **Failure mode:** horizontal-overflow → silently clipped (no scroll).
+- **Root cause:** a long unbroken param name or eng-string value cannot wrap, so the `overflow-hidden` wrapper at [:127](ui/src/components/shell/RightRail.tsx#L127) clips it rather than scrolling — a wide value is truncated with no horizontal scrollbar. Lower severity because the rail width is generous and values are usually short eng-strings.
+- **Fix direction:** add `truncate max-w-0` (with `table-fixed` on the table) or `break-all` to the key/value `<td>`s so long names ellipsize or wrap inside the 300px rail.
+
+#### Right rail body / Left rail / Bottom panel — REFERENCE (verified safe)
+
+- **Right rail body:** [RightRail.tsx:80](ui/src/components/shell/RightRail.tsx#L80) — `min-h-0 flex-1 overflow-y-auto p-3`; the aside ([:57](ui/src/components/shell/RightRail.tsx#L57)) is `flex w-[300px] shrink-0 flex-col` with a `shrink-0` header. Tall spec-status / best-params lists scroll inside the rail. No action.
+- **Left rail:** the rail body sits between a `shrink-0` header and footer with `min-h-0 flex-1 overflow-y-auto`; scrolls correctly. No action.
+- **Bottom panel:** a fixed `h-48 shrink-0` panel whose log body is `min-h-0 flex-1 overflow-y-auto` (capped at 500 lines); scrolls correctly and does not steal the center scroll region. No action.
+
+---
+
+### Score Shaping — REFERENCE (verified safe)
+
+- [ScoreShapingTab.tsx:156](ui/src/components/tabs/ScoreShapingTab.tsx#L156) is a **grid** (`grid min-h-0 flex-1 gap-3 overflow-auto p-3`), so no Panel flex-crush. The tall per-spec breakdown's inner table region is `min-h-0 flex-1 overflow-auto` ([:237](ui/src/components/tabs/ScoreShapingTab.tsx#L237)), giving it its own scroll. Correctly excluded from 42dd636. No action.
+
+### Pipeline — REFERENCE (verified safe)
+
+- [PipelineView.tsx:115](ui/src/components/tabs/PipelineView.tsx#L115) is `flex min-h-0 flex-1 flex-col overflow-auto p-4`; its direct children are a description div, an optional PVT banner, and the DAG column row — none are `Panel`s with `overflow-hidden`, and the column nodes are not height-constrained, so there is no flex-crush. The container scrolls vertically/horizontally for tall or wide DAGs. No action.
+
+### Schematic — REFERENCE (verified safe)
+
+- The inspector `<aside className="w-[290px] shrink-0 overflow-hidden …">` at [SchematicTab.tsx:403](ui/src/components/tabs/SchematicTab.tsx#L403) clips at its edge, **but** its child `DeviceInspector` root is `flex h-full min-h-0 flex-col overflow-y-auto` ([DeviceInspector.tsx:132](ui/src/components/schematic/DeviceInspector.tsx#L132)), so tall inspector content (selects + sliders + sensitivity result) scrolls **inside** the aside. The toolbar breadcrumb is `min-w-0 flex-1 overflow-x-auto whitespace-nowrap` ([SchematicTab.tsx:300](ui/src/components/tabs/SchematicTab.tsx#L300)) — the correct strip pattern. No action.
 
 ---
 
 ## Summary of fixes by leverage
 
-| Fix | Resolves |
-|---|---|
-| Add `w-full min-w-0` to `inputCn`/`selectCn` + `min-w-0` to `Field` ([wizard-controls.tsx](ui/src/components/wizard/wizard-controls.tsx), [select.tsx](ui/src/components/ui/select.tsx)) | PVT, PDK Rules, Testbench params/top, Basic Info, Target Specs (all RC-1/RC-2 overflow) |
-| Apply the Toolbar pattern (`flex-nowrap overflow-x-auto whitespace-nowrap [&>*]:shrink-0`) to `TabStrip` + `StatusBar` | RC-4 tab/footer overflow |
-| Add `min-w-0` to truncating spans + `shrink-0` to fixed siblings ([StudioLeftRail.tsx:27-28](ui/src/components/shell/StudioLeftRail.tsx#L27), [StatusBar.tsx:49](ui/src/components/shell/StatusBar.tsx#L49)) | RC-3 ellipsis failures |
-| (Health) delete `ui/.next` + rebuild if clip reproduces; no CSS change | Reported symptom #2 |
+| # | Fix | Resolves | Severity |
+|---|---|---|---|
+| 1 | **Mirror DutParamsStep** (`overflow-x-auto` + `min-w-[Npx]`) **or** switch tracks to `minmax(0,…fr)` + `min-w-0` on the grid, across PVTStep ([:113](ui/src/components/wizard/steps/PVTStep.tsx#L113), [:153](ui/src/components/wizard/steps/PVTStep.tsx#L153)), TestbenchesStep ([:131/:135](ui/src/components/wizard/steps/TestbenchesStep.tsx#L131)), OptimizerStep ([:162/:166](ui/src/components/wizard/steps/OptimizerStep.tsx#L162)), PDKRulesStep ([:52](ui/src/components/wizard/steps/PDKRulesStep.tsx#L52)) | GRC-1 + GRC-3 horizontal-overflow — **the reported PVT Supply-column clip** and its siblings | **High** |
+| 2 | On the **number-input** rows, mitigate the spinner floor (`appearance-none`, or let the row wrap on narrow widths) — PVT Temp/Supply-V, Optimizer budget/seed/bounds | GRC-2 (the part the existing `min-w-0` does not fix) | High (couples with #1) |
+| 3 | Add `w-full` to each wizard `<select>` (or a `w-full` opt-in to `selectCn`) | GRC-4 select mis-sizing in TargetSpecs/Optimizer/BasicInfo | Medium (cosmetic) |
+| 4 | Add `truncate max-w-0`+`table-fixed` (or `break-all`) to the Best-params `<td>`s ([RightRail.tsx:132-133](ui/src/components/shell/RightRail.tsx#L132)) | Right-rail value clip | Low (needs runtime verification) |
+| 5 | Give the Create-Wizard wrapper a definite height (`h-full`/`flex-1` at [SetupTab.tsx:304](ui/src/components/tabs/SetupTab.tsx#L304)) | Monaco height-chain collapse risk in wizard mode | Low (needs runtime verification) |
+| — | **Already fixed by 42dd636** (`[&>*]:shrink-0` on Optimize/Health/Explorer scroll containers) — verified present and **complete** (covers all three tabs the GRC-5 crush affected, not just Manual Sim) | clipped-no-scroll family | **Done** |
+
+**Net:** the single highest-leverage action is **#1** — bringing the four wizard step grids in line
+with the `overflow-x-auto` + `min-w` (or `minmax(0,…fr)`) pattern that DutParamsStep already proves
+works — because it directly resolves the reported PVT overflow and removes the same latent overflow
+from three sibling steps in one consistent edit. Everything in the clipped-no-scroll family is
+already resolved at HEAD by commit 42dd636, which is **complete** for the tabs it targeted.

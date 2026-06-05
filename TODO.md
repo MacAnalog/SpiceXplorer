@@ -7,8 +7,15 @@
 > **⌘K command palette + wizard overlay**, **run history** (`runStore` + localStorage), the
 > **Schematic** view (Xschem viewer + `DeviceInspector` + sensitivity endpoint), the read-only
 > **Pipeline** DAG view, the **Health** view + **PDK-aware degradation** (`GET /api/env`), the
-> **sanity-check** endpoint, and **long-run checkpointing** (autosave + resume). The items below are
-> what remains.
+> **sanity-check** endpoint, **PVT Phase 1** (single chosen corner driving the sim), the
+> **manual single-sim** panel, and **long-run checkpointing** (autosave + resume). The items below
+> are what remains.
+>
+> **Audit note (2026-06, static-analysis round):** this refresh is a code-reading pass on the
+> server at HEAD — **no app/docker/live-sim was run** (the docker daemon is unreachable this round).
+> The new bug items in §17 are confirmed *present in source* by reading each cited file at HEAD;
+> items that would need a live UI/sim to confirm are tagged **needs runtime verification (deferred)**.
+> The §11 list (prior audit) stays as historical record — most of it shipped; do not re-derive it.
 
 ## 1. Create Wizard ✅
 
@@ -51,7 +58,7 @@ The current tab lets you tweak one spec value at a time in isolation. For multi-
 - [ ] **Equi-score contour overlay**: pick any two specs as X/Y axes; render a 2-D grid of aggregate F(x) values (sweeping those two specs while holding the rest at their current values) as a Plotly `contour` trace. Overlay the current operating point as a crosshair. This shows the optimizer's actual objective landscape and which spec is the binding constraint.
 - [ ] **Score contribution waterfall / bar chart**: horizontal bar chart where each spec contributes its signed penalty to the aggregate F(x). Bars colored red (fail) / green (pass). Updates live as values are changed. Replaces the static per-spec breakdown table.
 - [ ] **Sigmoid vs linear toggle applies globally**: the score-function radio (sigmoid / linear) should recompute the full multi-spec vector via `/api/score` and redraw all visualizations, not just the single-spec penalty curve.
-- [ ] **"Worst-case corner" mode**: allow setting each spec value to its worst-case across PVT corners (loaded from the current project) and see the resulting aggregate score — answers "would this design pass across all corners."
+- [ ] **"Worst-case corner" mode**: allow setting each spec value to its worst-case across PVT corners (loaded from the current project) and see the resulting aggregate score — answers "would this design pass across all corners." *(Blocked on PVT Phase 2 multi-corner aggregation — §16.)*
 
 ---
 
@@ -80,6 +87,8 @@ The wizard's job is to produce a valid `project_setup.yaml` that fully describes
 - [x] **Round-trip with existing YAML**: wizard is openable from an existing YAML via "Edit in Wizard" — `POST /api/project/parse-to-form` parses it and populates every step's form state. Re-emit via "Save YAML".
 - [ ] **Live YAML preview**: right pane shows the generated YAML diffing against the previous step's version (highlight changed lines). User can copy or download at any step.
 - [ ] **DSL validation surfaced step-by-step**: each step's "Next" button runs schema validation on its slice of the YAML before allowing progress. Errors point to the exact field.
+
+> ⚠️ **Round-trip fidelity gaps** found in the 2026-06 audit — these break the wizard's "the YAML IS the artifact" guarantee and are tracked as bugs in §17 (BUG-A2, BUG-A3, BUG-A6). Fix before adding more wizard scope.
 
 ---
 
@@ -114,7 +123,7 @@ The Explorer tab today is scatter + envelope table. For real design-space explor
 - [ ] **Parallel coordinates plot**: one axis per spec + per design parameter, one line per evaluated point, colored by feasibility or score. Classic multidimensional optimization viz; Plotly supports it natively (`parcoords`).
 - [ ] **Pareto front overlay on scatter**: highlight non-dominated points in the metric scatter with a distinct color and connecting line. Compute via simple O(n²) sweep — n is small (typically <2000 points).
 - [ ] **Brushing & linking**: select a region in the scatter → highlight the same points in the convergence chart and parallel coordinates → filter the Best Designs table to just those points. Foundational interactive-viz pattern.
-- [ ] **Design point inspector**: click any scatter point → side drawer opens with full param values, all metric values, iteration number, and a "Re-simulate this point" action that drops the params into a new run.
+- [ ] **Design point inspector**: click any scatter point → side drawer opens with full param values, all metric values, iteration number, and a "Re-simulate this point" action that drops the params into a new run. *(The manual single-sim primitive — §13 — is the natural backend for "Re-simulate this point".)*
 - [ ] **Convergence comparison improvements**: add ribbon/std-band for multiple replays of the same algorithm, and let the user overlay 3+ runs (not just A vs B).
 - [ ] **Spec sensitivity view**: small-multiples bar chart showing each spec's contribution to the final score across the run — answers "which spec was hardest." *(Distinct from the already-shipped device-parameter sensitivity in the Schematic `DeviceInspector` (`SensitivityChart` + `GET /api/spec/{name}/sensitivity`), which is finite-difference of metrics vs. DUT params, not per-spec score contribution across a run.)*
 
@@ -141,14 +150,14 @@ Things get crowded once a project has 10+ params and 6+ specs. Reduce clutter wi
 
 ---
 
-## 11. Bug fixes — functional audit (2026-06)
+## 11. Bug fixes — functional audit (2026-06, FIRST round)
 
-Actionable list from the audit. Full per-bug location / root cause / fix direction in [bug_report.md](bug_report.md) (IDs match). 39 confirmed (17 major, 22 minor); the two pre-flagged regressions lead.
+Actionable list from the **first** audit. Full per-bug location / root cause / fix direction in [bug_report.md](bug_report.md) (IDs match). 39 confirmed (17 major, 22 minor); the two pre-flagged regressions lead.
 
-> **Status (2026-06): 37 of 39 fixed in this branch** — verified by `pytest` (+7 new regression tests), `ruff`, `tsc`, `eslint` (0 warnings) and `next build`. Exceptions: **BUG-01** has the graceful-degradation half (a "symbols unavailable" banner); full symbol rendering needs the PDK xschem symbol library vendored into the backend image (infra). **BUG-35** keeps its `pvt_map`/`pvt_corners` parsing **deferred with the PVT work** (its `freeze`/default half is done).
+> **Status (2026-06): 37 of 39 fixed in this branch** — verified by `pytest` (+7 new regression tests), `ruff`, `tsc`, `eslint` (0 warnings) and `next build`. Exceptions: **BUG-01** had only the graceful-degradation half (a "symbols unavailable" banner) — see §17 BUG-A1 for the now-actionable remainder on the **server** (the PDK IS present here). **BUG-35** keeps its `pvt_map`/`pvt_corners` parsing **deferred** (its `freeze`/default half is done).
 
 ### Flagged regressions
-- [x] **BUG-01** *(partial — graceful "symbols unavailable" banner; full vendoring deferred)* · `ui/backend/routes/xschem.py` — Schematic symbols all render as red "?" placeholders under Docker: PDK xschem libs and xschem binary absent, so…
+- [x] **BUG-01** *(partial — graceful "symbols unavailable" banner; full rendering now actionable on the server, see §17 BUG-A1)* · `ui/backend/routes/xschem.py` — Schematic symbols all render as red "?" placeholders when the backend lacks the PDK xschem libs.
 - [x] **BUG-02** · `ui/src/components/tabs/ScoreShapingTab.tsx` — Score Shaping aggregate F(x) reflects only the selected spec, not all configured specs
 
 ### Major
@@ -184,7 +193,7 @@ Actionable list from the audit. Full per-bug location / root cause / fix directi
 - [x] **BUG-21** · `ui/src/components/tabs/ExplorerTab.tsx` — Envelope 'winner' awards ties to B and labels a winner when only one run is loaded
 - [x] **BUG-23** · `ui/src/lib/xschem/parser.ts` — parseAttrs does not skip whitespace around '=', mis-parsing spaced key/value attrs like {dash = 4}
 - [x] **BUG-24** · `ui/src/components/tabs/SchematicTab.tsx` — Stale-response race: rapid schematic navigation via the "Open" dropdown can let an earlier load clobber a later one
-- [x] **BUG-25** · `ui/src/components/schematic/DeviceInspector.tsx` — Inspector slider 'nominal' default (range midpoint) can disagree with the backend's simulated baseline (_nominal prefers val/init)
+- [x] **BUG-25** · `ui/src/components/schematic/DeviceInspector.tsx` — Inspector slider 'nominal' default (range midpoint) can disagree with the backend's simulated baseline (_nominal prefers val/init) *(re-opened in part — see §17 BUG-A2: dut_param string `val` is still never resolved)*
 - [x] **BUG-28** · `ui/src/components/tabs/HealthTab.tsx` — Health check drops the backend's "PDK missing" verdict
 - [x] **BUG-29** · `ui/backend/routes/optimize.py` — Backend /optimize/start has no server-side PDK/live-runs guard; gating is client-only
 - [x] **BUG-30** · `ui/src/components/tabs/ScoreShapingTab.tsx` — Deep-linking a disabled (enable:false) spec into Score Shaping silently no-ops
@@ -192,48 +201,135 @@ Actionable list from the audit. Full per-bug location / root cause / fix directi
 - [x] **BUG-34** · `src/spicexplorer/core/domains.py` — from_yaml silently accepts duplicate dut_param names (no uniqueness validation; example YAML defines x_dut_Vb1 twice)
 - [x] **BUG-38** · `src/spicexplorer/core/domains.py` — DutParams.get_frozen_params does float(p.init) with no None-guard; crashes on default params (dead code)
 
+---
+
 ## 12. Manual simulation feature
 
 Run all enabled testbenches once for a chosen DUT-param vector, reusing the optimizer's sim infra at run-count 1. Full design in [PVT_plan.md](PVT_plan.md) §"Part B — Manual simulation feature".
 
-- [ ] **Backend route** `POST /api/simulate/once` in `ui/backend/routes/simulate.py` (sibling of `sanity.py`): load project, build wrappers, instantiate `Nevergrad_Spice_Single_Objective`, call `evaluate(params, append_to_log=False)` (`optimization/base.py:837`) — do **not** call `parameterize()`/`_create_optimizer_obj()`/`optimization_step()` (those `ask()` a random point).
-- [ ] Promote `_build_spicelib_wrappers` to a shared helper (currently mirrored in `optimizer_runner.py` and `sanity.py:110-125`); reuse `probe_pdk` + `_tail_log` + `run_in_executor` from `sanity.py`.
-- [ ] Register router in `ui/backend/main.py`; add `simulateOnce()` to `ui/src/lib/api.ts` + `SimulateOnceResponse` to `ui/src/types/api.ts`.
-- [ ] **Mode A — load from prior result**: accept `{checkpoint_id, point}`, resolve via `_resolve_checkpoint_path` + `read_checkpoint`; stored params are already engineering-real → feed `evaluate` with no transform. Default to best point (argmax of `scores`).
-- [ ] **Mode B — manual values**: accept `{params}`; pre-fill a form from `project.dut_params` using `Param.init` as default + `min_val`/`max_val` hints; partial dicts allowed (unset params keep netlist defaults). Range-check against bounds; respect `is_integer` and the `C*`/`R*` suffix convention.
-- [ ] **UI**: collapsible "Manual Sim / Evaluate Point" panel in `OptimizeTab` (PDK-gated like live Start); `Segmented` source toggle (checkpoint | manual); per-spec result table (value vs target, pass/fail, score) + total score + per-testbench log tails; optional "Send to Score Shaping".
-- [ ] **Interface gaps to close** (optional but clean): add a `Base_Optimizer.simulate_point(params)` façade; give manual-sim wrappers a distinct output subfolder (`outdir/manual_sim`) so they don't clobber a live run's outputs (`_validate` rmtrees `output_folder`).
+> **Status: landed** (commits `37952bf`, `c409031`). `POST /api/simulate/once` is registered in
+> `ui/backend/main.py:60`, wired in `ui/src/lib/api.ts:143` (`simulateOnce`) +
+> `ui/src/types/api.ts:289` (`SimulateOnceResponse`), and surfaced by
+> `ui/src/components/pvt/ManualSimPanel.tsx` in OptimizeTab. It calls
+> `evaluate(params, append_to_log=False)` (the correct primitive, not `ask()`), is PDK-gated, and
+> isolates outputs into `outdir/manual_sim`.
+
+### Landed ✅
+- [x] **Backend route** `POST /api/simulate/once` in `ui/backend/routes/simulate.py` — loads the project, builds wrappers, instantiates `Nevergrad_Spice_Single_Objective`, calls `evaluate(params, append_to_log=False)`. Does **not** call `parameterize()`/`_create_optimizer_obj()`/`optimization_step()`.
+- [x] `_build_spicelib_wrappers` shared in `ui/backend/services/optimizer_runner.py:53` and reused by simulate.py (with `output_subdir`).
+- [x] Router registered in `ui/backend/main.py`; `simulateOnce()` in `ui/src/lib/api.ts`; `SimulateOnceResponse` in `ui/src/types/api.ts`.
+- [x] **Mode A — load from prior result**: accepts a checkpoint point; stored params are engineering-real and feed `evaluate` directly. Default to best point (argmax of scores).
+- [x] **Mode B — manual values**: accepts an explicit engineering-real `{params}` vector; soft range-check via `_validate_params`.
+- [x] **UI**: collapsible Manual-Sim panel in `OptimizeTab` (PDK-gated), `Segmented` source toggle, per-spec result table, total score, active-corner display.
+- [x] **Isolated output subfolder** (`outdir/manual_sim`) so a manual sim doesn't clobber a live run's outputs.
+
+### Remaining
+- [x] **Two-directional output isolation (BUG-A8 — fixed)**: isolation is currently **one-directional**. Starting a *live* run while a manual sim is in flight rmtrees `ws_root/outdir` (which **contains** `manual_sim`) — `_build_spicelib_wrappers(project)` at `optimizer_runner.py:257` passes **no** `output_subdir`, and `NGSpice_Wrapper._validate` rmtrees its `output_folder` (`spicelib.py:236-238`). Give the live run its own subfolder, or guard against a concurrent manual sim.
+- [ ] **`Base_Optimizer.simulate_point(params)` façade** (optional but clean): a named one-shot wrapper around `evaluate(params, append_to_log=False)` so callers (manual sim, future "Re-simulate this point" in Explorer §8) don't reach into `evaluate` directly.
+- [ ] **Mode B pre-fill from `project.dut_params`** (optional): seed the manual-values form from `Param.init` (with `min_val`/`max_val` hints), respect `is_integer` and the `C*`/`R*` suffix convention. *(Blocked on BUG-A2 §17 — the dut_param string `val`/`init` must resolve to a number first or the seeds are null.)*
+- [ ] **"Send to Score Shaping"** action from the result table (optional).
 
 ## 13. PVT corners — Phase 1 (single chosen corner)
 
-Make corners first-class and actually drive the sim against **one** active corner; the optimizer loop, scorer, and per-trial flow stay untouched. Full design + exact change list in [PVT_plan.md](PVT_plan.md) §"Phase 1". (Note: `tech_spec.pvt_map` and the flat `pvt_corners` are currently **dead config** — silently dropped by non-strict dacite; no `.lib`/temp/supply injection exists today.)
+Make corners first-class and actually drive the sim against **one** active corner; the optimizer loop, scorer, and per-trial flow stay untouched. Full design + exact change list in [PVT_plan.md](PVT_plan.md) §"Phase 1".
 
-- [ ] **Config schema**: add a top-level `pvt:` block (`active_corner`, reusable `process_bundles`, `corners[]` = process includes + temp + supply + params, `enabled`). Subsumes/replaces `pvt_map` + `pvt_corners`; keep a back-compat shim. See the copy-pasteable YAML in PVT_plan.md.
-- [ ] **`core/domains.py`**: add `ModelInclude` / `SupplyOverride` / `Corner` / `PVTConfig` dataclasses; add `pvt: Optional[PVTConfig] = None` to `Project_Setup`; in `from_yaml()` pre-expand each corner's `process:` bundle into `model_includes` before `safe_from_dict`. Leave `TechSpec`/`PVT`/`pvt_corners` as-is (no regression).
-- [ ] **`spice_engine/spicelib.py`**: add `NGSpice_Wrapper.apply_corner(corner)` — strip the hardcoded `.lib` line (`remove_Xinstruction`), add the ordered cross-family `.lib <file> <section>` includes (`add_instruction`), emit `.options temp=<t>`, and `set_parameter` for supply/extra params. Isolate all ngspice-specific syntax here (PDK-agnostic seam).
-- [ ] **`optimization/base.py`**: in `Spice_Base_Optimizer.__post_init__()` (the existing one-time tb-param setup, ~`:463-475`) apply the active corner once to each enabled testbench wrapper, before the loop. Persists across trials via `SpiceEditor` state.
-- [ ] **UI (optional, ephemeral)**: surface `pvt.active_corner` + corner list in `routes/project.py`; let `optimizer_runner._apply_overrides` accept an ephemeral `active_corner` override (in-memory, never rewrite YAML) → gives "switch to a defined corner" for free.
-- [ ] **Stays untouched**: nevergrad/Ax optimizer classes, `optimization_step`, `optimize()`, `simulate_circuit`, `evaluate`, `compute_fitness*`, `core/utils` error/reward fns, checkpoint schema, charts.
+> **Status: landed** (commits `ebc8e9d`, `2375f45`, `37952bf`, `c409031`, `a15b420`; example block
+> `dc8b6f5`). Corners are first-class and drive the sim against one active corner. The legacy
+> `tech_spec.pvt_map` / flat `pvt_corners` stay **display-only** (BUG-35 parsing still deferred).
+
+### Landed ✅
+- [x] **Config schema**: top-level `pvt:` block (`active_corner`, `process_bundles` sugar, `corners[]` with `model_includes`/`temp`/`supplies`, `enabled`, `model_lib_root`). `_normalize_pvt_block` (`core/domains.py:131`) desugars `process_bundles`, singular `supply`, and eng-strings before dacite.
+- [x] **`core/domains.py`**: `ModelInclude` / `SupplyOverride` / `Corner` (`:249`) / `PVTConfig` (`:264`, with `model_lib_root` at `:272`) dataclasses; `pvt: Optional[PVTConfig]` on `Project_Setup`; `PVTConfig.get_active()` (`:280`). Legacy `TechSpec`/`PVT`/`pvt_corners` left as-is.
+- [x] **`spice_engine/spicelib.py`**: `NGSpice_Wrapper.apply_corner(corner, model_lib_root)` (`:337`) — strips the hardcoded `.lib`, injects ordered cross-family includes, emits `.options temp=`, overrides supply `.param`s. The only ngspice-specific corner seam; idempotent.
+- [x] **`optimization/base.py`**: `Spice_Base_Optimizer.__post_init__` applies `pvt.get_active()` once per enabled testbench wrapper before the loop, persisting across trials.
+- [x] **UI (ephemeral)**: `pvt.active_corner` + corner list surfaced via `ui/src/components/pvt/CornerSelect.tsx` (Run popover, Optimize toolbar, Health check); `optimizer_runner._apply_overrides` accepts an ephemeral `active_corner` override (in-memory, never rewrites YAML).
+- [x] **Wizard PVTStep**: emits inline `model_includes`, round-tripped through `yaml_generator._pvt_block_to_form`.
+
+### Remaining (Phase 1 hardening — see §17 for the bug detail)
+- [x] **Wizard `pvt.model_lib_root` now round-trips (BUG-A3 — fixed)**: `_build_pvt_block` (`yaml_generator.py:174-206`) never emits it and `_pvt_block_to_form` (`:253-293`) never reads `block.get("model_lib_root")`, so a project that relies on it loses lib-path resolution after a wizard Save. Needs a form field (`ui/src/types/api.ts:398` `WizardPVTConfig`, `ui/src/stores/wizardStore.ts:46` default, `PVTStep.tsx`) + emit/parse in the generator.
+- [x] **Wizard preserves multi-rail corners (BUG-A6 — fixed)**: `_pvt_block_to_form` (`:276-283`) keeps only `supplies[0]` and `_build_pvt_block` (`:197-199`) emits a singular `supply`, so corners with rails 2..N lose them through the wizard. Either model multiple rails in `WizardPVTCorner` (`ui/src/types/api.ts:389-396` + `PVTStep.tsx:121-124`) or warn that multi-rail YAML must be edited in the raw editor.
 
 ## 14. PVT corners — Phase 2 (DEFERRED / research)
 
-> **Deferred — not scheduled this round.** Once corners drive a single sim (Phase 1), run the full **testbench × corner** cross-product and collapse **N corner-scores into one scalar** the optimizer consumes. The open research question is the aggregation strategy — candidates: worst-case/min, weighted mean, sum-of-penalties, must-pass-all (constraint), or Pareto/multi-objective (Ax). No strategy is committed. Secondary deferred items: where the corner loop lives, `parallel_sim` fan-out (N× ngspice processes), and `{corner}::{spec}` checkpoint key namespacing (+ the dotted-column `.iterrows()` caveat). See [PVT_plan.md](PVT_plan.md) §"Phase 2".
+> **Deferred — not scheduled this round.** Once corners drive a single sim (Phase 1, §13 — landed), run the full **testbench × corner** cross-product and collapse **N corner-scores into one scalar** the optimizer consumes. The open research question is the aggregation strategy — candidates: worst-case/min, weighted mean, sum-of-penalties, must-pass-all (constraint), or Pareto/multi-objective (Ax). No strategy is committed. Secondary deferred items: where the corner loop lives, `parallel_sim` fan-out (N× ngspice processes), `{corner}::{spec}` checkpoint key namespacing (+ the dotted-column `.iterrows()` caveat), and completing **BUG-35** (`pvt_map`/`pvt_corners` parsing) alongside it. The Score-Shaping "Worst-case corner" mode (§3) and Explorer worst-case views depend on this. See [PVT_plan.md](PVT_plan.md) §"Phase 2".
 
 ## 15. UI layout fixes (CSS / overflow / scroll)
 
 From the layout audit — full per-tab findings + global root causes in [ui_layout_report.md](ui_layout_report.md).
 
-- [x] **RC-1 (done) / RC-2 (largely subsumed)**: added `w-full min-w-0` to `inputCn` + `min-w-0` to `Field` (`wizard-controls.tsx`) and `min-w-0` to `selectCn` (`select.tsx`). Deliberately kept `selectCn` off `w-full` so toolbar selects don't stretch to fill the row. Fixes the reported PVT Supply-column overflow and the input-heavy steps.
+### Landed ✅
+- [x] **RC-1 / RC-2 (largely subsumed)**: added `w-full min-w-0` to `inputCn` + `min-w-0` to `Field` (`wizard-controls.tsx`) and `min-w-0` to `selectCn` (`select.tsx`). Deliberately kept `selectCn` off `w-full` so toolbar selects don't stretch. Fixes the reported PVT Supply-column overflow and the input-heavy steps.
 - [x] **RC-4**: `TabStrip` and `StatusBar` now use `overflow-x-auto whitespace-nowrap [&>*]:shrink-0` (StatusBar footer gets `overflow-hidden`) so labels scroll/truncate instead of wrapping on a narrow center column.
 - [x] **RC-3**: added `min-w-0` to truncating spans + `shrink-0` to fixed siblings in `StudioLeftRail` and `StatusBar` so long project names ellipsize.
-- [ ] **Sanity Check "clipped-no-scroll"**: confirmed **not** a source CSS defect (the height/scroll chain is intact) — delete `ui/.next` and rebuild if it recurs.
+- [x] **Sanity Check / Optimize (Manual-Sim logs) / Compare clipped-no-scroll**: Fixed — the scroll-container clip that prevented reaching tall panels (e.g. Manual-Sim logs) was resolved (commit `42dd636`). These three previously-reported clips are confirmed **gone** at HEAD.
+
+### Remaining (2026-06 re-audit — still present at HEAD, mostly `min-w-0` gaps in the wizard)
+- [ ] **Wizard PVT Corners step — horizontal overflow** (`PVTStep.tsx`): the includes/supply rows still overflow on a narrow column. Apply the RC-1 `min-w-0`/`w-full` treatment to the remaining grid cells.
+- [ ] **Wizard Testbenches step — horizontal overflow** (`TestbenchesStep.tsx`): param-row cards overflow; add `min-w-0` to the row grid.
+- [ ] **Wizard PDK Rules step — horizontal overflow** (`PDKRulesStep.tsx`): the key/value constraint rows overflow.
+- [ ] **Wizard Optimizer step — mis-sizing** (`OptimizerStep.tsx`): the algorithm select / kwargs editor mis-size on a narrow column.
+- [ ] **Wizard select-bearing steps — mis-sizing** (`TargetSpecsStep.tsx` / `OptimizerStep.tsx` / `BasicInfoStep.tsx`): selects don't size consistently with their row cells (the deliberate `selectCn`-off-`w-full` choice needs a per-step `w-full` opt-in where the select owns its row).
+- [ ] **Studio shell Right rail — horizontal overflow** (`RightRail.tsx`): spec-status rows overflow on long metric names; add `min-w-0` + truncation.
+- [ ] **Setup (Create Wizard mode) — mis-sizing** (`SetupTab.tsx` → `WizardShell.tsx`): *needs runtime verification (deferred — no live UI on server this round)*. The static chain looks intact; confirm against a running UI before changing CSS.
+- Verified **no-issue** at HEAD (do not touch): Setup Load/Edit summary panels, ScoreShapingTab, PipelineView, SchematicTab + DeviceInspector, BottomPanel, RightRail (global), StudioLeftRail.
 
 ## 16. Redundancy cleanup (low-risk first)
 
 From the redundancy survey — full list + risk ratings in [project_redundancy.md](project_redundancy.md).
 
+### Landed ✅
 - [x] Deleted unused `formatNumber` (`lib/utils.ts`); removed dead `uiStore` fields (`compareRunA`/`compareRunB`/`setCompare`/`setSelectedRunId`); removed the dead `DutParams` class (`domains.py`, BUG-38). *(The one-tab `bottomTab` collapse is deferred — purely cosmetic.)*
 - [x] Consolidated `_safe_float` (3 copies) into `ui/backend/services/num.py`; `config.py` now calls `_infer_score_fn` (fixes the `"linear"` divergence vs `checkpoint.py`).
-- [x] Extracted `_target_specs_from_yaml` in `checkpoint.py`. *(Deferred — cosmetic/behavior-changing: the `score_service` penalty-helper extraction, the shared `goalSym` glyph helper, and routing all FE pass/fail through `statusForGoal`.)*
-- [x] Renamed the duplicate `x_dut_Vb1`→`x_dut_Vb2` in the example YAML (matches the netlist), and `from_yaml` now **rejects** duplicate dut_param names (BUG-34). *(The always-empty `CheckpointMeta.n_iters` branch is deferred.)*
-- [ ] **Decide (needs sign-off)**: fate of `demo/newcas_demo_runner.py` and the `optimization/rl/` subtree — both dead relative to the webapp but carry dependent tests.
+- [x] Extracted `_target_specs_from_yaml` in `checkpoint.py`.
+- [x] Renamed the duplicate `x_dut_Vb1`→`x_dut_Vb2` in the example YAML (matches the netlist), and `from_yaml` now **rejects** duplicate dut_param names (BUG-34).
+
+### Remaining (2026-06 re-survey — confirmed present at HEAD)
+- [ ] **[deadCode/high] RL optimizer backend** — `src/spicexplorer/optimization/rl/` (`rl_optimizer.py`, `rl_factory.py`, `agent_trainer.py`, `circuit_env.py`, …) is a dormant subtree unreferenced by the webapp backend (`ui/backend/` does not import it). **Decide its fate (needs sign-off)** — keep as research, or remove with its dependent tests.
+- [ ] **[deadCode/medium] Orphaned demo runner** — `src/spicexplorer/demo/newcas_demo_runner.py` is a parallel reimplementation of the backend data flow; `tests/test_newcas_demo_runner.py` is its only consumer. **Decide its fate (needs sign-off)** alongside the RL subtree.
+- [ ] **[deadCode/medium] Orphaned symbolic Bode fitter** — `src/spicexplorer/optimization/stochastic/symbolic.py` is unreferenced by the webapp (not imported anywhere under `ui/backend/`). Confirm it isn't used by any shipped path, then quarantine or remove.
+- [ ] **[deadCode/low] `CheckpointMeta.n_iters`** — rendered in `RunsRail.tsx:154-155` but the list endpoint never populates it (`ui/backend/routes/checkpoint.py:72` sets `"n_iters": None`). Either populate it in the list endpoint or drop the render branch.
+- [ ] **[duplicated/high] Constraint-satisfaction (goal+tolerance pass/fail)** — the same "does value meet goal within tolerance" rule is reimplemented in 4+ places (backend `compute_envelope`, `score_service`, FE `statusForGoal`, FE `RightRail`). Route everything through one helper. *(Several of the §17 exact-goal / tolerance bugs are symptoms of this duplication.)*
+- [ ] **[duplicated/medium] Spec pass/fail helper duplicated across FE** — two inline copies (notably `RightRail.tsx:40-46`) ignore tolerance, diverging from `HealthTab`/`statusForGoal`. Collapse onto `statusForGoal` (this also fixes BUG-A12 in §17).
+- [ ] **[duplicated/low] `score_service` penalty block** — duplicated verbatim between the per-spec loop and the curve loop; factor into one helper.
+- [ ] **[duplicated/low] `goalSym` (goal → comparison glyph)** — reimplemented in ~8 components with two **divergent** glyph sets (`>`/`<`/`≈` vs others). Ship one shared helper.
+- [ ] **[convoluted/high] `score_service.compute_score`** — a parallel scorer that re-derives the optimizer's penalty instead of calling the library's `evaluate`/`compute_fitness`. Reconcile so the UI and the optimizer never disagree on a point's score.
+- [ ] **[convoluted/medium] Two parallel schematic-rendering paths** — legacy pre-rendered SVG `<img>` vs the interactive xschem viewer. Pick one (the interactive viewer) and retire the other once BUG-A1 (§17) lands.
+- [ ] **[convoluted/low] `bottomTab`** — a full store field + setter + active-tab compare modeling exactly one tab. Collapse to a boolean or drop. *(Purely cosmetic; deferred.)*
+
+---
+
+## 17. Bug fixes — functional audit (2026-06, SECOND round / static-analysis)
+
+Actionable list from the **second** audit (static analysis on the server — **no app/sim run**). Every item below was confirmed **present in source at HEAD** by reading the cited file. Grouped by severity. IDs are `BUG-A*` to avoid colliding with §11. Anything that would need a live UI/sim to confirm end-to-end is tagged **needs runtime verification (deferred)**.
+
+> **Server grounding:** unlike the first audit (Docker/PDK-less context), the PDK **is present** on this
+> server — ngspice/xschem/openvaf installed natively, PDK at `/home/noorizad/local/pdks`,
+> `PDK=ihp-sg13g2`, `PDK_ROOT=/home/noorizad/local/pdks`, and the 40 `.sym` files exist under
+> `…/libs.tech/xschem/sg13g2_pr/`. So BUG-A1 is a real, fixable env-contract gap here, not an infra blocker.
+
+> **Status (fixed 2026-06, this round):** **ALL of BUG-A1..A16 are fixed**, plus five follow-ups found by
+> an adversarial diff review (delete_checkpoint multi-root, resume `best_metrics` seeding, sensitivity/sanity
+> output isolation, exact-goal winner tie) — re-verified clean by a second review pass. Regression tests in
+> [tests/test_audit_redo_backend.py](tests/test_audit_redo_backend.py) + [tests/test_pvt_wizard_roundtrip.py](tests/test_pvt_wizard_roundtrip.py)
+> + [tests/test_audit_fixes.py](tests/test_audit_fixes.py); full `pytest` (53, incl. real-SPICE slow) +
+> `tsc --noEmit` + `eslint --max-warnings=0` all green. No commit yet — staged in the worktree.
+
+### Major
+- [x] **BUG-A1** *(fixed)* · [`ui/backend/routes/xschem.py:47-54`](ui/backend/routes/xschem.py#L47-L54) (`_pdk_xschem_dir`, `@lru_cache`) + [`:57-66`](ui/backend/routes/xschem.py#L57-L66) (`_search_roots`) — **Device symbols render as "missing symbol" placeholders when the backend has `PDK_ROOT` but not `PDK`.** Env-contract divergence: `_pdk_xschem_dir` requires **both** `PDK_ROOT` *and* `PDK` set, returning None otherwise, whereas the sim/PDK probe ([`env_probe.py:25`](ui/backend/services/env_probe.py#L25) `_PDK_ENV_VARS`, [`:42-58`](ui/backend/services/env_probe.py#L42-L58) `_candidate_pdk_roots`, [`:61-76`](ui/backend/services/env_probe.py#L61-L76) `_find_model_lib`) accepts any of `PDK_ROOT`/`PDK`/`IHP_PDK_ROOT` and falls back to a bounded `rglob`. Fix: make the xschem resolver use the **same** PDK-root discovery as the probe (or default `PDK` to `ihp-sg13g2` / derive it from the resolved root). FE manifestation: [`SchematicTab.tsx:63-69,89-99,385-388`](ui/src/components/tabs/SchematicTab.tsx#L63-L69) + [`SchematicViewer.tsx:182`](ui/src/components/schematic/SchematicViewer.tsx#L182). *(needs runtime verification (deferred) for the end-to-end render; the env-contract gap itself is confirmed in source.)*
+- [x] **BUG-A2** *(fixed)* · [`yaml_generator.py:46-47`](ui/backend/services/yaml_generator.py#L46-L47) (`_build_dut_param`) — **`freeze: true` is silently dropped on YAML generation**; `_build_dut_param` only emits `freeze` when the form value is `False` (`if row.get("freeze") is False`), so a frozen DUT param is written without `freeze` and is then **swept as a free optimization dimension**. Fix: emit `freeze: true` when set (or always emit the explicit boolean).
+- [x] **BUG-A3** *(fixed)* · [`yaml_generator.py:174-206`](ui/backend/services/yaml_generator.py#L174-L206) (`_build_pvt_block`) + [`:253-293`](ui/backend/services/yaml_generator.py#L253-L293) (`_pvt_block_to_form`, returns only `{active_corner, corners}` at `:290-293`) — **`pvt.model_lib_root` is dropped on the YAML→form→YAML round-trip**, breaking lib-file path resolution for projects that set it (`PVTConfig.model_lib_root` exists at [`domains.py:272`](src/spicexplorer/core/domains.py#L272) and is consumed by `apply_corner`). Form-type gap: [`api.ts:398-401`](ui/src/types/api.ts#L398-L401) (`WizardPVTConfig`), [`wizardStore.ts:46`](ui/src/stores/wizardStore.ts#L46) default, `PVTStep.tsx`. Caller path is `ui/src/components/tabs/SetupTab.tsx`. *(Also tracked under §13 Remaining.)*
+- [x] **BUG-A4** *(fixed)* · [`yaml_generator.py:46-47`](ui/backend/services/yaml_generator.py#L46-L47) string `val` resolution — *Library half:* **`dut_param` string `val` is never resolved.** `resolve_all_parameter_ranges` ([`domains.py:832-846`](src/spicexplorer/core/domains.py#L832-L846)) calls `ressolve_val` **only** for testbench params (`:844`), never in the dut_params loop (`:835-839`), and `resolve_min_max` ([`:313-321`](src/spicexplorer/core/domains.py#L313-L321)) resolves `init` but not `val`. So a numeric-but-engineering-string operating point (e.g. `val: 0.9`/`val: 1.2u`) serializes to `null` in the project summary ([`project.py:63`](ui/backend/routes/project.py#L63) `isinstance(p.val, (int, float))`) and the sensitivity `_nominal` can't parse it ([`sensitivity.py:84-99`](ui/backend/routes/sensitivity.py#L84-L99) via [`num.safe_float`](ui/backend/services/num.py#L8-L14), which can't parse eng-strings), so the Device Inspector slider nominal silently drops to range-center ([`DeviceInspector.tsx:19-27`](ui/src/components/schematic/DeviceInspector.tsx#L19-L27)). Fix: call `ressolve_val` in the dut_params loop too (mirror the tb-param path). *(Re-opens part of §11 BUG-25.)*
+- [x] **BUG-A5** *(fixed)* · [`ExplorerTab.tsx:26-31`](ui/src/components/tabs/ExplorerTab.tsx#L26-L31) (`bestOf`), used at [`:191-192`](ui/src/components/tabs/ExplorerTab.tsx#L191-L192) + [`:198`](ui/src/components/tabs/ExplorerTab.tsx#L198) (envelope/winner) and [`:495-498`](ui/src/components/tabs/ExplorerTab.tsx#L495-L498) (spec-summary pass/fail) — **`exact`-goal specs get the wrong "best" value (max instead of closest-to-target)** in the performance-envelope and spec-summary tables. `bestOf` only special-cases `minimize`; everything else (incl. `exact`) reduces to max. Fix: for `exact`, choose the sample with the smallest `|v − target|`. Corroborating server-side copy in BUG-A11.
+- [x] **BUG-A11** *(fixed)* · [`checkpoint_reader.py:131-144`](ui/backend/services/checkpoint_reader.py#L131-L144) (`compute_envelope`) — **server-side `compute_envelope` returns max (not closest-to-target) and a wrong `passes` for `exact`-goal specs**: `goal == "minimize"` → `min`, `else` → `max`, so `exact` takes the max branch; `passes` then compares that wrong `best_ever` against target±tol. Reached via [`checkpoint.py:143-151`](ui/backend/routes/checkpoint.py#L143-L151) (`GET /checkpoint/{id}/envelope`), consumed by [`ExplorerTab.tsx:541-575`](ui/src/components/tabs/ExplorerTab.tsx#L541-L575) via [`api.ts:121-124`](ui/src/lib/api.ts#L121-L124). Fix together with BUG-A5 (one shared closest-to-target rule).
+
+### Minor
+- [x] **BUG-A6** *(fixed)* · [`yaml_generator.py:276-283`](ui/backend/services/yaml_generator.py#L276-L283) (`_pvt_block_to_form`, keeps `supplies[0]` only) + [`:197-199`](ui/backend/services/yaml_generator.py#L197-L199) (`_build_pvt_block`, emits singular `supply`) — **multi-rail PVT corners lose supply rails 2..N through the wizard.** Single-rail FE model: [`api.ts:389-396`](ui/src/types/api.ts#L389-L396) (`WizardPVTCorner`), [`PVTStep.tsx:121-124`](ui/src/components/wizard/steps/PVTStep.tsx#L121-L124). *(Also tracked under §13 Remaining.)*
+- [x] **BUG-A7** *(fixed)* · [`project.py:47`](ui/backend/routes/project.py#L47) (`_summarise`) — **`target_spec` weight of 0 is misreported as 1.0** in the parsed project summary (`float(s.weight) if s.weight else 1.0` — `0.0` is falsy). Consumed at [`SetupTab.tsx:373`](ui/src/components/tabs/SetupTab.tsx#L373) (weight Σ) and [`:414`](ui/src/components/tabs/SetupTab.tsx#L414) (per-spec column). Fix: `float(s.weight) if s.weight is not None else 1.0`.
+- [x] **BUG-A8** *(fixed — live/manual/sensitivity/sanity each isolated)* · [`optimizer_runner.py:53-77`](ui/backend/services/optimizer_runner.py#L53-L77) (`_build_spicelib_wrappers`; live run calls it with **no** `output_subdir` at [`:257`](ui/backend/services/optimizer_runner.py#L257)) + [`simulate.py:177`](ui/backend/routes/simulate.py#L177) (manual sim uses `output_subdir="manual_sim"`) + [`spicelib.py:234-242`](src/spicexplorer/spice_engine/spicelib.py#L234-L242) (`_validate` rmtrees `output_folder` at `:238`) — **starting a live run while a manual sim is in flight rmtrees the manual sim's working directory** (isolation is one-directional). *(Also tracked under §12 Remaining.)*
+- [x] **BUG-A9** *(fixed)* · [`base.py:63`](src/spicexplorer/optimization/base.py#L63) (write — CWD-relative `./auto_save`) and [`:449-450`](src/spicexplorer/optimization/base.py#L449-L450) (`get_auto_save_name` builds under `autosave_checkpoint_dir`) vs [`checkpoint.py:53`](ui/backend/routes/checkpoint.py#L53) + [`:63`](ui/backend/routes/checkpoint.py#L63) (read under `REPO_ROOT/'auto_save'`) — **autosave checkpoints are written CWD-relative but discovered under `REPO_ROOT/auto_save`**, so Resume ([`optimize.py:70-76`](ui/backend/routes/optimize.py#L70-L76) 404 path) and live checkpoint listing silently break when the backend CWD ≠ repo root. `run_newcas_ui.sh:71-73` starts uvicorn before any `cd` (the `cd` at `:78` is for the frontend), so today they coincide — but it's fragile. Fix: anchor the autosave dir to a known root (or have the reader honor CWD).
+- [x] **BUG-A10** *(fixed)* · [`MetricConvergenceChart.tsx:19-31`](ui/src/components/charts/MetricConvergenceChart.tsx#L19-L31) (`bestSoFar`) — **best-so-far curve treats `exact` goals as maximize** (`minimize` → `Math.min`, `else` → `Math.max`). Call sites: [`ExplorerTab.tsx:305-310`](ui/src/components/tabs/ExplorerTab.tsx#L305-L310) and [`OptimizeTab.tsx:266-271`](ui/src/components/tabs/OptimizeTab.tsx#L266-L271). Fix: for `exact`, track the value closest to target.
+- [x] **BUG-A12** *(fixed)* · [`RightRail.tsx:40-46`](ui/src/components/shell/RightRail.tsx#L40-L46) — **RightRail spec pass/fail ignores tolerance for `exceed`/`minimize`**, contradicting `HealthTab`/`statusForGoal` (only the `exact` branch reads `spec.tolerance`). Fix: route through `statusForGoal` (ties into §16 duplicated/medium).
+- [x] **BUG-A13** *(fixed — incl. resume seeding)* · Backend: [`optimizer_runner.py:152-162`](ui/backend/services/optimizer_runner.py#L152-L162) (`_StreamingOpt` `_emit` — `best_score`/`best_params` are the instance-tracked running best, set on improvement at [`:142-151`](ui/backend/services/optimizer_runner.py#L142-L151), while `metrics` is the **current** step's `fit` `curr_val` at `:156-160`). Store: [`runStore.ts:193-209`](ui/src/stores/runStore.ts#L193-L209) (`pushEvent` merges `bestMetrics` from `e.metrics`). Consumers: [`RightRail.tsx:39`](ui/src/components/shell/RightRail.tsx#L39) and [`PipelineView.tsx:111,195`](ui/src/components/tabs/PipelineView.tsx#L111). — **Right-rail "Spec status" / Pipeline pass-fail use the latest-seen metrics, not the best-scoring trial's**, so they're inconsistent with the displayed best params/score. Fix: emit the best trial's metrics alongside `best_params`, and merge those (not the running `metrics`) into `bestMetrics`. *(needs runtime verification (deferred) for the visible inconsistency; the data-flow mismatch is confirmed in source.)*
+- [x] **BUG-A14** *(fixed)* · [`score_service.py:103`](ui/backend/services/score_service.py#L103) (`return … "linear": -total_linear, "sigmoid": -total_sigmoid`) vs [`ScoreShapingTab.tsx:228`](ui/src/components/tabs/ScoreShapingTab.tsx#L228) (header defines `F(x) = Σ wᵢ · P̂ᵢ`, a sum of non-negative penalties) and [`:292-296`](ui/src/components/tabs/ScoreShapingTab.tsx#L292-L296) (footer renders `aggregate.sigmoid`/`aggregate.linear` raw) — **the "F(x) aggregate" footer shows a negated value under a header that defines F(x) as a sum of non-negative penalties.** Fix: either return the unnegated penalty sum or relabel the footer (and keep the optimizer-facing negation separate).
+- [x] **BUG-A15** *(fixed)* · [`env_probe.py:28-33`](ui/backend/services/env_probe.py#L28-L33) (`_PDK_LIB_SUBPATHS`) + [`:61-76`](ui/backend/services/env_probe.py#L61-L76) (`_find_model_lib`) — **PDK fast-path subpaths miss the *tech-prefixed* `…/libs.tech/ngspice/models/` layout the real install uses**, forcing a full-tree `rglob` on every probe. The list has `{tech}/libs.tech/ngspice/{lib}` (no `models/`) and `libs.tech/ngspice/models/{lib}` (no tech prefix), but **not** `{tech}/libs.tech/ngspice/models/{lib}`. The server PDK is `PDK_ROOT=/home/noorizad/local/pdks` with the lib at `ihp-sg13g2/libs.tech/ngspice/models/cornerMOSlv.lib`, so the candidate root + needed subpath is exactly the missing tech-prefixed `models/` combo → falls through to `root.rglob` (walks the whole PDK tree, no caching) on every `/api/env`, `/api/sanity-check`, `/api/optimize/start`, `/api/simulate/once`. Confirmed against the on-disk layout (filesystem read, **no runtime needed**). Fix: add `f"{_PDK_TECH}/libs.tech/ngspice/models/{_PDK_MODEL_LIB}"` to `_PDK_LIB_SUBPATHS`. (Matches bug_report.md **ENV-1**.)
+- [x] **BUG-A16** *(fixed)* · [`checkpoint_reader.py:15`](ui/backend/services/checkpoint_reader.py#L15) (`read_json_checkpoint`, no `limit` param) + [`:104-105`](ui/backend/services/checkpoint_reader.py#L104-L105) (`read_checkpoint` JSON branch drops `limit`, CSV branch forwards it); route at [`checkpoint.py:96-101`](ui/backend/routes/checkpoint.py#L96-L101) (passes `limit`) — **the JSON checkpoint reader ignores the `limit` parameter** that the CSV reader and the route honor, so a large JSON checkpoint is always returned full-resolution. Fix: add `limit` to `read_json_checkpoint` and truncate consistently with the CSV path.
