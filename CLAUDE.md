@@ -108,9 +108,13 @@ Five Zustand stores hold cross-view state: `projectStore` (loaded/applied projec
 
 **PDK-aware degradation**: `GET /api/env` reports `{ngspice_ok, pdk_ok, live_runs_enabled, ...}`. When `pdk_ok` is false the status bar shows the replay-only pill and OptimizeTab disables live Start (steering to Replay). Score Shaping, Compare/Explore on cached checkpoints, the wizard, and the Pipeline view all work without the PDK.
 
-**Run-config overrides are ephemeral**: OptimizeTab's algorithm/budget/seed are sent to `POST /api/optimize/start` and applied in-memory to the loaded `Project_Setup` (`optimizer_runner._apply_overrides`) — the YAML on disk is never rewritten.
+**Run-config overrides are ephemeral**: OptimizeTab's algorithm/budget/seed (and the PVT `active_corner`) are sent to `POST /api/optimize/start` and applied in-memory to the loaded `Project_Setup` (`optimizer_runner._apply_overrides`) — the YAML on disk is never rewritten.
 
-**`dut_param.freeze` defaults to `False`**: an omitted `freeze` key means "optimize this param" — matching the wizard default and the historical sweep-everything behavior. Set `freeze: true` to exclude a param from the search space (`NevergradMixin.parameterize` skips it and injects its `val`/`init`, if given). `Project_Setup.from_yaml()` now also **rejects duplicate `dut_param` names** (they previously collapsed silently to one search dimension). The `freeze_to: <value>` YAML key is still parsed-but-ignored — wiring it up is deferred with the PVT / multi-corner work.
+**PVT corners (Phase 1) actually drive the sim**: a top-level `pvt:` block (`PVTConfig` → named `Corner`s with `model_includes`/`temp`/`supplies`) makes corners first-class. `Project_Setup.from_yaml()` calls `_normalize_pvt_block` to desugar `process_bundles`, a singular `supply: {node,value}`, and eng-strings **before** dacite. The optimizer applies `pvt.get_active()` **once** in `Spice_Base_Optimizer.__post_init__` via `NGSpice_Wrapper.apply_corner()` — the **only** ngspice-specific corner seam (strips the hardcoded `.lib`, injects the corner's ordered cross-family includes, sets `.options temp=`, overrides supply `.param`s; idempotent). The optimize loop/scorer/`simulate_circuit` are untouched, so a single-corner run is a strict superset of the legacy "netlist hardcodes the corner" behavior (`pvt: None`). The legacy `tech_spec.pvt_map` / flat `pvt_corners` stay **display-only**. Phase 2 (multi-corner `{tb × corner}` aggregation) is deferred — see `PVT_plan.md`. The UI surfaces corners via `CornerSelect` (Run popover, Optimize toolbar, Health check) and the wizard's PVTStep (emits inline `model_includes`, round-tripped through `yaml_generator._pvt_block_to_form`).
+
+**Manual single sim (`POST /api/simulate/once`)**: evaluate ONE chosen design point through the optimizer's `evaluate(params, append_to_log=False)` primitive (same scoring as a real trial). Mode B = explicit engineering-real vector; Mode A = a checkpoint point (best by argmax, or a given index). PDK-gated; isolated output subfolder (`outdir/manual_sim`) so it can't clobber a live run. UI: `ManualSimPanel` in OptimizeTab. Do **not** route this through `parameterize()`/`ask()` (that sims a *random* point — the `sanity.py` gap).
+
+**`dut_param.freeze` defaults to `False`**: an omitted `freeze` key means "optimize this param" — matching the wizard default and the historical sweep-everything behavior. Set `freeze: true` to exclude a param from the search space (`NevergradMixin.parameterize` skips it and injects its `val`/`init`, if given). `Project_Setup.from_yaml()` now also **rejects duplicate `dut_param` names** (they previously collapsed silently to one search dimension). The `freeze_to: <value>` YAML key is still parsed-but-ignored — wiring it up is deferred with the Phase 2 multi-corner work (PVT Phase 1 single-corner has landed; see the PVT note above).
 
 **App-Router typed routes**: `next.config.mjs` sets `typedRoutes: true`, so `router.push("/foo")` needs `"/foo" as Route` (import `type { Route } from "next"`).
 
@@ -128,4 +132,8 @@ Five Zustand stores hold cross-view state: `projectStore` (loaded/applied projec
 | Live-run SSE / run history | `ui/src/stores/runStore.ts` |
 | Demo preset checkpoints | `ui/app_config.json` (repo-root-relative paths) |
 | Reference optimization run | `examples/OTA/cascode/ihp-sg13g2/sizing/nevergrad_single_obj_opt.py` |
+| PVT corner schema / apply | `src/spicexplorer/core/domains.py` (`PVTConfig`, `_normalize_pvt_block`) + `spice_engine/spicelib.py` (`apply_corner`) |
+| PVT corner UI | `ui/src/components/pvt/` (`CornerSelect`, `ManualSimPanel`) + `lib/pvt.ts` |
+| Manual single sim | `ui/backend/routes/simulate.py` + `ui/src/components/pvt/ManualSimPanel.tsx` |
+| PVT design + Phase 2 plan | `PVT_plan.md` |
 | Full Studio migration plan | `doc/PLAN_STUDIO_INTEGRATION.md` |

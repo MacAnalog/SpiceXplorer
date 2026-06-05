@@ -1,5 +1,22 @@
 # PVT Corner System — Design & Implementation Plan
 
+> **✅ STATUS — Phase 1 + Manual Sim IMPLEMENTED (branch `feat/pvt`).** Corners now
+> drive the simulation against a single `active_corner`; the manual-sim feature ships.
+> Phase 2 (multi-corner aggregation) remains deferred research. What landed:
+> - **Core:** `ModelInclude`/`SupplyOverride`/`Corner`/`PVTConfig` + `Project_Setup.pvt`;
+>   `_normalize_pvt_block` desugars the YAML (`process_bundles`, singular `supply`).
+> - **Engine:** `NGSpice_Wrapper.apply_corner()` (strip+inject `.lib`, `.options temp=`,
+>   supply `.param`) — the only ngspice-specific seam; applied once in
+>   `Spice_Base_Optimizer.__post_init__`.
+> - **Backend:** `pvt` in the project summary; ephemeral `active_corner` override on
+>   live runs + sanity; `POST /api/simulate/once` (manual evaluate-a-point).
+> - **UI:** `CornerSelect` in the Run popover / Optimize toolbar / Health check;
+>   `ManualSimPanel` in Optimize; PVT in the Pipeline DAG, Setup summary, and the wizard.
+> - **Tests:** `tests/test_pvt_corner.py`, `tests/test_pvt_wizard_roundtrip.py`.
+>
+> Anchors/line-numbers below are from the original audit (commit `a11aa05`) and may have
+> shifted; they remain accurate as *locations*, not exact lines.
+
 **Scope:** Make process/voltage/temperature (PVT) corners first-class so they actually drive SPICE simulation, replacing today's dead `pvt_map` / unused `pvt_corners` config. Phase 1 (this round) runs the optimizer against **one chosen corner**; Phase 2 (deferred research) runs the full **testbench × corner** cross-product and aggregates. A shorter companion section folds in the **manual-simulation** feature, which shares the same sim infrastructure.
 
 All claims are grounded in the code paths read during this audit; every anchor is a clickable `file:line` link relative to the repo root.
