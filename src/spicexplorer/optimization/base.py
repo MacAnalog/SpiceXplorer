@@ -465,6 +465,12 @@ class Spice_Base_Optimizer(Base_Optimizer):
         # Update the tb parameters
         # ----------------------------------------
         for tb in self.setup_obj.testbenches:
+            # Wrappers are built only for ENABLED testbenches (orchestrator /
+            # _build_spicelib_wrappers skip disabled ones), but this list includes
+            # disabled testbenches too — indexing a missing wrapper would raise
+            # KeyError. Skip any testbench without a wrapper.
+            if tb.name not in self.spicelib_wrappers:
+                continue
             tb_params = {param.name : param.get_val() for param in tb.params if param.has_val()}
             if tb_params:
                 logger.info(f"updating the parameters for testbench {tb.name} with the following values:")

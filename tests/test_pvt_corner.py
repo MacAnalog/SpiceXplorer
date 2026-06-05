@@ -12,10 +12,11 @@ IHP PDK:
     simulation run.
 """
 import re
+from pathlib import Path
 
 import pytest
 
-from conftest import REPO_ROOT
+from conftest import REPO_ROOT, requires_ngspice
 
 from spicexplorer.core.domains import (
     Project_Setup,
@@ -26,6 +27,7 @@ from spicexplorer.core.domains import (
 
 FC_YAML = REPO_ROOT / "examples/OTA/folded_cascode/ihp-sg13g2/sizing/project_setup.yaml"
 FC_TB_NETLIST = REPO_ROOT / "examples/OTA/folded_cascode/ihp-sg13g2/spice/cora_testbench.spice"
+CASCODE_YAML = REPO_ROOT / "examples/OTA/cascode/ihp-sg13g2/sizing/project_setup.yaml"
 
 
 # ── parsing / desugaring ────────────────────────────────────────────────────
@@ -133,6 +135,37 @@ def test_apply_corner_mutates_netlist(tmp_path):
     assert re.search(r"\.options?\s+temp\s*=\s*125", joined)
     # supply override applied to the .param
     assert abs(float(w.editor.get_parameter("VDD")) - 1.62) < 1e-9
+
+
+@requires_ngspice
+def test_post_init_skips_testbenches_without_a_wrapper(tmp_path):
+    """Regression: `Spice_Base_Optimizer.__post_init__` iterates ALL testbenches but
+    wrappers are built only for ENABLED ones — indexing a missing wrapper raised
+    KeyError (e.g. a project with a disabled testbench). It must skip instead.
+
+    Reproduced on the cascode example by omitting one wrapper, so the test does not
+    depend on any project's `enable` flags or on a real simulation.
+    """
+    from spicexplorer.spice_engine.spicelib import NGSpice_Wrapper
+    from spicexplorer.optimization.stochastic.nevergrad import Nevergrad_Spice_Single_Objective
+
+    p = Project_Setup.from_yaml(CASCODE_YAML)
+    enabled = [tb for tb in p.testbenches if tb.enable]
+    assert len(enabled) >= 2, "need at least two enabled testbenches to omit one"
+
+    # Build wrappers for all but the last enabled testbench → it has no wrapper,
+    # exactly like a disabled testbench would.
+    wrappers = {}
+    for tb in enabled[:-1]:
+        wrappers[tb.name] = NGSpice_Wrapper(
+            testbench_name=tb.name,
+            netlist_filename=Path(p.ws_root) / Path(tb.netlist),
+            output_folder=tmp_path / f"out_{tb.name}",
+        )
+
+    # __post_init__ runs here; previously KeyError on the omitted testbench.
+    opt = Nevergrad_Spice_Single_Objective(setup_obj=p, spicelib_wrappers=wrappers)
+    assert set(opt.spicelib_wrappers) == set(wrappers)
 
 
 @pytest.mark.skipif(not FC_TB_NETLIST.exists(), reason="folded_cascode testbench netlist missing")
