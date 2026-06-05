@@ -138,3 +138,100 @@ Things get crowded once a project has 10+ params and 6+ specs. Reduce clutter wi
 - [ ] **Export entire run report**: a "Download report" button on the Optimize and Explorer tabs that packages the YAML + JSON checkpoint + all chart PNGs + a summary markdown into a single zip. Useful for sharing post-run.
 - [x] **Recent runs sidebar**: Done — the run-centric left rail (`shell/rails/RunsRail.tsx`) lists `runStore.history` (replays + live) with score sparklines and a click-to-load (`rerun`) action, plus checkpoint resume/delete. Backed by `runStore.history` persisted to localStorage.
 - [ ] **Validation error inline highlighting in Monaco**: the YAML editor already validates with a 600 ms debounce; surface errors as Monaco markers (red squiggles) with hover tooltips, not just a panel below.
+
+---
+
+## 11. Bug fixes — functional audit (2026-06)
+
+Actionable list from the audit. Full per-bug location / root cause / fix direction in [bug_report.md](bug_report.md) (IDs match). 39 confirmed (17 major, 22 minor); the two pre-flagged regressions lead.
+
+### Flagged regressions
+- [ ] **BUG-01** · `ui/backend/routes/xschem.py` — Schematic symbols all render as red "?" placeholders under Docker: PDK xschem libs and xschem binary absent, so…
+- [ ] **BUG-02** · `ui/src/components/tabs/ScoreShapingTab.tsx` — Score Shaping aggregate F(x) reflects only the selected spec, not all configured specs
+
+### Major
+- [ ] **BUG-03** · `ui/src/components/tabs/SetupTab.tsx` — Applying uploaded/edited YAML leaves yamlPath empty: Optimize and Sensitivity silently target the DEFAULT cascode project…
+- [ ] **BUG-07** · `ui/backend/services/yaml_generator.py` — Wizard target spec with blank Range silently coerces to nan, poisoning optimization penalty/reward normalization
+- [ ] **BUG-09** · `ui/src/stores/runStore.ts` — Live-run SSE error events are silently dropped — user never sees why a run died
+- [ ] **BUG-12** · `ui/src/stores/runStore.ts` — EventSource onerror unconditionally finishes the run and cancels reconnect, orphaning the backend optimizer thread
+- [ ] **BUG-17** · `ui/src/components/tabs/ExplorerTab.tsx` — Deselecting run A (or B) and clicking "Load both" leaves the stale run rendering (no clear path in loadBoth)
+- [ ] **BUG-18** · `ui/src/components/tabs/ExplorerTab.tsx` — Explorer scatter X/Y and selectedMetric default to hardcoded cascode metric names and are never reconciled against the loaded…
+- [ ] **BUG-22** · `ui/src/components/schematic/SchematicViewer.tsx` — Symbol text labels mis-anchored on rotated instances (transformPoint rotates opposite to instanceTransform)
+- [ ] **BUG-26** · `ui/src/components/tabs/ScoreShapingTab.tsx` — Score Shaping deep-link permanently locks the spec dropdown — every dropdown pick snaps back to the deep-linked spec
+- [ ] **BUG-27** · `ui/src/components/shell/RightRail.tsx` — Right rail "best score" uses Math.min over a max-tracking best_score series, showing the worst (first) best-so-far
+- [ ] **BUG-32** · `src/spicexplorer/core/domains.py` — OptimizationLog mutable default list is shared across all default-constructed instances, leaking trials between…
+- [ ] **BUG-33** · `ui/backend/routes/score.py` — score.py _project_cache never invalidated — /api/score returns stale spec values after the on-disk YAML changes
+- [ ] **BUG-35** · `src/spicexplorer/core/domains.py` — from_yaml silently drops unrecognized YAML keys (dacite strict=False): freeze_to, pvt_corner name/enable, and tech_spec.pvt_map…
+- [ ] **BUG-36** · `ui/backend/services/optimizer_runner.py` — Live-run SSE best_params are optimizer-space (normalized) values, not physical — inconsistent with checkpoints/resume/replay…
+- [ ] **BUG-37** · `src/spicexplorer/optimization/base.py` — Omitted target_spec `range` becomes NaN normalizing_coeff and poisons every score in the library evaluate/sanity path…
+- [ ] **BUG-39** · `src/spicexplorer/optimization/stochastic/nevergrad.py` — Nevergrad parameterize() ignores Param.freeze — frozen params are still swept as free optimization variables
+
+### Minor
+- [ ] **BUG-04** · `ui/backend/services/yaml_generator.py` — Wizard parse-to-form defaults omitted `freeze` to False, contradicting the library's `freeze=True` dataclass default
+- [ ] **BUG-05** · `ui/src/components/wizard/optimizer-registry.ts` — Nevergrad "configurable family" optimizers (SamplingSearch, DifferentialEvolution) are unselectable in the wizard dropdown though…
+- [ ] **BUG-06** · `ui/src/components/wizard/steps/DutParamsStep.tsx` — Duplicate DUT param names silently collapse to one search dimension (no uniqueness validation in load/wizard/parameterize)
+- [ ] **BUG-08** · `ui/backend/services/netlist_parser.py` — Netlist .param parser does not strip ngspice `$` inline comments (but `;` IS handled, contrary to the claim)
+- [ ] **BUG-10** · `ui/src/components/tabs/OptimizeTab.tsx` — Score function toggle (sigmoid/linear) in Optimize toolbar is a dead control
+- [ ] **BUG-11** · `ui/backend/services/optimizer_runner.py` — _run_replay has no try/finally — a corrupt/unparseable checkpoint never sends the done sentinel, leaving the UI stuck "running"
+- [ ] **BUG-13** · `ui/backend/services/optimizer_runner.py` — RunState entries accumulate forever in the module-level _runs registry (unbounded growth)
+- [ ] **BUG-14** · `ui/src/components/shell/rails/RunsRail.tsx` — History replay click in RunsRail orphans the active run (no isRunning guard, no stopRun on prior run)
+- [ ] **BUG-15** · `ui/src/components/tabs/OptimizeTab.tsx` — Replay progress shows the live-run budget (default 200) instead of the checkpoint length
+- [ ] **BUG-16** · `ui/src/components/tabs/ExplorerTab.tsx` — Metric-scatter colors runs by array position, so run B renders in run A's indigo when A has no scatter points
+- [ ] **BUG-19** · `ui/backend/services/checkpoint_reader.py` — read_json_checkpoint assumes every fit_summary value is a {curr_val} dict; bare-float fit_summary from the Bode SPICE optimizer…
+- [ ] **BUG-20** · `ui/src/components/tabs/ExplorerTab.tsx` — Unbounded full-resolution checkpoint/scatter payloads spread into Math.min(...)/Math.max(...) and Plotly — RangeError + memory…
+- [ ] **BUG-21** · `ui/src/components/tabs/ExplorerTab.tsx` — Envelope 'winner' awards ties to B and labels a winner when only one run is loaded
+- [ ] **BUG-23** · `ui/src/lib/xschem/parser.ts` — parseAttrs does not skip whitespace around '=', mis-parsing spaced key/value attrs like {dash = 4}
+- [ ] **BUG-24** · `ui/src/components/tabs/SchematicTab.tsx` — Stale-response race: rapid schematic navigation via the "Open" dropdown can let an earlier load clobber a later one
+- [ ] **BUG-25** · `ui/src/components/schematic/DeviceInspector.tsx` — Inspector slider 'nominal' default (range midpoint) can disagree with the backend's simulated baseline (_nominal prefers val/init)
+- [ ] **BUG-28** · `ui/src/components/tabs/HealthTab.tsx` — Health check drops the backend's "PDK missing" verdict
+- [ ] **BUG-29** · `ui/backend/routes/optimize.py` — Backend /optimize/start has no server-side PDK/live-runs guard; gating is client-only
+- [ ] **BUG-30** · `ui/src/components/tabs/ScoreShapingTab.tsx` — Deep-linking a disabled (enable:false) spec into Score Shaping silently no-ops
+- [ ] **BUG-31** · `ui/src/components/overlays/CommandPalette.tsx` — ⌘K "Jump to run" only highlights the rail row; no center view consumes selectedRunId, so the deep-link loads nothing
+- [ ] **BUG-34** · `src/spicexplorer/core/domains.py` — from_yaml silently accepts duplicate dut_param names (no uniqueness validation; example YAML defines x_dut_Vb1 twice)
+- [ ] **BUG-38** · `src/spicexplorer/core/domains.py` — DutParams.get_frozen_params does float(p.init) with no None-guard; crashes on default params (dead code)
+
+## 12. Manual simulation feature
+
+Run all enabled testbenches once for a chosen DUT-param vector, reusing the optimizer's sim infra at run-count 1. Full design in [PVT_plan.md](PVT_plan.md) §"Part B — Manual simulation feature".
+
+- [ ] **Backend route** `POST /api/simulate/once` in `ui/backend/routes/simulate.py` (sibling of `sanity.py`): load project, build wrappers, instantiate `Nevergrad_Spice_Single_Objective`, call `evaluate(params, append_to_log=False)` (`optimization/base.py:837`) — do **not** call `parameterize()`/`_create_optimizer_obj()`/`optimization_step()` (those `ask()` a random point).
+- [ ] Promote `_build_spicelib_wrappers` to a shared helper (currently mirrored in `optimizer_runner.py` and `sanity.py:110-125`); reuse `probe_pdk` + `_tail_log` + `run_in_executor` from `sanity.py`.
+- [ ] Register router in `ui/backend/main.py`; add `simulateOnce()` to `ui/src/lib/api.ts` + `SimulateOnceResponse` to `ui/src/types/api.ts`.
+- [ ] **Mode A — load from prior result**: accept `{checkpoint_id, point}`, resolve via `_resolve_checkpoint_path` + `read_checkpoint`; stored params are already engineering-real → feed `evaluate` with no transform. Default to best point (argmax of `scores`).
+- [ ] **Mode B — manual values**: accept `{params}`; pre-fill a form from `project.dut_params` using `Param.init` as default + `min_val`/`max_val` hints; partial dicts allowed (unset params keep netlist defaults). Range-check against bounds; respect `is_integer` and the `C*`/`R*` suffix convention.
+- [ ] **UI**: collapsible "Manual Sim / Evaluate Point" panel in `OptimizeTab` (PDK-gated like live Start); `Segmented` source toggle (checkpoint | manual); per-spec result table (value vs target, pass/fail, score) + total score + per-testbench log tails; optional "Send to Score Shaping".
+- [ ] **Interface gaps to close** (optional but clean): add a `Base_Optimizer.simulate_point(params)` façade; give manual-sim wrappers a distinct output subfolder (`outdir/manual_sim`) so they don't clobber a live run's outputs (`_validate` rmtrees `output_folder`).
+
+## 13. PVT corners — Phase 1 (single chosen corner)
+
+Make corners first-class and actually drive the sim against **one** active corner; the optimizer loop, scorer, and per-trial flow stay untouched. Full design + exact change list in [PVT_plan.md](PVT_plan.md) §"Phase 1". (Note: `tech_spec.pvt_map` and the flat `pvt_corners` are currently **dead config** — silently dropped by non-strict dacite; no `.lib`/temp/supply injection exists today.)
+
+- [ ] **Config schema**: add a top-level `pvt:` block (`active_corner`, reusable `process_bundles`, `corners[]` = process includes + temp + supply + params, `enabled`). Subsumes/replaces `pvt_map` + `pvt_corners`; keep a back-compat shim. See the copy-pasteable YAML in PVT_plan.md.
+- [ ] **`core/domains.py`**: add `ModelInclude` / `SupplyOverride` / `Corner` / `PVTConfig` dataclasses; add `pvt: Optional[PVTConfig] = None` to `Project_Setup`; in `from_yaml()` pre-expand each corner's `process:` bundle into `model_includes` before `safe_from_dict`. Leave `TechSpec`/`PVT`/`pvt_corners` as-is (no regression).
+- [ ] **`spice_engine/spicelib.py`**: add `NGSpice_Wrapper.apply_corner(corner)` — strip the hardcoded `.lib` line (`remove_Xinstruction`), add the ordered cross-family `.lib <file> <section>` includes (`add_instruction`), emit `.options temp=<t>`, and `set_parameter` for supply/extra params. Isolate all ngspice-specific syntax here (PDK-agnostic seam).
+- [ ] **`optimization/base.py`**: in `Spice_Base_Optimizer.__post_init__()` (the existing one-time tb-param setup, ~`:463-475`) apply the active corner once to each enabled testbench wrapper, before the loop. Persists across trials via `SpiceEditor` state.
+- [ ] **UI (optional, ephemeral)**: surface `pvt.active_corner` + corner list in `routes/project.py`; let `optimizer_runner._apply_overrides` accept an ephemeral `active_corner` override (in-memory, never rewrite YAML) → gives "switch to a defined corner" for free.
+- [ ] **Stays untouched**: nevergrad/Ax optimizer classes, `optimization_step`, `optimize()`, `simulate_circuit`, `evaluate`, `compute_fitness*`, `core/utils` error/reward fns, checkpoint schema, charts.
+
+## 14. PVT corners — Phase 2 (DEFERRED / research)
+
+> **Deferred — not scheduled this round.** Once corners drive a single sim (Phase 1), run the full **testbench × corner** cross-product and collapse **N corner-scores into one scalar** the optimizer consumes. The open research question is the aggregation strategy — candidates: worst-case/min, weighted mean, sum-of-penalties, must-pass-all (constraint), or Pareto/multi-objective (Ax). No strategy is committed. Secondary deferred items: where the corner loop lives, `parallel_sim` fan-out (N× ngspice processes), and `{corner}::{spec}` checkpoint key namespacing (+ the dotted-column `.iterrows()` caveat). See [PVT_plan.md](PVT_plan.md) §"Phase 2".
+
+## 15. UI layout fixes (CSS / overflow / scroll)
+
+From the layout audit — full per-tab findings + global root causes in [ui_layout_report.md](ui_layout_report.md).
+
+- [ ] **RC-1/RC-2 (biggest leverage)**: add `w-full min-w-0` to `inputCn`/`selectCn` (`wizard-controls.tsx`, `select.tsx`) and `min-w-0` to `Field` — one edit fixes horizontal overflow in PVT, PDK Rules, Testbenches, Basic Info, and Target Specs wizard steps (incl. the reported PVT Supply-column clip).
+- [ ] **RC-4**: apply the `Toolbar` pattern (`flex-nowrap overflow-x-auto whitespace-nowrap [&>*]:shrink-0`) to `TabStrip` and `StatusBar` so labels don't wrap/overflow on a narrow center column.
+- [ ] **RC-3**: add `min-w-0` to truncating spans + `shrink-0` to fixed siblings in `StudioLeftRail` and `StatusBar` so long project names ellipsize.
+- [ ] **Sanity Check "clipped-no-scroll"**: source height/scroll chain is intact — most likely a stale `ui/.next` build. Delete `ui/.next` and rebuild before changing CSS; optionally switch the HealthTab body to `overflow-y-auto` for intent clarity.
+
+## 16. Redundancy cleanup (low-risk first)
+
+From the redundancy survey — full list + risk ratings in [project_redundancy.md](project_redundancy.md).
+
+- [ ] Delete unused `formatNumber` (`lib/utils.ts`); remove dead `uiStore` fields (`compareRunA`/`compareRunB`/`setCompare`/`setSelectedRunId`); collapse the one-tab `bottomTab` abstraction.
+- [ ] Consolidate `_safe_float` (4 copies) into one helper; have `config.py` call `_infer_score_fn` (fixes the existing `"linear"` divergence vs `checkpoint.py`).
+- [ ] Extract `_target_specs_from_yaml` in `checkpoint.py` and an inner penalty helper in `score_service.py`; extract one `goalSym` helper (`lib/utils.ts`) with a canonical glyph set; route all FE pass/fail through `statusForGoal` (deliberate tolerance-honoring behavior change).
+- [ ] Fix the duplicate `x_dut_Vb1` in the example YAML (→ `x_dut_Vb2` after checking the netlist bias nodes); resolve the always-empty `CheckpointMeta.n_iters` branch.
+- [ ] **Decide (needs sign-off)**: fate of `demo/newcas_demo_runner.py` and the `optimization/rl/` subtree — both dead relative to the webapp but carry dependent tests.
