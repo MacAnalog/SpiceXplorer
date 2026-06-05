@@ -21,6 +21,25 @@ def _infer_score_fn(path: Path) -> str:
     return "unknown"
 
 
+def _target_specs_from_yaml(yaml_path: str) -> list[dict[str, Any]] | None:
+    """Load a project's target specs as plain dicts for envelope/scatter feasibility.
+
+    Returns None when no path is given or the project fails to load.
+    """
+    if not yaml_path:
+        return None
+    from spicexplorer.core.domains import Project_Setup
+    try:
+        project = Project_Setup.from_yaml(Path(yaml_path))
+    except Exception:
+        return None
+    return [
+        {"name": s.name, "target": float(s.target), "goal": s.goal.value,
+         "tolerance": float(s.tolerance) if s.tolerance else None}
+        for s in project.optimizer_config.target_specs.targets
+    ]
+
+
 def _resolve_checkpoint_path(checkpoint_id: str) -> Path | None:
     """Resolve a checkpoint id to a file on disk.
 
@@ -123,27 +142,12 @@ def delete_checkpoint(checkpoint_id: str):
 
 @router.get("/checkpoint/{checkpoint_id}/envelope")
 def checkpoint_envelope(checkpoint_id: str, yaml_path: str = Query(default="")):
-    from pathlib import Path as _Path
-    from spicexplorer.core.domains import Project_Setup
-
     path = _resolve_checkpoint_path(checkpoint_id)
     if path is None:
         raise HTTPException(404, f"Checkpoint '{checkpoint_id}' not found")
 
     data = read_checkpoint(path)
-
-    target_specs = None
-    if yaml_path:
-        try:
-            project = Project_Setup.from_yaml(_Path(yaml_path))
-            target_specs = [
-                {"name": s.name, "target": float(s.target),
-                 "goal": s.goal.value, "tolerance": float(s.tolerance) if s.tolerance else None}
-                for s in project.optimizer_config.target_specs.targets
-            ]
-        except Exception:
-            pass
-
+    target_specs = _target_specs_from_yaml(yaml_path)
     return {"envelope": compute_envelope(data, target_specs)}
 
 
@@ -154,26 +158,11 @@ def checkpoint_scatter(
     metric_y: str = Query(...),
     yaml_path: str = Query(default=""),
 ):
-    from pathlib import Path as _Path
-    from spicexplorer.core.domains import Project_Setup
-
     path = _resolve_checkpoint_path(checkpoint_id)
     if path is None:
         raise HTTPException(404, f"Checkpoint '{checkpoint_id}' not found")
 
     data = read_checkpoint(path)
-
-    target_specs = None
-    if yaml_path:
-        try:
-            project = Project_Setup.from_yaml(_Path(yaml_path))
-            target_specs = [
-                {"name": s.name, "target": float(s.target),
-                 "goal": s.goal.value, "tolerance": float(s.tolerance) if s.tolerance else None}
-                for s in project.optimizer_config.target_specs.targets
-            ]
-        except Exception:
-            pass
-
+    target_specs = _target_specs_from_yaml(yaml_path)
     points = compute_scatter(data, metric_x, metric_y, target_specs)
     return {"metric_x": metric_x, "metric_y": metric_y, "points": points}

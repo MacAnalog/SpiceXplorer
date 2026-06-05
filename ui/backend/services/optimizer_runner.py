@@ -4,26 +4,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import math
 import threading
-import time
 import traceback
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from spicexplorer.core.domains import Project_Setup
+from ui.backend.services.num import safe_float as _safe_float
 
 logger = logging.getLogger(__name__)
-
-
-def _safe_float(v: Any) -> float | None:
-    try:
-        x = float(v)
-        return x if math.isfinite(x) else None
-    except (TypeError, ValueError):
-        return None
 
 
 @dataclass
@@ -46,6 +36,14 @@ class RunState:
 
 
 _runs: dict[str, RunState] = {}
+
+
+def _prune_finished_runs() -> None:
+    """Evict completed runs so the registry doesn't grow unbounded in a long-lived
+    backend. A run is safe to drop once its stream has ended (state.done is set
+    after the None sentinel is queued and the SSE generator has broken its loop)."""
+    for rid in [rid for rid, st in _runs.items() if st.done]:
+        _runs.pop(rid, None)
 
 
 # ---------- live optimizer ----------
@@ -136,7 +134,13 @@ def _streaming_optimizer_class(state: RunState):
             fit = metadata if isinstance(metadata, dict) else {}
             if sval is not None and (self._best_score is None or sval > self._best_score):
                 self._best_score = sval
-                self._best_params = {k: _safe_float(v) for k, v in params.items()}
+                # `params` is candidate.value in optimizer (normalized) space;
+                # denormalize to physical values so the streamed best_params match
+                # the checkpoint/resume/replay representation (which is physical).
+                phys = self.denormalize_params(params)
+                if getattr(self, "_frozen_params", None):
+                    phys = {**phys, **self._frozen_params}
+                self._best_params = {k: _safe_float(v) for k, v in phys.items()}
                 self.global_best_index = len(self.optimization_log) - 1
             _emit({
                 "iter": self._abs_iter,
@@ -281,31 +285,38 @@ async def _run_replay(state: RunState, checkpoint_path: Path) -> None:
     """Drip-feed CSV/JSON trace rows as SSE events at ~50ms per event."""
     from ui.backend.services.checkpoint_reader import read_checkpoint
 
-    data = read_checkpoint(checkpoint_path)
-    scores = data["scores"]
-    best_scores = data["best_scores"]
-    per_metric = data["per_metric"]
-    params = data["params"]
-    metric_names = list(per_metric.keys())
-    param_names = list(params.keys())
+    try:
+        data = read_checkpoint(checkpoint_path)
+        scores = data["scores"]
+        best_scores = data["best_scores"]
+        per_metric = data["per_metric"]
+        params = data["params"]
+        metric_names = list(per_metric.keys())
+        param_names = list(params.keys())
 
-    for i, (s, bs) in enumerate(zip(scores, best_scores)):
-        if state.stop_event.is_set():
-            break
-        metrics = {m: per_metric[m][i] for m in metric_names if i < len(per_metric[m])}
-        best_p = {p: params[p][i] for p in param_names if i < len(params[p])}
-        event = {
-            "iter": i,
-            "score": s,
-            "best_score": bs,
-            "metrics": metrics,
-            "best_params": best_p,
-        }
-        await state.queue.put(event)
-        await asyncio.sleep(0.05)
-
-    state.done = True
-    await state.queue.put(None)
+        for i, (s, bs) in enumerate(zip(scores, best_scores)):
+            if state.stop_event.is_set():
+                break
+            metrics = {m: per_metric[m][i] for m in metric_names if i < len(per_metric[m])}
+            best_p = {p: params[p][i] for p in param_names if i < len(params[p])}
+            event = {
+                "iter": i + 1,  # 1-based, consistent with the live run's iter counter
+                "score": s,
+                "best_score": bs,
+                "metrics": metrics,
+                "best_params": best_p,
+            }
+            await state.queue.put(event)
+            await asyncio.sleep(0.05)
+    except Exception as e:
+        # Without this, a corrupt/unparseable checkpoint would unwind before the
+        # done-sentinel, leaving the SSE stream heartbeating forever and the UI
+        # stuck "running". Surface the error and always close the stream.
+        logger.error("[run %s] replay error: %s\n%s", state.run_id[:8], e, traceback.format_exc())
+        await state.queue.put({"error": str(e)})
+    finally:
+        state.done = True
+        await state.queue.put(None)
 
 
 # ---------- public API ----------
@@ -323,6 +334,7 @@ def start_run(
     resume_path: str | None = None,
     loop: asyncio.AbstractEventLoop,
 ) -> str:
+    _prune_finished_runs()  # keep the registry bounded across many runs
     run_id = str(uuid.uuid4())
     queue: asyncio.Queue = asyncio.Queue()
     state = RunState(

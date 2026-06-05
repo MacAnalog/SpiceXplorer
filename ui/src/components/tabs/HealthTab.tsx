@@ -151,6 +151,12 @@ export function HealthTab() {
                       · {result.ngspice_path}
                     </span>
                   )}
+                  {result.pdk_ok === false && (
+                    <span className="rounded bg-warn-soft px-1.5 py-0.5 font-mono text-[10px] text-[#b45309]">
+                      PDK missing — replay only
+                      {result.pdk_detail ? ` · ${result.pdk_detail}` : ""}
+                    </span>
+                  )}
                 </div>
                 {result.error && (
                   <p className="mt-2 rounded bg-danger-soft px-2 py-1 font-mono text-[11px] text-danger">

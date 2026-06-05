@@ -15,7 +15,7 @@ _PARAM_LINE = re.compile(
     r"""^\s*\.param\s+         # directive
         ([A-Za-z_][A-Za-z0-9_]*) # capture name
         \s*=\s*
-        ([^\s*;]+)               # capture value (stop at comment marker / whitespace)
+        ([^\s*;$]+)              # capture value (stop at whitespace, `*`/`;`/`$` comment markers)
     """,
     re.IGNORECASE | re.VERBOSE,
 )

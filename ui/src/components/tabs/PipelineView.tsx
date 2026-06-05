@@ -175,13 +175,17 @@ export function PipelineView() {
               <Node
                 key={s.name}
                 title={s.name}
-                subtitle={`${goalSym(s.goal)} ${formatEng(s.target)}${v != null ? ` · now ${formatEng(v)}` : ""}`}
+                subtitle={`${goalSym(s.goal)} ${formatEng(s.target)}${s.enable ? (v != null ? ` · now ${formatEng(v)}` : "") : " · disabled"}`}
                 tone={pass == null ? "default" : pass ? "ok" : "fail"}
-                title2="Open in Score Shaping"
-                onClick={() => {
-                  setSelectedSpec(s.name);
-                  router.push("/scoring" as Route);
-                }}
+                title2={s.enable ? "Open in Score Shaping" : "Disabled — not in the objective"}
+                onClick={
+                  s.enable
+                    ? () => {
+                        setSelectedSpec(s.name);
+                        router.push("/scoring" as Route);
+                      }
+                    : undefined
+                }
               />
             );
           })}

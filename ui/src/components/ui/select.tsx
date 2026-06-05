@@ -10,7 +10,10 @@ type SelectSize = keyof typeof sizeStyles;
 
 export function selectCn(selectSize: SelectSize = "sm") {
   return cn(
-    "rounded border border-border bg-panel px-2 text-fg",
+    // min-w-0 lets a select shrink inside a flex/grid track (toolbar items are
+    // shrink-0 so they're unaffected). No w-full here — that would stretch
+    // toolbar selects to fill the row.
+    "min-w-0 rounded border border-border bg-panel px-2 text-fg",
     sizeStyles[selectSize],
     "focus:outline-none focus:ring-1 focus:ring-primary",
     "disabled:bg-hairline disabled:text-faint disabled:opacity-60",

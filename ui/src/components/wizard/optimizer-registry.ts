@@ -10,6 +10,14 @@ export interface AlgorithmGroup {
 
 export const NEVERGRAD_REGISTRY: AlgorithmGroup[] = [
   {
+    // Configurable-family classes (resolved via ng.families). These take
+    // optimizer_kwargs; the shipped folded_cascode example uses SamplingSearch.
+    // (ParametrizedCMA / ConfPSO / ParametrizedOnePlusOne / ParametrizedBO are
+    // listed under their own groups below.)
+    label: "Configurable Families",
+    items: ["DifferentialEvolution", "SamplingSearch"],
+  },
+  {
     label: "Differential Evolution",
     items: [
       "DE", "TwoPointsDE", "OnePointDE", "LhsDE",

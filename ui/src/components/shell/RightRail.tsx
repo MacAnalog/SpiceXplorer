@@ -23,10 +23,14 @@ export function RightRail() {
 
   const bestScore = useMemo(() => {
     if (!events.length) return "—";
-    const vals = events
-      .map((e) => e.best_score ?? e.score ?? Infinity)
-      .filter((v) => Number.isFinite(v));
-    return vals.length ? formatEng(Math.min(...vals)) : "—";
+    // best_score is a running maximum (higher is better). Use the maximum
+    // (== the final value), not Math.min which returned the first/worst. Reduce
+    // instead of spreading to avoid a stack overflow on long runs.
+    const best = events.reduce((m, e) => {
+      const v = e.best_score ?? e.score;
+      return v != null && Number.isFinite(v) && v > m ? v : m;
+    }, -Infinity);
+    return Number.isFinite(best) ? formatEng(best) : "—";
   }, [events]);
 
   const specStatuses = useMemo(() => {

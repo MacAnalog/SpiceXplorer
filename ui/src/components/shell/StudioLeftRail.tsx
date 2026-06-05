@@ -23,9 +23,9 @@ export function StudioLeftRail() {
     <aside className="flex w-[200px] shrink-0 flex-col border-r border-border bg-panel text-xs">
       <div className="shrink-0 border-b border-border p-3">
         <RailHeading>Project</RailHeading>
-        <div className="flex items-center justify-between rounded px-1.5 py-1 text-fg">
-          <span className="truncate">{summary?.name ?? "no project"}</span>
-          <span className="font-mono text-[10px] text-muted">
+        <div className="flex items-center justify-between gap-2 rounded px-1.5 py-1 text-fg">
+          <span className="min-w-0 truncate">{summary?.name ?? "no project"}</span>
+          <span className="shrink-0 font-mono text-[10px] text-muted">
             {isApplied ? "active" : "draft"}
           </span>
         </div>

@@ -57,6 +57,11 @@ def _summarise(project: Project_Setup) -> dict[str, Any]:
             "name": p.name,
             "min_val": float(p.min_val) if p.min_val is not None else None,
             "max_val": float(p.max_val) if p.max_val is not None else None,
+            # Resolved operating-point value (if the YAML set val/init), so the
+            # Schematic inspector seeds its slider from the same nominal the
+            # sensitivity backend uses. Non-numeric (unresolved) -> None.
+            "val": float(p.val) if isinstance(p.val, (int, float)) else None,
+            "init": float(p.init) if isinstance(p.init, (int, float)) else None,
             "is_integer": p.is_integer,
             "log_scale": p.log_scale,
             "freeze": p.freeze,
@@ -111,16 +116,21 @@ def load_project(body: LoadRequest):
     if body.yaml_content:
         import os
         import tempfile
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
+        # Persist the uploaded/edited YAML to a real path and RETURN that path, so
+        # every path-keyed endpoint (optimize/score/sanity/sensitivity) resolves to
+        # THIS project. Previously this returned yaml_path="", which made a live run
+        # silently optimize the default cascode example instead of the applied YAML.
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False, prefix="spx_uploaded_"
+        ) as tmp:
             tmp.write(body.yaml_content)
             tmp_path = tmp.name
         try:
             project = Project_Setup.from_yaml(tmp_path)
-            return {"ok": True, "summary": _summarise(project), "yaml_path": ""}
+            return {"ok": True, "summary": _summarise(project), "yaml_path": tmp_path}
         except Exception as e:
-            raise HTTPException(status_code=422, detail=str(e))
-        finally:
             os.unlink(tmp_path)
+            raise HTTPException(status_code=422, detail=str(e))
 
     if not body.yaml_path:
         raise HTTPException(status_code=400, detail="Provide yaml_path or yaml_content")
@@ -162,7 +172,8 @@ def validate_yaml(body: ValidateRequest):
         return {"ok": False, "errors": [f"YAML parse error: {e}"]}
 
     # Write to a temp file and try full parse
-    import tempfile, os
+    import tempfile
+    import os
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
         tmp.write(body.yaml_content)
         tmp_path = tmp.name
@@ -206,7 +217,8 @@ def generate_project(body: GenerateRequest):
 
     # Best-effort validation; surface errors but still return the rendered YAML
     errors: list[str] = []
-    import tempfile, os
+    import tempfile
+    import os
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
         tmp.write(yaml_text)
         tmp_path = tmp.name

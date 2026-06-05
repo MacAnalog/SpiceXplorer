@@ -4,6 +4,9 @@ export interface DutParam {
   name: string;
   min_val: number | null;
   max_val: number | null;
+  /** Explicit operating-point value (matches the backend sensitivity nominal). */
+  val?: number | null;
+  init?: number | null;
   is_integer: boolean;
   log_scale: boolean;
   freeze: boolean;
@@ -141,6 +144,8 @@ export interface RunStartResponse {
   run_id: string;
   replay: boolean;
   resumed?: boolean;
+  /** Row count of the replayed checkpoint, so progress shows iter/length. */
+  n_iters?: number | null;
 }
 
 /** Emitted when a live run autosaves a (cumulative) checkpoint. */

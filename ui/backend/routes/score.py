@@ -11,16 +11,15 @@ from ui.backend.services.score_service import compute_score
 
 router = APIRouter()
 
-_project_cache: dict[str, Project_Setup] = {}
-
 
 def _get_project(yaml_path: str) -> Project_Setup:
-    if yaml_path not in _project_cache:
-        p = Path(yaml_path)
-        if not p.exists():
-            raise HTTPException(404, f"YAML not found: {yaml_path}")
-        _project_cache[yaml_path] = Project_Setup.from_yaml(p)
-    return _project_cache[yaml_path]
+    # Reload from disk every call (Project_Setup.from_yaml is cheap and
+    # PDK-independent). A module-level cache previously returned stale specs
+    # after the YAML was edited on disk — inconsistent with /sanity-check.
+    p = Path(yaml_path)
+    if not p.exists():
+        raise HTTPException(404, f"YAML not found: {yaml_path}")
+    return Project_Setup.from_yaml(p)
 
 
 class ScoreRequest(BaseModel):

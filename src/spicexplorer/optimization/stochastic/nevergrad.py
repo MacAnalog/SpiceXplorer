@@ -124,10 +124,20 @@ def create_optimizer(
 class NevergradMixin(Base_Optimizer):
     """Reusable mixin for all Nevergrad-based optimizers."""
     # --- Overwriting Some Abstract Methods ---
-    def parameterize(self) -> ng.p.Dict:        
+    def parameterize(self) -> ng.p.Dict:
         parameters: Dict[str, ng.p.Scalar] = {}
+        # Frozen params are excluded from the search space and injected at their
+        # fixed value (val/init) during evaluation; if neither is given the
+        # netlist's own .param default is used. (Default freeze is False, so this
+        # is a no-op unless a param explicitly sets `freeze: true`.)
+        self._frozen_params: Dict[str, float] = {}
 
         for param in self.setup_obj.dut_params:
+            if getattr(param, "freeze", False):
+                fixed = param.val if param.val is not None else param.init
+                if fixed is not None:
+                    self._frozen_params[param.name] = float(fixed)
+                continue
             if param.is_integer:
                 p_obj = ng.p.Scalar(
                     lower=param.min_val,
@@ -178,6 +188,9 @@ class NevergradMixin(Base_Optimizer):
         candidate : ng.p.Parameter = self.optimizer.ask()
         # Evaluate function
         denorm_params: Dict[str, float] = self.denormalize_params(parameterization=candidate.value)
+        # Re-inject any frozen params (excluded from the search space) at their fixed value.
+        if getattr(self, "_frozen_params", None):
+            denorm_params.update(self._frozen_params)
         curr_score, metadata = self.evaluate(parameterization=denorm_params)
         # Provide feedback to optimizer (The negative of the fitness score is used because the optimizer is set to minimize this value... this way the optimizer will maximize the fitness score.
         self.optimizer.tell(candidate, -1 * curr_score)

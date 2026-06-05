@@ -248,9 +248,9 @@ def compute_error(curr_val: np.float64, target_val: np.float64, error_type: Erro
         error_type = Error_Types(error_type)
 
     if "relative" in error_type.value:
-        if normalizing_coeff is None or normalizing_coeff <= 0:
-            logger.error(f"Normalizing coefficient must be provided and > 0 for relative error types. Got: {normalizing_coeff}")
-            raise ValueError(f"Normalizing coefficient must be provided and > 0 for relative error types. Got: {normalizing_coeff}")
+        if normalizing_coeff is None or not np.isfinite(normalizing_coeff) or normalizing_coeff <= 0:
+            logger.error(f"Normalizing coefficient must be provided, finite and > 0 for relative error types. Got: {normalizing_coeff}")
+            raise ValueError(f"Normalizing coefficient must be provided, finite and > 0 for relative error types. Got: {normalizing_coeff}")
         return ERROR_COMPUTE_FUNCTIONS[error_type](curr_val, target_val, normalizing_coeff)
     return ERROR_COMPUTE_FUNCTIONS[error_type](curr_val, target_val)
 
@@ -264,9 +264,9 @@ def compute_reward(curr_val: np.float64, target_val: np.float64, reward_type: Re
         return np.float64(0)
     
     if "relative" in reward_type.value:
-        if normalizing_coeff is None or normalizing_coeff <= 0:
-            logger.error(f"Normalizing coefficient must be provided and > 0 for relative reward types. Got: {normalizing_coeff}")
-            raise ValueError(f"Normalizing coefficient must be provided and > 0 for relative reward types. Got: {normalizing_coeff}")
+        if normalizing_coeff is None or not np.isfinite(normalizing_coeff) or normalizing_coeff <= 0:
+            logger.error(f"Normalizing coefficient must be provided, finite and > 0 for relative reward types. Got: {normalizing_coeff}")
+            raise ValueError(f"Normalizing coefficient must be provided, finite and > 0 for relative reward types. Got: {normalizing_coeff}")
         return REWARD_COMPUTE_FUNCTIONS[reward_type](curr_val, target_val, normalizing_coeff)
     return REWARD_COMPUTE_FUNCTIONS[reward_type](curr_val, target_val)
 

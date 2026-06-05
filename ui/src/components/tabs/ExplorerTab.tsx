@@ -25,7 +25,9 @@ function goalSym(g: string): string {
 
 function bestOf(values: number[], goal: string): number | null {
   if (!values.length) return null;
-  return goal === "minimize" ? Math.min(...values) : Math.max(...values);
+  // reduce, not Math.min(...values): spreading a long run's array as call
+  // arguments overflows the stack (RangeError) above ~65k points.
+  return values.reduce((m, v) => (goal === "minimize" ? (v < m ? v : m) : v > m ? v : m), values[0]);
 }
 
 function passesSpec(s: TargetSpec, val: number | null): boolean | null {
@@ -56,6 +58,17 @@ export function ExplorerTab() {
   const [scatterPointsA, setScatterPointsA] = useState<ScatterPoint[]>([]);
   const [scatterPointsB, setScatterPointsB] = useState<ScatterPoint[]>([]);
 
+  // Replace any selection (selectedMetric / scatter X / Y) that the freshly
+  // loaded checkpoint doesn't actually contain, so non-cascode projects and
+  // checkpoint switches don't leave the metric/scatter panels stuck empty.
+  const reconcileMetrics = (keys: string[]) => {
+    if (keys.length === 0) return;
+    if (!keys.includes(selectedMetric)) setSelectedMetric(keys[0]);
+    const x = keys.includes(scatterMetricX) ? scatterMetricX : keys[0];
+    const y = keys.includes(scatterMetricY) ? scatterMetricY : keys[1] ?? keys[0];
+    if (x !== scatterMetricX || y !== scatterMetricY) setScatterMetrics(x, y);
+  };
+
   const loadBoth = async () => {
     if (!runAId && !runBId) return;
     setLoadingBoth(true);
@@ -65,16 +78,27 @@ export function ExplorerTab() {
         tasks.push(
           api.loadCheckpoint(runAId).then(async (data) => {
             setRunA(data);
-            if (!selectedMetric && Object.keys(data.per_metric).length > 0) {
-              setSelectedMetric(Object.keys(data.per_metric)[0]);
-            }
+            reconcileMetrics(Object.keys(data.per_metric));
             const env = await api.envelope(runAId, yamlPath || undefined);
             setEnvelopeA(env);
           }),
         );
+      } else {
+        // Deselected: clear the stale A slot so it stops rendering.
+        setRunA(null);
+        setEnvelopeA(null);
+        setScatterPointsA([]);
       }
       if (runBId) {
-        tasks.push(api.loadCheckpoint(runBId).then((data) => setRunB(data)));
+        tasks.push(
+          api.loadCheckpoint(runBId).then((data) => {
+            setRunB(data);
+            if (!runAId) reconcileMetrics(Object.keys(data.per_metric));
+          }),
+        );
+      } else {
+        setRunB(null);
+        setScatterPointsB([]);
       }
       await Promise.all(tasks);
     } finally {
@@ -143,10 +167,13 @@ export function ExplorerTab() {
 
   const histogramRuns = metricRuns;
 
+  // Always emit BOTH slots (A first, B second) so the chart's positional color
+  // (A=indigo, B=cyan) stays stable even when one run has no scatter points.
   const scatterRuns = [
-    ...(scatterPointsA.length ? [{ label: runA?.label ?? "A", points: scatterPointsA }] : []),
-    ...(scatterPointsB.length ? [{ label: runB?.label ?? "B", points: scatterPointsB }] : []),
+    { label: runA?.label ?? "A", points: scatterPointsA },
+    { label: runB?.label ?? "B", points: scatterPointsB },
   ];
+  const hasScatter = scatterPointsA.length > 0 || scatterPointsB.length > 0;
 
   const selectedSpecObj = summary?.target_specs.find((s) => s.name === selectedMetric);
   const targetX = summary?.target_specs.find((s) => s.name === scatterMetricX)?.target;
@@ -163,20 +190,14 @@ export function ExplorerTab() {
     const bVals = runB?.per_metric[s.name]?.filter((v): v is number => v != null) ?? [];
     const aBest = bestOf(aVals, s.goal);
     const bBest = bestOf(bVals, s.goal);
-    const winA =
-      aBest != null && bBest != null
-        ? s.goal === "minimize"
-          ? aBest < bBest
-          : aBest > bBest
-        : aBest != null
-          ? true
-          : false;
-    return {
-      spec: s,
-      aBest,
-      bBest,
-      winner: aBest == null && bBest == null ? null : winA ? "A" : "B",
-    };
+    // Only a true head-to-head (both runs loaded, values differ) has a winner.
+    // A tie, or only one run loaded, is neutral — previously ties silently went
+    // to B and a single run was always declared the winner.
+    let winner: "A" | "B" | null = null;
+    if (aBest != null && bBest != null && aBest !== bBest) {
+      winner = (s.goal === "minimize" ? aBest < bBest : aBest > bBest) ? "A" : "B";
+    }
+    return { spec: s, aBest, bBest, winner };
   });
 
   const totalEvals = (runA?.n_iters ?? 0) + (runB?.n_iters ?? 0);
@@ -332,7 +353,7 @@ export function ExplorerTab() {
                 }
               />
               <PanelBody>
-                {scatterRuns.length > 0 ? (
+                {hasScatter ? (
                   <MetricScatterChart
                     runs={scatterRuns}
                     metricX={scatterMetricX}

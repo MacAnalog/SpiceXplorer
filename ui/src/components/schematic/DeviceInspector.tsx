@@ -14,8 +14,11 @@ import type { DutParam, SensitivityResponse } from "@/types/api";
 
 type Scope = "device" | "all";
 
-/** Range centre used as the default operating point (matches the backend nominal). */
+/** Default operating point, matching the backend `_nominal`: prefer an explicit
+ *  val/init, else the range centre. */
 function midpoint(p: DutParam): number {
+  if (p.val != null && Number.isFinite(p.val)) return p.val;
+  if (p.init != null && Number.isFinite(p.init)) return p.init;
   const lo = p.min_val ?? 0;
   const hi = p.max_val ?? 1;
   if (p.is_integer) return Math.round((lo + hi) / 2);
