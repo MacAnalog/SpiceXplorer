@@ -190,11 +190,17 @@ export const useRunStore = create<RunStore>((set, get) => ({
   pushEvent: (e) =>
     set((state) => {
       const events = [...state.events, e];
-      const bestMetrics = e.metrics
+      // Prefer the best trial's metrics (live runs emit `best_metrics`); fall back to
+      // `metrics` for replay (metrics[i] paired with params[i] per row) AND when
+      // best_metrics is an empty {} — e.g. a resume before the first new best — since `??`
+      // would not fall through an (non-nullish) empty object.
+      const metricsSource =
+        e.best_metrics && Object.keys(e.best_metrics).length ? e.best_metrics : e.metrics;
+      const bestMetrics = metricsSource
         ? {
             ...state.bestMetrics,
             ...(Object.fromEntries(
-              Object.entries(e.metrics).filter(([, v]) => v !== null),
+              Object.entries(metricsSource).filter(([, v]) => v !== null),
             ) as Record<string, number>),
           }
         : state.bestMetrics;

@@ -115,7 +115,9 @@ def _run_sanity(yaml_path: str, active_corner: str | None = None) -> dict[str, A
             project.pvt.active_corner = active_corner
         active_corner_used = project.pvt.active_corner
 
-    output_folder = Path(project.ws_root) / Path(project.outdir)
+    # Own subdir so the per-wrapper rmtree (NGSpice_Wrapper._validate) can't delete a
+    # concurrent live run's outdir/live tree (BUG-A8 / OPT-2).
+    output_folder = Path(project.ws_root) / Path(project.outdir) / "sanity"
     path_to_simulator = Path(project.simulator)
     wrappers: dict[str, NGSpice_Wrapper] = {}
     tb_results: list[dict] = []

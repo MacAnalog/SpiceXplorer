@@ -192,6 +192,9 @@ export interface SSEEvent {
   best_score?: number | null;
   metrics?: Record<string, number | null>;
   best_params?: Record<string, number | null>;
+  /** Snapshot of the BEST trial's metrics (live runs) — distinct from `metrics`, the
+   *  latest trial. The right-rail / Pipeline key their pass-fail off this. */
+  best_metrics?: Record<string, number | null>;
   checkpoint?: CheckpointEvent;
   done?: boolean;
   error?: string;
@@ -391,6 +394,9 @@ export interface WizardPVTCorner {
   temp: string;
   supply_node: string;
   supply_value: string;
+  /** Rails 2..N, carried losslessly through the wizard (the form edits only the primary
+   *  rail; multi-rail corners are authored/edited in the raw YAML). */
+  extra_supplies?: { node: string; value: string }[];
   enabled: boolean;
   includes: WizardModelInclude[];
 }
@@ -398,6 +404,8 @@ export interface WizardPVTCorner {
 export interface WizardPVTConfig {
   active_corner: string;
   corners: WizardPVTCorner[];
+  /** Optional root prepended to each corner include's lib_file at sim time. */
+  model_lib_root?: string;
 }
 
 export interface WizardDutParam {

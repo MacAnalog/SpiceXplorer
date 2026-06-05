@@ -127,6 +127,7 @@ def _streaming_optimizer_class(state: RunState):
         _abs_iter = 0
         _best_score: float | None = None
         _best_params: dict = {}
+        _best_metrics: dict = {}
         _ckpt_count = 0
 
         def optimization_step(self):
@@ -149,6 +150,14 @@ def _streaming_optimizer_class(state: RunState):
                     phys = {**phys, **self._frozen_params}
                 self._best_params = {k: _safe_float(v) for k, v in phys.items()}
                 self.global_best_index = len(self.optimization_log) - 1
+                # Snapshot the BEST trial's metrics so the right-rail / Pipeline pass-fail
+                # reflect the design whose params/score they display — not a later, lower-
+                # scoring trial's metrics (BUG-A13 / OPT-1 / RAIL-2).
+                self._best_metrics = {
+                    k: _safe_float(v.get("curr_val"))
+                    for k, v in fit.items()
+                    if isinstance(v, dict)
+                }
             _emit({
                 "iter": self._abs_iter,
                 "score": sval,
@@ -159,6 +168,7 @@ def _streaming_optimizer_class(state: RunState):
                     if isinstance(v, dict)
                 },
                 "best_params": self._best_params,
+                "best_metrics": self._best_metrics,
             })
             return params, score, metadata
 
@@ -254,7 +264,9 @@ def _run_live(state: RunState, project_path: str) -> None:
             seed=state.seed,
             active_corner=state.active_corner,
         )
-        wrappers = _build_spicelib_wrappers(project)
+        # Isolate live-run sim outputs under outdir/live so they can't be rmtree'd by — or
+        # rmtree — a concurrent manual sim (which uses outdir/manual_sim) (BUG-A8 / OPT-2).
+        wrappers = _build_spicelib_wrappers(project, output_subdir="live")
         stream_cls = _streaming_optimizer_class(state)
         if state.resume_path:
             logger.info("[run %s] resuming from checkpoint %s", state.run_id[:8], state.resume_path)
@@ -275,13 +287,24 @@ def _run_live(state: RunState, project_path: str) -> None:
         opt._ckpt_count = 0
         best_score: float | None = None
         best_params: dict = {}
+        best_metrics: dict = {}
         for entry in opt.optimization_log:
             s = _safe_float(entry.point.score)
             if s is not None and (best_score is None or s > best_score):
                 best_score = s
                 best_params = {k: _safe_float(v) for k, v in entry.point.params.items()}
+                # Seed best_metrics from the restored best so the rail/Pipeline show the
+                # resumed design's metrics immediately — not {} until the first new best
+                # (which on a near-optimal resume may never come). (BUG-A13 resume gap)
+                fit = entry.fit_summary or {}
+                best_metrics = {
+                    k: _safe_float(v.get("curr_val"))
+                    for k, v in fit.items()
+                    if isinstance(v, dict)
+                }
         opt._best_score = best_score
         opt._best_params = best_params
+        opt._best_metrics = best_metrics
         logger.info("[run %s] parameterizing", state.run_id[:8])
         opt.parameterize()
         logger.info("[run %s] starting optimize() — budget %d%s", state.run_id[:8], state.budget,

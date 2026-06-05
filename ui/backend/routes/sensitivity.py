@@ -142,7 +142,9 @@ def _run_sensitivity(
         bp = by_name[name]
         baseline[name] = min(max(v, float(bp.min_val)), float(bp.max_val))
 
-    wrappers = _build_spicelib_wrappers(project)
+    # Own output subdir so building these wrappers (which rmtree their output_folder) can't
+    # wipe a concurrent live run's outdir/live tree (BUG-A8 / OPT-2 — same hole as manual sim).
+    wrappers = _build_spicelib_wrappers(project, output_subdir="sensitivity")
     opt = Nevergrad_Spice_Single_Objective(setup_obj=project, spicelib_wrappers=wrappers)
 
     n_sims = 0

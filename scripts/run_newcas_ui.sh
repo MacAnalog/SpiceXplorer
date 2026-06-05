@@ -68,6 +68,10 @@ stop_servers  # clear anything a crashed previous run left behind
 # and Next build artifact (ui/.next) — an endless reload loop that thrashes the
 # backend ("watchfiles: change detected" spam, a new log file per restart).
 echo "Starting FastAPI backend on :${BACKEND_PORT}… (LOG_LEVEL=${LOG_LEVEL})"
+# Run the backend from the repo root so its CWD == REPO_ROOT: the optimizer autosaves to a
+# CWD-relative ./auto_save while the checkpoint API reads REPO_ROOT/auto_save — keep them
+# aligned regardless of where this script was invoked from (BUG-A9 / OPT-3).
+cd "${ROOT_DIR}"
 LOG_LEVEL="${LOG_LEVEL}" uv run --extra ui uvicorn ui.backend.main:app \
   --reload --reload-dir "${ROOT_DIR}/ui/backend" --reload-dir "${ROOT_DIR}/src" \
   --port "${BACKEND_PORT}" &
