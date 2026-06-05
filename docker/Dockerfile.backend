@@ -114,12 +114,21 @@ COPY docker/pdk/ihp-sg13g2/libs.tech/ngspice/models /opt/pdk/ihp-sg13g2/libs.tec
 COPY docker/pdk/ihp-sg13g2/libs.tech/ngspice/.spiceinit /opt/pdk/ihp-sg13g2/libs.tech/ngspice/.spiceinit
 COPY --from=osdi /osdi /opt/pdk/ihp-sg13g2/libs.tech/ngspice/osdi
 
+# PDK xschem symbol libraries (sg13g2_pr/*.sym) — resolved by the in-browser
+# schematic viewer via _pdk_xschem_dir() → $PDK_ROOT/$PDK/libs.tech/xschem.
+COPY docker/pdk/ihp-sg13g2/libs.tech/xschem /opt/pdk/ihp-sg13g2/libs.tech/xschem
+
+# xschem standard devices library (devices/*.sym) — resolved via XSCHEM_LIBRARY_PATH.
+# No xschem binary is installed; the env var is the hook used by _xschem_share_dirs().
+COPY docker/xschem_library /opt/xschem_library
+
 ENV PATH=/opt/ngspice/bin:/app/.venv/bin:$PATH \
     HOME=/app \
     PDK_ROOT=/opt/pdk \
     PDK=ihp-sg13g2 \
     IHP_PDK_ROOT=/opt/pdk/ihp-sg13g2 \
     SPICE_USERINIT_DIR=/opt/pdk/ihp-sg13g2/libs.tech/ngspice \
+    XSCHEM_LIBRARY_PATH=/opt/xschem_library:/opt/xschem_library/devices \
     UV_PYTHON=/usr/bin/python3 \
     UV_PYTHON_DOWNLOADS=never \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
