@@ -427,12 +427,20 @@ the cited code). Full per-bug location / scenario / fix / verifier note in [bug_
 of the report so they aren't re-raised). No app/sim was run — items needing a live trial to *see* the
 symptom (B4, B13, B31) are confirmed at the source/data-flow level. **None of this surface was covered by
 §11 or §17.** Reachability: 🟢 shipped cascode/default flow · 🟡 valid user config / non-default toggle ·
-⚪ latent. **Nothing fixed yet** — recommended order is Tier 0 → NEWCAS-core majors → PVT majors → minors,
-each with a regression test.
+⚪ latent.
 
-> Several finder "major"s were **downgraded to minor** by the verifier where the trigger is a non-default
-> opt-in or the shipped example dodges it (e.g. `log_scale` tolerance, duplicate spec names, serial-mode sim
-> abort, replay-without-id hang). Severities below are the verifier-corrected ones.
+> **Status (2026-06-06): ALL FIXED except one deferred (B42).** Landed on `feat/pvt` in 6 commits —
+> `750ba6c` (Tier 0), `932ac80` (Tier 1 NEWCAS-core), `d816fba` (Tier 2 PVT), `09a211c` (Tier 3),
+> `e5c4c43` (Tier 4 backend), `47409ad` (Tier 4 frontend + B4-residual). Verified by `uv run pytest`
+> (167 pass; the lone failure is the host-PDK-gated `test_ngspice_sanity_check`, which **passes in the
+> Docker container**), `tsc --noEmit`, `eslint --max-warnings=0`, **+~75 new regression tests**, an
+> adversarial bypass review per tier, and the real-SPICE suites (PDK sanity + slow optimization + a
+> corner-applied sim + B5 autosave-reset run) re-run **against real ngspice + the IHP PDK in the
+> container**. The one deferred item is **B42** (run stuck `running` on a hard-kill until the next
+> startup reconcile — needs a heartbeat/PID liveness signal; normal restart self-heals).
+>
+> Severities below are the verifier-corrected ones (several finder "major"s were downgraded where the
+> trigger is a non-default opt-in or the shipped example dodges it).
 
 ### Tier 0 — Security & data-integrity (fix first) ✅ FIXED 2026-06-06
 
@@ -485,19 +493,27 @@ each with a regression test.
 - [x] **BUG-B15** *(fixed)* · `yaml_generator.py` (+ `WizardDutParam.val`) — `_build_dut_param` now emits `val` and `project_dict_to_form` carries it, so a frozen param's pinned operating point round-trips through the wizard instead of falling back to `init`/netlist default.
 - [x] **BUG-B16** *(fixed)* · `projectStore.ts` `switchProject` — if a run is live it now `useRunStore.getState().stopRun()`s (server-stop + record to history + close the EventSource) BEFORE rebinding, so the old run's SSE no longer streams into the new project's UI and the stream isn't orphaned. (Lazy `import` avoids a store cycle.)
 
-### Tier 4 — Minor (grouped; full detail in the report)
-**Core/scoring:** [ ] **B17** `domains.py:457-462` tolerance fallback = 0 when target==0 · [ ] **B18** *pvt* `domains.py:180-186` `parse_value(None)` AttributeError on blank `temp`/supply value · [ ] **B19** `base.py:967-970,1039-1042` `log_scale` log10's the tolerance width (inverted band; opt-in) · [ ] **B20** `base.py:1048-1052` EXCEED reward `elif` is dead code · [ ] **B21** `utils.py:211-218` log-reward `±inf` when curr==target (opt-in) · [ ] **B22** `utils.py:181-182,202-203` exponential-error overflow → saturated penalty (opt-in) · [ ] **B23** *design* `base.py:943` constraint-first aggregation discards all reward while any spec violated · [ ] **B24** ⚪ `domains.py:345-346` vs `utils.py:294-307` log base-e (RL) vs base-10 (Nevergrad) · [x] **B25** *(fixed via B5)* `base.py` `global_best_index` is now log-relative + seeded from retained history, so `keep_history=True` reports the true best.
+### Tier 4 — Minor ✅ FIXED 2026-06-06 (one deferred: B42)
 
-**Optimizer/lifecycle:** [ ] **B26** ⚪ `base.py:699-707`+`nevergrad.py:209-215` Bode & Constraint optimizers drop `output_root` · [ ] **B27** `optimizer_runner.py:311,435` resume re-runs the **full** budget · [ ] **B28** `base.py:529-531` serial-path no-RAW sim **aborts the whole run** (parallel default is graceful) · [ ] **B29** `base.py:884-888,933-937` duplicate target-spec **names** collide in the perf map (no uniqueness guard) · [ ] **B36** `optimizer_runner.py:570-575`+`optimize.py:64` replay with no `checkpoint_id` → SSE hangs "running" forever (direct-API) · [ ] **B41** `simulate.py:185`/`sanity.py:185`/`sensitivity.py:148` one-off routes leak `./auto_save` in CWD (no `output_root`) · [ ] **B42** ⚪ `optimizer_runner.py:407,474-489` run stuck `running` on hard-kill until next startup reconcile · [ ] **B43** `project_service.py:136-154` `reconcile_stale_runs` skips `.trash` → trashed `running` never repaired.
+> Landed (commits `e5c4c43` backend Groups A/B/C, `47409ad` Group D + B4-residual). Verified by
+> `uv run pytest` (167 pass) + 16 regression tests in [tests/test_audit_r3_tier4_backend.py](tests/test_audit_r3_tier4_backend.py),
+> `tsc --noEmit`, `eslint --max-warnings=0`, and the real-SPICE suites re-run in the container.
 
-**Routes/scoping:** [ ] **B35** `checkpoint.py:59-63`+`checkpoint_reader.py:144,194` `tolerance:None` → **500** on envelope/scatter/report for a `target:0` (or blank-tolerance wizard) spec · [ ] **B37** `optimize.py:48-50`+`project.py:167-172` invalid `project_id` → **500** instead of 404/400 · [ ] **B38** `checkpoint.py:66-80` prefix-glob `{id}*`+`[0]` resolves the **wrong** checkpoint (no `project_id`) · [ ] **B39** `checkpoint.py:59-63` envelope/scatter feasibility counts **disabled** specs.
+**Core/scoring:** [x] **B17** zero-target tolerance floored to a scale-aware positive · [x] **B18** `parse_value(None)` → clear `ValueError` · [x] **B19** `log_scale` tolerance mapped as a log-space band (`_log_space_band`) · [x] **B20** dead EXCEED-reward `elif` removed · [x] **B21** log-reward operands floored (no `-inf` at exact match) · [x] **B22** exponential-error exponent clamped (no `inf`) · [x] **B23** *(documented)* constraint-first aggregation is intentional · [x] **B24** `compute_log_normalization` base-10 · [x] **B25** *(via B5)* `global_best_index` log-relative + history-seeded.
 
-**PVT:** [ ] **B30** *pvt* `spicelib.py:378-381` temp-strip misses combined `.options … temp=` lines (stale/duplicated temp; can drop sibling options) · [ ] **B31** *pvt* `optimizer_runner.py:356-363`+`sanity.py:112-116`+`simulate.py:169-177` unknown `active_corner` handled 3 ways (live-run warning not streamed; sanity silently misreports the fallback) · [ ] **B32** *pvt* `domains.py:161-172` `process:` bundle silently dropped when `model_includes` also present · [ ] **B33** *pvt* `sanity.py:126-141` per-tb sanity rows run `use_editor=False` → **corner NOT applied** to the Health rows · [ ] **B34** *pvt* `domains.py:286-294`+`base.py:501-509` `get_active()` applies an `enabled:false` corner *(verifier dissent: maybe intended)*.
+**Optimizer/lifecycle:** [x] **B26** Bode + Constraint optimizers forward `output_root` · [x] **B27** resume runs only the **remaining** budget · [x] **B28** serial no-RAW sim scores the trial as a failure (no run abort) · [x] **B29** duplicate target-spec names rejected · [x] **B36** replay with no `checkpoint_id` → 400 · [x] **B41** lazy autosave-dir mkdir (no stray `./auto_save`) · [ ] **B42** *(deferred)* `optimizer_runner.py` run stuck `running` on a hard-kill until next startup reconcile — needs a heartbeat/PID liveness signal (disproportionate for a minor edge; normal `docker compose up` self-heals via the startup reconciler) · [x] **B43** `reconcile_stale_runs` also scans `.trash`.
 
-**Frontend:** [ ] **B40** *pvt* `yaml_generator.py:163-213,259-308` wizard drops per-corner PVT `params` overrides · [x] **B44** *(fixed with B16)* `projectStore.deleteProject` now also `useRunStore.getState().reset()`s when the active project is deleted, closing the orphaned EventSource + clearing the run UI · [ ] **B45** `pareto.ts:17-20`+`MetricScatterChart.tsx:43-46` Pareto/feasible-region overlay treats **exact** goal as maximize (closest-to-target rule not applied to overlays) · [ ] **B46** 🟢 `lib/utils.ts:10-19` `formatEng(0)` → `"0.000 p"` (spurious pico prefix) · [ ] **B47** `runStore.ts:142-213` superseding an in-flight run never records it to history · [ ] **B48** `ScoreShapingTab.tsx:53-60,143-150,292-300` eng-string in the target field → NaN slider/marker · [ ] **B49** ⚪ `ExplorerTab.tsx:194-197,509-510` scatter click resolves run by label → routes to B when A/B share a label · [ ] **B50** `simulate.py:184`+`spicelib.py:236-242` concurrent manual sims race the shared `manual_sim/` rmtree · [ ] **B51** `RunsRail.tsx:204-212` run-rename **Escape commits** (via `onBlur`) instead of cancelling · [ ] **B52** `ProjectsOverlay.tsx:71-101` load-example/create failure is a **silent no-op** (no `setError`).
+**Routes/scoping:** [x] **B35** target-spec tolerance always emitted (>0; no `None`→500) · [x] **B37** invalid `project_id` → 400 · [x] **B38** exact-stem checkpoint resolution · [x] **B39** envelope/scatter use only enabled specs.
 
-### Cross-cutting root causes (fix once, resolve several)
-- [ ] `tolerance:None` serialization (`checkpoint.py:61`) → B35 + the `target:0` 500s. · [ ] `output_root` not threaded (Bode/Constraint optimizers + the 3 one-off routes) → B26, B41. · [ ] checkpoint stems carry no project/run id → B3, B38. · [ ] `stop_runs_for` bounded join ignores liveness → B4. · [ ] shared `spicexplorer` logger unscoped + corner warning on a non-streamed logger → B13, B31. · [ ] exact-goal "closest-to-target" rule not applied to FE overlays → B45. · [ ] no `projectStore`↔`runStore` teardown on switch/delete → B16, B44.
+**PVT:** [x] **B30** temp strip preserves combined `.options` lines · [x] **B31** unknown `active_corner` surfaced (live-run warning streamed via the `spicexplorer` logger + `sanity` `warnings[]`) · [x] **B32** corner with both `process` + `model_includes` rejected · [x] **B33** sanity `warnings[]` note that per-tb rows run the netlist corner (the trial step uses the active corner) · [x] **B34** `get_active()` warns when the active corner is `enabled:false`.
+
+**Frontend:** [x] **B40** per-corner PVT `params` round-trip the wizard · [x] **B44** *(with B16)* delete-active-project resets `runStore` · [x] **B45** Pareto/feasible overlay handles `exact` (closest-to-target; half-plane rect skipped) · [x] **B46** `formatEng(0)` → unprefixed `"0.000"` · [x] **B47** superseded in-flight run recorded to history · [x] **B48** Score Shaping parses eng-strings (`parseEng`) · [x] **B49** scatter click resolves run by trace-slot index · [x] **B50** manual sims use a unique output subfolder · [x] **B51** run-rename Escape cancels (no blur-commit) · [x] **B52** ProjectsOverlay surfaces a load/create open failure.
+
+### Cross-cutting root causes ✅ (all resolved by the fixes above)
+- [x] `tolerance:None` serialization → fixed at source (B17 + B35). · [x] `output_root` threaded into Bode/Constraint + lazy mkdir for the one-off routes (B26, B41). · [x] checkpoint resolution/delete scoped + exact-stem + precise-`path` delete (B3, B38). · [x] `stop_runs_for` reports liveness; lifecycle routes 409 + a delete tombstone (B4 + residual). · [x] `spicexplorer` logger run-scoped; corner warning re-routed to the streamed logger (B13, B31). · [x] exact-goal closest-to-target applied to the FE overlays (B45). · [x] `projectStore`↔`runStore` teardown on switch/delete (B16, B44).
+
+### B4-residual ✅ FIXED 2026-06-06
+- [x] start-after-stop TOCTOU on project delete — a per-project "deleting" tombstone (`optimizer_runner.begin/end_project_delete`); `/optimize/start` refuses (409) a run for a project whose delete is in flight, and `delete_project` holds the tombstone across the whole stop→move window.
 
 ### Watch / hardening (refuted-but-noted — not confirmed bugs)
 - [ ] `soft_delete_project` trash id is `project_id__{whole-second-ts}` with **no random suffix** (unlike `delete_run`'s uuid suffix) — verifiers judged a same-second re-delete collision not currently reachable; add a suffix defensively.

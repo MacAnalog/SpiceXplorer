@@ -198,6 +198,12 @@ either block the switch or `useRunStore.getState().stopRun()` before rebinding.
 
 ## Tier 4 — Minor (grouped by subsystem)
 
+> **✅ STATUS: all FIXED 2026-06-06 except B42 (deferred).** Commits `e5c4c43` (backend Groups A/B/C) +
+> `47409ad` (frontend Group D + B4-residual). Verified by `pytest` (167 pass) + 16 regression tests,
+> `tsc`/`eslint`, and the real-SPICE suites re-run in the container. **B42** (run stuck `running` on a
+> hard-kill) is deferred — it needs a heartbeat/PID liveness signal and a normal restart self-heals via
+> the startup reconciler. See TODO §19 Tier 4 for the per-bug fix notes.
+
 ### Core / scoring (NEWCAS path)
 - **BUG-B17** 🟡 `domains.py:457-462` — tolerance fallback yields `0` when `target==0`, defeating its own
   `>0` guard (zero-width band; `minimize`/`exact` then treat any nonzero value as a violation). Floor to a
