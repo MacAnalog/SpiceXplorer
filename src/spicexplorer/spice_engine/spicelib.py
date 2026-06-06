@@ -383,8 +383,11 @@ class NGSpice_Wrapper:
             ed.add_instruction(f".lib {path} {inc.section}")
             log.info(f"\t🧩 .lib {path} {inc.section}")
 
-        # (2) temperature — authoritative directive; strip any prior injected one first.
-        self._strip_matching_instructions(r"^\s*\.options?\s+temp\s*=")
+        # (2) temperature — append an authoritative `.options temp=` (ngspice processes .options
+        #     cumulatively, last temp wins). Strip only a prior STANDALONE injected temp line (for
+        #     re-apply idempotency); do NOT strip a COMBINED line like `.options temp=27 gmin=1e-12`,
+        #     which the old broad regex deleted whole — dropping the sibling options (BUG-B30).
+        self._strip_matching_instructions(r"^\s*\.options?\s+temp\s*=\s*\S+\s*$")
         ed.add_instruction(f".options temp={corner.temp}")
         log.info(f"\t🌡️  .options temp={corner.temp}")
 

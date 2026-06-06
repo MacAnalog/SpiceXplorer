@@ -76,6 +76,9 @@ export function ProjectsOverlay() {
       await refreshProjects();
       const ok = await switchProject(id);
       if (ok) closeProjects();
+      // Created on disk but failed to open — say so instead of a silent no-op (which invites a
+      // retry → duplicate projects) (BUG-B52).
+      else setError("Loaded the example, but failed to open it — it's in your projects list.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load example.");
     } finally {
@@ -93,6 +96,7 @@ export function ProjectsOverlay() {
       await refreshProjects();
       const ok = await switchProject(id);
       if (ok) closeProjects();
+      else setError("Created the project, but failed to open it — it's in your projects list.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create project.");
     } finally {

@@ -7,8 +7,35 @@ const ENG_PREFIXES: [number, string][] = [
   [1, ""], [1e-3, "m"], [1e-6, "µ"], [1e-9, "n"], [1e-12, "p"],
 ];
 
+// Engineering-suffix multipliers, mirroring the backend's `parse_value` MULTIPLIERS (case-sensitive:
+// M=mega, m=milli). `µ` is accepted as an alias for `u` since formatEng emits it.
+const ENG_SUFFIX: Record<string, number> = {
+  f: 1e-15, p: 1e-12, n: 1e-9, u: 1e-6, "µ": 1e-6, m: 1e-3, k: 1e3, M: 1e6, G: 1e9,
+};
+
+/**
+ * Parse an engineering-suffix string ("250u", "200e6", "1.5") to a number — mirrors the backend's
+ * `parse_value`, so a value the server accepts doesn't read as NaN client-side (BUG-B48). Returns
+ * NaN for unparseable / partial input.
+ */
+export function parseEng(v: string | number | null | undefined): number {
+  if (typeof v === "number") return v;
+  if (v == null) return NaN;
+  const s = String(v).trim();
+  if (s === "") return NaN;
+  const mult = ENG_SUFFIX[s.slice(-1)];
+  if (mult !== undefined) {
+    const n = Number(s.slice(0, -1));
+    return Number.isNaN(n) ? NaN : n * mult;
+  }
+  return Number(s);
+}
+
 export function formatEng(value: number | null | undefined, unit = "", digits = 3): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "n/a";
+  // Zero would otherwise fall through to the 1e-12 (pico) fallback and render as "0.000 p";
+  // emit an unprefixed zero (BUG-B46).
+  if (value === 0) return `${(0).toFixed(digits)} ${unit}`.trim();
   const abs = Math.abs(value);
   for (const [scale, prefix] of ENG_PREFIXES) {
     if (abs >= scale * 0.9999 || scale === 1e-12) {

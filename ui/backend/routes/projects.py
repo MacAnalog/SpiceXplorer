@@ -125,22 +125,30 @@ def fork_project(project_id: str, body: ForkRequest):
 
 @router.delete("/projects/{project_id}")
 def delete_project(project_id: str):
-    # Quiesce any in-flight live run for this project FIRST, else its writer thread
-    # re-creates the moved-away run tree and defeats the soft-delete (corruption + leak).
-    # If a worker is still mid-trial after the join, do NOT move the dir out from under it
-    # (BUG-B4) — 409 and let the caller retry once the trial finishes.
-    stopped, still_alive = optimizer_runner.stop_runs_for(project_id=project_id)
-    if still_alive:
-        raise HTTPException(
-            409,
-            f"{len(still_alive)} run(s) for '{project_id}' are still stopping; retry shortly.",
-        )
+    # Tombstone the project for the whole stop→move window so a run that tries to START in that
+    # gap is refused (begin/end around it) — closes the start-after-stop TOCTOU residual of BUG-B4.
+    optimizer_runner.begin_project_delete(project_id)
     try:
-        trash_id = project_service.soft_delete_project(project_id)
-    except FileNotFoundError as e:
-        raise HTTPException(404, str(e))
-    except Exception as e:
-        raise HTTPException(400, f"delete failed: {e}")
+        # Quiesce any in-flight live run for this project FIRST, else its writer thread
+        # re-creates the moved-away run tree and defeats the soft-delete (corruption + leak).
+        # If a worker is still mid-trial after the join, do NOT move the dir out from under it
+        # (BUG-B4) — 409 and let the caller retry once the trial finishes.
+        stopped, still_alive = optimizer_runner.stop_runs_for(project_id=project_id)
+        if still_alive:
+            raise HTTPException(
+                409,
+                f"{len(still_alive)} run(s) for '{project_id}' are still stopping; retry shortly.",
+            )
+        try:
+            trash_id = project_service.soft_delete_project(project_id)
+        except FileNotFoundError as e:
+            raise HTTPException(404, str(e))
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(400, f"delete failed: {e}")
+    finally:
+        optimizer_runner.end_project_delete(project_id)
     return {"ok": True, "trash_id": trash_id, "stopped_runs": stopped}
 
 

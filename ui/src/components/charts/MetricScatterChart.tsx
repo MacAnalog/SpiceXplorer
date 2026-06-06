@@ -20,7 +20,7 @@ interface Props {
   /** Overlay the non-dominated (Pareto) frontier over feasible points. */
   showPareto?: boolean;
   /** Click a point → inspect it (params/metrics at its iteration). */
-  onPointClick?: (point: ScatterPoint, runLabel: string) => void;
+  onPointClick?: (point: ScatterPoint, runIndex: number) => void;
 }
 
 function feasibleRect(
@@ -31,6 +31,10 @@ function feasibleRect(
   goalY: string,
 ): Partial<Plotly.Shape> | null {
   if (targetX == null || targetY == null || pts.length === 0) return null;
+  // An `exact` goal's feasible region is a BAND around target (needs tolerance, not available here),
+  // NOT the corner half-plane this rect models — drawing the half-plane is misleading, so skip it and
+  // rely on the (correct, backend-computed) per-point feasibility coloring instead (BUG-B45).
+  if (goalX === "exact" || goalY === "exact") return null;
   // for-loop min/max, not Math.min(...xs): a long run's point array overflows
   // the call stack when spread as arguments.
   let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
@@ -84,29 +88,31 @@ export function MetricScatterChart({
         x: infeasible.map((p) => p.x),
         y: infeasible.map((p) => p.y),
         customdata: infeasible as unknown as Plotly.Datum[],
+        meta: ri,  // run slot index — disambiguates click attribution when labels collide (BUG-B49)
         type: "scatter",
         mode: "markers",
         name: `${run.label} (infeasible)`,
         marker: { color: COLORS.faint, size: 4, opacity: 0.5 },
-      });
+      } as Plotly.Data);
     }
     if (feasible.length) {
       traces.push({
         x: feasible.map((p) => p.x),
         y: feasible.map((p) => p.y),
         customdata: feasible as unknown as Plotly.Datum[],
+        meta: ri,  // run slot index (BUG-B49)
         type: "scatter",
         mode: "markers",
         name: `${run.label}`,
         marker: { color: col, size: 5, opacity: 0.85 },
-      });
+      } as Plotly.Data);
     }
   });
 
   // Pareto frontier over the union of feasible points (non-dominated trade-offs).
   if (showPareto) {
     const feasibleAll = runs.flatMap((r) => r.points).filter((p) => p.feasible);
-    const front = paretoFront(feasibleAll, goalX, goalY);
+    const front = paretoFront(feasibleAll, goalX, goalY, targetX, targetY);
     if (front.length > 1) {
       traces.push({
         x: front.map((p) => p.x),
@@ -161,7 +167,7 @@ export function MetricScatterChart({
               const pt = e.points?.[0];
               const sp = pt?.customdata as unknown as ScatterPoint | undefined;
               if (sp && typeof sp.iter === "number") {
-                onPointClick(sp, String(pt?.data?.name ?? ""));
+                onPointClick(sp, Number((pt?.data as { meta?: number } | undefined)?.meta ?? 0));
               }
             }
           : undefined

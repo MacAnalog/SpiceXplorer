@@ -96,6 +96,30 @@ class RunState:
 
 _runs: dict[str, RunState] = {}
 
+# Projects with a delete in progress. A run that STARTS in the window between stop_runs_for() and the
+# dir move would otherwise re-create the moved-away tree (the start-after-stop TOCTOU residual of
+# BUG-B4). delete_project marks the project here for the stop→move window; start_run refuses a new run
+# for a marked project.
+_deleting_lock = threading.Lock()
+_deleting_projects: set[str] = set()
+
+
+def begin_project_delete(project_id: str) -> None:
+    with _deleting_lock:
+        _deleting_projects.add(project_id)
+
+
+def end_project_delete(project_id: str) -> None:
+    with _deleting_lock:
+        _deleting_projects.discard(project_id)
+
+
+def is_project_deleting(project_id: str | None) -> bool:
+    if not project_id:
+        return False
+    with _deleting_lock:
+        return project_id in _deleting_projects
+
 
 def _prune_finished_runs() -> None:
     """Evict completed runs so the registry doesn't grow unbounded in a long-lived

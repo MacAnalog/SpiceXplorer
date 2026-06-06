@@ -4,7 +4,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
 import { useProjectStore } from "@/stores/projectStore";
 import { useUIStore } from "@/stores/uiStore";
 import { api } from "@/lib/api";
-import { formatEng, goalSymbol } from "@/lib/utils";
+import { formatEng, goalSymbol, parseEng } from "@/lib/utils";
 import type { ScoreResponse, TargetSpec } from "@/types/api";
 import { PenaltyCurveChart } from "@/components/charts/PenaltyCurveChart";
 import { ScoreWaterfallChart } from "@/components/charts/ScoreWaterfallChart";
@@ -50,14 +50,16 @@ export function ScoreShapingTab() {
     return all.map((s) => {
       const e = specEdits[s.name];
       if (!e) return s;
+      // Parse with parseEng (not bare Number) so the engineering strings the editor invites
+      // ("250u") don't read as NaN and poison the slider/marker math (BUG-B48).
       const num = (v: string | number | boolean | undefined, fallback: number | null) =>
-        v === undefined || v === "" ? fallback : Number(v);
+        v === undefined || v === "" ? fallback : parseEng(v as string | number);
       return {
         ...s,
-        target: e.target !== undefined && e.target !== "" ? Number(e.target) : s.target,
+        target: e.target !== undefined && e.target !== "" ? parseEng(e.target as string | number) : s.target,
         tolerance: num(e.tolerance, s.tolerance),
         range: num(e.range, s.range),
-        weight: e.weight !== undefined && e.weight !== "" ? Number(e.weight) : s.weight,
+        weight: e.weight !== undefined && e.weight !== "" ? parseEng(e.weight as string | number) : s.weight,
         goal: (e.goal as TargetSpec["goal"]) ?? s.goal,
         enable: e.enable !== undefined ? Boolean(e.enable) : s.enable,
       };
@@ -140,11 +142,13 @@ export function ScoreShapingTab() {
   const currentSpec: TargetSpec | undefined = effectiveSpecs.find(
     (s) => s.name === selectedSpec,
   );
+  // Guard against a transiently-NaN target/range (mid-typing an eng-string) so the slider stays usable.
+  const safeTarget = Number.isFinite(currentSpec?.target as number) ? (currentSpec!.target as number) : 0;
   const range =
-    currentSpec?.range && currentSpec.range > 0
+    currentSpec?.range && Number.isFinite(currentSpec.range) && currentSpec.range > 0
       ? currentSpec.range
-      : Math.max(Math.abs(currentSpec?.target ?? 1), 1) * 0.5;
-  const target = currentSpec?.target ?? 0;
+      : Math.max(Math.abs(safeTarget), 1) * 0.5;
+  const target = safeTarget;
   const metricValue = values[selectedSpec] ?? target;
   const sliderMin = target - 3 * range;
   const sliderMax = target + 3 * range;

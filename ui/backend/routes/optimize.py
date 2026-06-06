@@ -49,6 +49,12 @@ async def start_run(body: StartRequest, request: Request):
     if body.replay and not body.checkpoint_id:
         raise HTTPException(400, "replay requires a checkpoint_id")
 
+    # Refuse to start a run for a project whose delete is in flight — otherwise this run could
+    # re-create the project tree the delete is about to move to trash (start-after-stop TOCTOU,
+    # the B4 residual).
+    if runner.is_project_deleting(body.project_id):
+        raise HTTPException(409, "project is being deleted; cannot start a run")
+
     # Single resolver: project_id → its project.yaml; else yaml_path; else default.
     try:
         yaml_path = str(project_service.resolve_yaml(body.project_id, body.yaml_path))

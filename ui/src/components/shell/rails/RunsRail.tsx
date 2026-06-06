@@ -44,6 +44,8 @@ export function RunsRail() {
   const [pendingRunDelete, setPendingRunDelete] = useState<string | null>(null);
   // Guards against the run-rename input firing commit twice (Enter then the unmount blur).
   const runRenameInFlight = useRef(false);
+  // Set on Escape so the unmount-triggered onBlur cancels instead of committing the draft (BUG-B51).
+  const cancelRename = useRef(false);
 
   // Per-project run history (report.md P3) — server-persisted, replacing the
   // localStorage list when a registered project is active. Refetched on project
@@ -89,6 +91,7 @@ export function RunsRail() {
   };
 
   const commitRunRename = async (runId: string) => {
+    if (cancelRename.current) { cancelRename.current = false; setEditingRunId(null); return; }
     if (runRenameInFlight.current) return;  // Enter + blur both fire — commit once.
     const label = editRunLabel.trim();
     if (!projectId || !label) { setEditingRunId(null); return; }
@@ -201,7 +204,7 @@ export function RunsRail() {
                         onChange={(e) => setEditRunLabel(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") void commitRunRename(r.run_id);
-                          if (e.key === "Escape") setEditingRunId(null);
+                          if (e.key === "Escape") { cancelRename.current = true; setEditingRunId(null); }
                         }}
                         onBlur={() => void commitRunRename(r.run_id)}
                         aria-label="Rename run"

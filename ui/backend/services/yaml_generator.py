@@ -202,6 +202,11 @@ def _build_pvt_block(form: Dict[str, Any]) -> Dict[str, Any] | None:
             corner["supply"] = rails[0]
         elif len(rails) > 1:
             corner["supplies"] = rails
+        # Carry per-corner extra `.param` overrides so they survive the round-trip instead of
+        # reverting to the netlist defaults after a wizard Save (BUG-B40).
+        params = c.get("params") or {}
+        if isinstance(params, dict) and params:
+            corner["params"] = {k: _coerce_number(v) for k, v in params.items()}
         corner["enabled"] = bool(c.get("enabled", True))
         corners_out.append(corner)
 
@@ -303,6 +308,8 @@ def _pvt_block_to_form(raw_pvt: Any) -> Dict[str, Any]:
                 {"lib_file": _str_or_blank(m.get("lib_file")), "section": _str_or_blank(m.get("section"))}
                 for m in (c.get("model_includes") or [])
             ],
+            # Carry per-corner `.param` overrides so they round-trip (BUG-B40).
+            "params": dict(c.get("params") or {}),
         })
     return {
         "active_corner": _str_or_blank(block.get("active_corner")),

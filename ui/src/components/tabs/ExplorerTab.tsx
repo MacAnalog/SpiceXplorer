@@ -506,8 +506,10 @@ export function ExplorerTab() {
                     targetY={targetY}
                     goalX={goalX}
                     goalY={goalY}
-                    onPointClick={(sp, runLabel) => {
-                      setInspect({ run: runLabel === runB?.label ? "B" : "A", iter: sp.iter });
+                    onPointClick={(sp, runIndex) => {
+                      // Resolve by trace slot index (0=A, 1=B), not label — labels collide when the
+                      // same checkpoint is loaded into both slots (BUG-B49).
+                      setInspect({ run: runIndex === 1 ? "B" : "A", iter: sp.iter });
                       setResim({ loading: false, result: null, error: null });
                     }}
                   />

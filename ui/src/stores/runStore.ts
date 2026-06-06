@@ -146,6 +146,9 @@ export const useRunStore = create<RunStore>((set, get) => ({
     const prev = get();
     if (prev.isRunning && prev.runId && prev.runId !== id) {
       api.stopRun(prev.runId).catch(() => {});
+      // Record the superseded run to history before we reset state — finishRun() is the only
+      // writer of a history record, so without this the prior run's trials vanish (BUG-B47).
+      get().finishRun();
     }
     closeStream();
     activeMeta = {

@@ -179,9 +179,13 @@ def _run_single_sim(req: SimulateOnceRequest) -> dict[str, Any]:
     # 4 — soft validation (non-fatal)
     _validate_params(project, params, warnings)
 
-    # 5 — build wrappers (isolated subfolder) + evaluate ONCE
+    # 5 — build wrappers (isolated subfolder) + evaluate ONCE. Use a UNIQUE subfolder per call so
+    # two overlapping manual sims (or a manual sim + the Explorer "Re-simulate", same route) don't
+    # share `manual_sim/` and race the per-wrapper rmtree in NGSpice_Wrapper._validate (BUG-B50).
+    import uuid
     try:
-        wrappers = _build_spicelib_wrappers(project, output_subdir="manual_sim")
+        wrappers = _build_spicelib_wrappers(
+            project, output_subdir=f"manual_sim/{uuid.uuid4().hex[:8]}")
         opt = Nevergrad_Spice_Single_Objective(setup_obj=project, spicelib_wrappers=wrappers)
         score, fit_summary = opt.evaluate(params, append_to_log=False)
     except Exception as e:

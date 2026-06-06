@@ -157,8 +157,51 @@ def test_b43_reconcile_flips_trashed_running_run(tmp_path, monkeypatch):
     assert json.loads(rj.read_text())["status"] == "error"
 
 
+def test_b40_pvt_corner_params_round_trip():
+    """A corner's per-corner `.param` overrides must survive generate → parse → generate (B40)."""
+    _ui()
+    from ui.backend.services.yaml_generator import _build_pvt_block, _pvt_block_to_form
+    form = {"pvt": {"active_corner": "c", "corners": [
+        {"name": "c", "temp": "27", "supply_node": "VDD", "supply_value": "1.5",
+         "extra_supplies": [], "enabled": True, "includes": [], "params": {"vbias": 0.7}}]}}
+    block = _build_pvt_block(form)
+    assert block is not None and block["corners"][0].get("params") == {"vbias": 0.7}
+    form2 = _pvt_block_to_form(block)  # raw block → form (re-normalizes)
+    assert form2["corners"][0]["params"] == {"vbias": 0.7}
+
+
+def test_b4_residual_project_delete_tombstone():
+    _ui()
+    from ui.backend.services import optimizer_runner as R
+    assert R.is_project_deleting("proj-x") is False
+    R.begin_project_delete("proj-x")
+    try:
+        assert R.is_project_deleting("proj-x") is True
+        assert R.is_project_deleting(None) is False
+    finally:
+        R.end_project_delete("proj-x")
+    assert R.is_project_deleting("proj-x") is False
+
+
+def test_b4_residual_start_refused_while_deleting():
+    _ui()
+    pytest.importorskip("httpx", reason="starlette TestClient needs httpx")
+    from fastapi.testclient import TestClient
+    from ui.backend.main import app
+    from ui.backend.services import optimizer_runner as R
+    client = TestClient(app)
+    R.begin_project_delete("proj-being-deleted")
+    try:
+        r = client.post("/api/optimize/start",
+                        json={"project_id": "proj-being-deleted", "replay": False})
+        assert r.status_code == 409
+    finally:
+        R.end_project_delete("proj-being-deleted")
+
+
 def test_b36_b37_optimize_route_status_codes():
     _ui()
+    pytest.importorskip("httpx", reason="starlette TestClient needs httpx")
     from fastapi.testclient import TestClient
     from ui.backend.main import app
     client = TestClient(app)
