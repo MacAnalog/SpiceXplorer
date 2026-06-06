@@ -10,7 +10,6 @@ import { useProjectStore } from "@/stores/projectStore";
 import { api } from "@/lib/api";
 import { resumeLiveRun } from "@/lib/launchRun";
 import { cn, formatEng } from "@/lib/utils";
-import { Sparkline } from "@/components/ui/sparkline";
 import { RailHeading, RailHint } from "./parts";
 import type { ProjectRun, TrashItem } from "@/types/api";
 
@@ -22,15 +21,15 @@ const RUN_STATUS_CLS: Record<string, string> = {
 };
 
 /**
- * Run-centric rail (Optimize, Explore): run history with score sparklines plus
- * the on-disk checkpoint list with refresh/delete. Salvaged unchanged from the
- * pre-split single rail — this is the most relevant context next to a run.
+ * Run-centric rail (Optimize, Explore): the ACTIVE project's runs (rename/delete/restore)
+ * plus its on-disk checkpoint list (refresh/delete/resume). The rail is project-scoped —
+ * with no project selected it shows nothing but a hint, since runs and checkpoints only
+ * have meaning relative to a project.
  */
 export function RunsRail() {
   const router = useRouter();
   const { availableCheckpoints, setAvailableCheckpoints } = useExplorerStore();
-  const { history, rerun, clearHistory, runId, isRunning } = useRunStore();
-  const { selectedRunId, openRun } = useUIStore();
+  const { isRunning } = useRunStore();
   const env = useUIStore((s) => s.env);
   const isApplied = useProjectStore((s) => s.isApplied);
   const projectId = useProjectStore((s) => s.projectId);
@@ -166,31 +165,24 @@ export function RunsRail() {
     }
   };
 
+  // Project-scoped rail: with no active project there are no runs/checkpoints to show
+  // (the legacy localStorage history + global preset catalog were intentionally removed).
+  if (!projectId) {
+    return (
+      <>
+        <RailHeading>Runs</RailHeading>
+        <RailHint>No project selected. Open a project (⌘P) to see its runs and checkpoints.</RailHint>
+      </>
+    );
+  }
+
   return (
     <>
-      <RailHeading
-        right={
-          !projectId && history.length > 0 ? (
-            <button
-              type="button"
-              onClick={clearHistory}
-              aria-label="Clear run history"
-              title="Clear run history"
-              className="rounded p-0.5 text-muted normal-case tracking-normal hover:bg-hairline hover:text-fg"
-            >
-              <Trash2 className="h-3 w-3" />
-            </button>
-          ) : undefined
-        }
-      >
-        {projectId ? "Project runs" : "Runs"}
-      </RailHeading>
+      <RailHeading>Project runs</RailHeading>
 
       {/* Per-project server runs (report.md P3): honest status pills (the startup
           reconciler flips crashed 'running' → 'error'), best score, algo·budget. */}
-      {projectId ? (
-        <>
-        {projectRuns.length === 0 ? (
+      {projectRuns.length === 0 ? (
           <RailHint>No runs yet for this project.</RailHint>
         ) : (
           projectRuns.map((r) => {
@@ -304,42 +296,6 @@ export function RunsRail() {
             ))}
           </div>
         )}
-        </>
-      ) : history.length === 0 ? (
-        <RailHint>No runs yet. Replay a checkpoint on Optimize.</RailHint>
-      ) : (
-        history.map((r) => {
-          const active = selectedRunId === r.id || (isRunning && runId === r.id);
-          return (
-            <button
-              key={r.id}
-              type="button"
-              onClick={() => {
-                openRun(r.id);
-                if (r.kind === "replay") void rerun(r);
-              }}
-              title={r.kind === "replay" ? "Click to replay this run" : "Live run (view-only)"}
-              className={cn(
-                "group flex w-full items-center gap-2 rounded px-1.5 py-1 text-left transition",
-                active ? "bg-primary-soft" : "hover:bg-hairline",
-              )}
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-1">
-                  <span className="truncate text-[11px]">{r.label}</span>
-                  <span className="font-mono text-[10px] text-muted">
-                    {r.bestScore != null ? formatEng(r.bestScore) : "—"}
-                  </span>
-                </div>
-                <div className="mt-0.5 font-mono text-[9px] text-faint">
-                  {r.kind} · {r.finalIter} it
-                </div>
-              </div>
-              <Sparkline values={r.sparkline} width={56} height={18} />
-            </button>
-          );
-        })
-      )}
 
       <RailHeading
         right={
