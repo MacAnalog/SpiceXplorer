@@ -81,6 +81,9 @@ export function RunsRail() {
     try {
       await api.restoreTrash(trashId);
       await refreshProjectRuns();
+      // The restored run's checkpoints are back on disk — re-scope the catalog so they
+      // reappear immediately (mirrors handleDeleteRun, which removes them on delete).
+      setAvailableCheckpoints(await api.listCheckpoints(projectId ?? undefined));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Restore failed");
     }
