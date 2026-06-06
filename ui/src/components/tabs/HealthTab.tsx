@@ -10,7 +10,7 @@ import { Toolbar, ToolbarLabel, ToolbarSpacer } from "@/components/shell/Toolbar
 import { CornerSelect } from "@/components/pvt/CornerSelect";
 import { useProjectStore } from "@/stores/projectStore";
 import { api } from "@/lib/api";
-import { statusForGoal } from "@/lib/utils";
+import { goalSymbol, statusForGoal } from "@/lib/utils";
 import type { SanityCheckResponse, TargetSpec } from "@/types/api";
 
 function passesSpec(s: TargetSpec, val: number | undefined | null): boolean | null {
@@ -293,12 +293,7 @@ export function HealthTab() {
                                   <Td className="font-mono">{spec.name}</Td>
                                   <Td className="font-mono">{val.toPrecision(4)}</Td>
                                   <Td className="font-mono text-muted">
-                                    {spec.goal === "exceed"
-                                      ? "≥"
-                                      : spec.goal === "minimize"
-                                        ? "≤"
-                                        : "≈"}{" "}
-                                    {spec.target}
+                                    {goalSymbol(spec.goal)} {spec.target}
                                   </Td>
                                   <Td>
                                     {p === null ? (

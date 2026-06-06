@@ -18,6 +18,27 @@ export function formatEng(value: number | null | undefined, unit = "", digits = 
   return value.toExponential(2);
 }
 
+/**
+ * Canonical goal → comparison glyph. One source of truth so every surface
+ * agrees (the codebase previously had two divergent glyph sets — `>`/`<` and
+ * `≥`/`≤` — scattered across ~8 components). `≥`/`≤` are correct because the
+ * pass band includes the tolerance boundary (see statusForGoal).
+ */
+export function goalSymbol(goal: string): string {
+  return goal === "exceed" ? "≥" : goal === "minimize" ? "≤" : "≈";
+}
+
+/** Format a millisecond duration as `m:ss` (or `h:mm:ss` past an hour). */
+export function formatDuration(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return "—";
+  const total = Math.floor(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
 export function statusForGoal(
   goal: string,
   value: number | null | undefined,

@@ -3,7 +3,7 @@ import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { useProjectStore } from "@/stores/projectStore";
 import { useUIStore } from "@/stores/uiStore";
-import { cn, formatEng } from "@/lib/utils";
+import { cn, formatEng, goalSymbol } from "@/lib/utils";
 import { RailHeading, RailHint } from "./parts";
 
 /**
@@ -32,7 +32,7 @@ export function SpecsRail() {
       <RailHeading>Target specs</RailHeading>
       {specs.map((s) => {
         const active = selectedSpec === s.name;
-        const sym = s.goal === "exceed" ? "≥" : s.goal === "minimize" ? "≤" : "≈";
+        const sym = goalSymbol(s.goal);
         return (
           <button
             key={s.name}

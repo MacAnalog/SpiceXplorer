@@ -7,7 +7,7 @@ import { useUIStore } from "@/stores/uiStore";
 import { Stat } from "@/components/ui/stat";
 import { Badge } from "@/components/ui/badge";
 import { SpecChip } from "@/components/ui/spec-chip";
-import { formatEng, statusForGoal } from "@/lib/utils";
+import { formatEng, goalSymbol, statusForGoal } from "@/lib/utils";
 
 /**
  * Always-on right rail: live run progress + spec status + best params. Hoisted
@@ -43,7 +43,7 @@ export function RightRail() {
       const verdict = statusForGoal(spec.goal, val, spec.target, spec.tolerance ?? undefined);
       const status: "ok" | "fail" | "neutral" =
         verdict === "pass" ? "ok" : verdict === "fail" ? "fail" : "neutral";
-      const goalSym = spec.goal === "exceed" ? ">" : spec.goal === "minimize" ? "<" : "≈";
+      const goalSym = goalSymbol(spec.goal);
       return { spec, val, status, goalSym };
     });
   }, [summary, bestMetrics]);
@@ -122,12 +122,12 @@ export function RightRail() {
             Best params
           </div>
           <div className="overflow-hidden rounded border border-border">
-            <table className="w-full text-xs">
+            <table className="w-full table-fixed text-xs">
               <tbody>
                 {Object.entries(bestParams).map(([k, v]) => (
                   <tr key={k} className="border-b border-border last:border-0">
-                    <td className="px-2 py-1 font-mono text-muted">{k}</td>
-                    <td className="px-2 py-1 text-right font-mono">{formatEng(v)}</td>
+                    <td className="max-w-0 truncate px-2 py-1 font-mono text-muted" title={k}>{k}</td>
+                    <td className="max-w-0 truncate px-2 py-1 text-right font-mono" title={formatEng(v)}>{formatEng(v)}</td>
                   </tr>
                 ))}
                 {Object.keys(bestParams).length === 0 && (

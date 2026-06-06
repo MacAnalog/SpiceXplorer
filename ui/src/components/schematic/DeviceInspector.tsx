@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useUIStore } from "@/stores/uiStore";
 import { api } from "@/lib/api";
-import { formatEng } from "@/lib/utils";
+import { formatEng, goalSymbol } from "@/lib/utils";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
@@ -125,8 +125,7 @@ export function DeviceInspector() {
     );
   }
 
-  const goalSym =
-    result?.goal === "exceed" ? "≥" : result?.goal === "minimize" ? "≤" : "≈";
+  const goalSym = goalSymbol(result?.goal ?? "");
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto p-3 text-xs">
