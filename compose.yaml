@@ -69,5 +69,6 @@ services:
     ports:
       - "${FRONTEND_PORT:-4000}:4000"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped

@@ -17,7 +17,8 @@ ARG NODE_TAG=22-slim
 FROM node:${NODE_TAG} AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --prefer-offline
 
 # ---- builder: produce the standalone build -----------------------------------
 FROM node:${NODE_TAG} AS builder
