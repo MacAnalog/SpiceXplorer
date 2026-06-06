@@ -103,11 +103,11 @@ def test_autosave_default_is_cwd_relative(tmp_path, monkeypatch):
 def test_autosave_output_root_routes_off_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     proj = _load_with(tmp_path, ws_root=".")
-    work = (tmp_path / "work" / "auto_save").resolve()
+    work = (tmp_path / "work" / "runs" / "r1" / "checkpoints").resolve()
     opt = _NoopOpt(proj, output_root=work)
     resolved = opt.autosave_checkpoint_dir.resolve()
-    # Checkpoints land under the provided persistent root, NOT ./auto_save.
-    assert work in resolved.parents
+    # output_root is used AS the exact checkpoint dir (per-run isolation), NOT ./auto_save.
+    assert resolved == work
     assert (tmp_path / "auto_save").resolve() not in resolved.parents
 
 

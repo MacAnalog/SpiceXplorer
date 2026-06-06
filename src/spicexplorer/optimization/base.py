@@ -60,13 +60,16 @@ class Base_Optimizer(ABC):
 
         self._TIMESTAMP = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.autosave_checkpoint_freqeucny : int = 2500
-        # Autosave base is CWD-relative `./auto_save` by default (CLI/example scripts
-        # rely on this, byte-identical). When a caller passes `output_root` (the UI
-        # backend passes a persistent dir under WORK_ROOT), checkpoints go there instead
-        # — so a Docker run's checkpoints survive `docker rm` rather than dying in the
-        # ephemeral image layer (report.md P1). The run-named subdir keeps runs disjoint.
-        _autosave_base = Path(output_root) if output_root is not None else Path("./auto_save")
-        self.autosave_checkpoint_dir : Path = _autosave_base / f"{self.setup_obj.name}_{self.setup_obj.optimizer_config.name}_{self._TIMESTAMP}"
+        # Autosave dir is CWD-relative `./auto_save/<run-name>` by default (CLI/example
+        # scripts rely on this, byte-identical). When a caller passes `output_root` it is
+        # used AS the exact checkpoint dir (the UI backend passes a per-run
+        # `runs/<id>/checkpoints` under WORK_ROOT) — so a Docker run's checkpoints survive
+        # `docker rm` rather than dying in the ephemeral image layer, and each run's
+        # checkpoints are isolated (report.md P1/P2).
+        if output_root is not None:
+            self.autosave_checkpoint_dir : Path = Path(output_root)
+        else:
+            self.autosave_checkpoint_dir = Path(f"./auto_save/{self.setup_obj.name}_{self.setup_obj.optimizer_config.name}_{self._TIMESTAMP}")
         self.autosave_checkpoint_dir.mkdir(parents=True, exist_ok=True)
         logger.critical(f"Autosave checkpoints (frequency : {self.autosave_checkpoint_freqeucny}) will be placed in {self.autosave_checkpoint_dir.absolute()}.")
         self.disable_autosave : bool = False

@@ -27,8 +27,22 @@ def work_root() -> Path:
 
 
 def auto_save_root() -> Path:
-    """Base dir for optimizer autosave checkpoints (persistent, under ``work_root``)."""
+    """Base dir for legacy/unscoped optimizer autosave checkpoints (under ``work_root``)."""
     d = work_root() / "auto_save"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def projects_root() -> Path:
+    """Base dir for encapsulated projects — ``WORK_ROOT/projects/<slug>-<id8>/`` (report.md P3)."""
+    d = work_root() / "projects"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def runs_root() -> Path:
+    """Fallback dir for runs NOT owned by a project (legacy yaml_path / example runs)."""
+    d = work_root() / "runs"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
