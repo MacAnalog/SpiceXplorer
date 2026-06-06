@@ -154,13 +154,29 @@ def _example_family(parts: tuple[str, ...]) -> str | None:
 
 
 def _project_family(project_id: str) -> str | None:
-    """The example family a project was copied from (manifest source.ref), if any."""
+    """The example family a project ultimately derives from, if any.
+
+    A ``copy_example`` project records ``source.ref`` = the example key (``OTA/<topology>/…``).
+    A ``fork`` records ``source.ref`` = the PARENT project id, so we walk the fork chain
+    (bounded, cycle-guarded) until we reach the example ancestor — otherwise a forked project
+    would lose its parent's example presets (the common duplicate-and-tweak case)."""
     from ui.backend.services import project_service
-    ref = (project_service.read_manifest(project_id).get("source") or {}).get("ref")
-    if isinstance(ref, str):
-        rp = ref.split("/")
-        if len(rp) >= 2:
-            return "/".join(rp[:2])
+    seen: set[str] = set()
+    pid: str | None = project_id
+    for _ in range(16):  # bound the walk; cheap manifests, but never loop forever
+        if not pid or pid in seen:
+            return None
+        seen.add(pid)
+        source = project_service.read_manifest(pid).get("source") or {}
+        kind, ref = source.get("kind"), source.get("ref")
+        if kind == "fork" and isinstance(ref, str):
+            pid = ref  # follow to the parent project and re-resolve its family
+            continue
+        if isinstance(ref, str):
+            rp = ref.split("/")
+            if len(rp) >= 2:
+                return "/".join(rp[:2])
+        return None
     return None
 
 
@@ -205,8 +221,14 @@ def load_checkpoint(checkpoint_id: str, limit: int = Query(default=0)):
 
 
 @router.delete("/checkpoint/{checkpoint_id}")
-def delete_checkpoint(checkpoint_id: str):
-    """Delete an autosave checkpoint. Preset checkpoints are protected."""
+def delete_checkpoint(checkpoint_id: str, project_id: str = Query(default="")):
+    """Delete an autosave checkpoint. Preset checkpoints are protected.
+
+    ``project_id`` scopes the search to that project's own runs — essential because a
+    checkpoint stem carries no project/run id, so a forked/copied project produces
+    identically-named stems; an unscoped delete would unlink another project's same-named
+    checkpoint the user never touched. Omitted → the legacy global search (delete-by-id).
+    """
     presets = preset_checkpoint_paths()
     if checkpoint_id in presets:
         raise HTTPException(
@@ -214,7 +236,7 @@ def delete_checkpoint(checkpoint_id: str):
             f"Checkpoint '{checkpoint_id}' is a preset and cannot be deleted from the UI.",
         )
 
-    roots = _autosave_roots()
+    roots = _autosave_roots_for(project_id=project_id or None, all_projects=not project_id)
     if not roots:
         raise HTTPException(404, "No autosave directory.")
 

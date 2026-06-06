@@ -110,10 +110,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     try {
       await api.deleteProject(id);
       await get().refreshProjects();
-      // If the active project was deleted, detach so runs no longer resolve to a gone
-      // project.yaml (they become unscoped until the user switches to another project).
+      // If the active project was deleted, FULLY reset — nulling only id/name would leave
+      // isApplied=true with yamlPath/summary still pointing at the now-trashed project.yaml,
+      // so a subsequent Start would POST that dead path (unscoped) instead of being blocked.
       if (get().projectId === id) {
-        set({ projectId: null, projectName: null });
+        get().reset();
       }
       return true;
     } catch {

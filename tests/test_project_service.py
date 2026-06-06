@@ -157,3 +157,58 @@ def test_rename_and_delete_run(ps):
     assert not rd.exists()
     with pytest.raises(FileNotFoundError):
         ps.rename_run(pid, "run-xyz", "gone")
+
+
+def test_delete_run_then_restore_roundtrips_into_runs_not_project(ps):
+    """A restored run must land back in the OWNER's runs/ — never as a project dir (which,
+    lacking project.yaml, would be a corrupt registry entry squatting the owner's slug)."""
+    pid = ps.create_project("Owner")
+    rd = ps.run_dir(pid, "2026_algo_abcd1234")
+    (rd / "run.json").write_text(json.dumps({"run_id": "run-1", "status": "done"}))
+    trash_id = ps.delete_run(pid, "run-1")
+    # The trash item is tagged kind=run, and list_trash surfaces it.
+    item = next(t for t in ps.list_trash() if t["trash_id"] == trash_id)
+    assert item["kind"] == "run" and item["project_id"] == pid
+    # Restore returns the OWNER id and puts the run back under the project's runs/.
+    assert ps.restore_project(trash_id) == pid
+    runs = ps.list_runs(pid)
+    assert len(runs) == 1 and runs[0]["run_id"] == "run-1"
+    # The project itself is untouched (still a real, loadable project).
+    assert ps.project_exists(pid)
+
+
+def test_restore_run_refuses_when_owner_deleted(ps):
+    """Restoring a run whose owner project is gone must refuse (else it recreates a bare,
+    project.yaml-less projects/<owner>/ that blocks the owner's own restore)."""
+    pid = ps.create_project("Owner")
+    rd = ps.run_dir(pid, "2026_algo_abcd1234")
+    (rd / "run.json").write_text(json.dumps({"run_id": "run-1", "status": "done"}))
+    run_trash = ps.delete_run(pid, "run-1")
+    ps.soft_delete_project(pid)  # owner now gone
+    with pytest.raises(ValueError):
+        ps.restore_project(run_trash)
+    # And the bogus owner dir was NOT created as a side effect.
+    assert not ps.project_dir(pid).exists()
+
+
+def test_restore_corrupt_sidecar_raises_runtime_not_value(ps):
+    """A corrupt trash sidecar is a data error (→ 500), not a clobber conflict (→ 409)."""
+    pid = ps.create_project("Doomed")
+    trash_id = ps.soft_delete_project(pid)
+    (ps.trash_root() / trash_id / ".trashmeta.json").write_text("{not json")
+    with pytest.raises(RuntimeError):
+        ps.restore_project(trash_id)
+
+
+def test_delete_run_trash_id_uses_full_run_id(ps):
+    """The trash id embeds the FULL run id (+random suffix), not a truncated prefix, so two
+    same-prefix runs deleted in the same second can't collide and clobber each other."""
+    pid = ps.create_project("P")
+    for rid in ("deadbeef-1111", "deadbeef-2222"):
+        rd = ps.run_dir(pid, f"2026_a_{rid[:8]}_{rid[-4:]}")
+        (rd / "run.json").write_text(json.dumps({"run_id": rid, "status": "done"}))
+    t1 = ps.delete_run(pid, "deadbeef-1111")
+    t2 = ps.delete_run(pid, "deadbeef-2222")
+    assert t1 != t2
+    trash_ids = {t["trash_id"] for t in ps.list_trash()}
+    assert {t1, t2} <= trash_ids  # both recoverable, neither buried

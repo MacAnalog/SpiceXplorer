@@ -120,11 +120,15 @@ export function ProjectsOverlay() {
   const doFork = async (id: string) => {
     setBusy(id);
     setError(null);
-    const newId = await forkProject(id);
-    setBusy(null);
-    if (!newId) { setError("Fork failed."); return; }
-    const ok = await switchProject(newId);
-    if (ok) closeProjects();
+    try {
+      const newId = await forkProject(id);
+      if (!newId) { setError("Fork failed."); return; }
+      const ok = await switchProject(newId);
+      if (ok) closeProjects();
+      else setError("Forked, but failed to open the new project.");
+    } finally {
+      setBusy(null);
+    }
   };
 
   const doDelete = async (id: string) => {

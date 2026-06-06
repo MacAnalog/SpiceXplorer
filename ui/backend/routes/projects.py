@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from spicexplorer.core.domains import Project_Setup
 from ui.backend.routes.project import _summarise
-from ui.backend.services import project_service
+from ui.backend.services import optimizer_runner, project_service
 
 router = APIRouter()
 
@@ -125,13 +125,16 @@ def fork_project(project_id: str, body: ForkRequest):
 
 @router.delete("/projects/{project_id}")
 def delete_project(project_id: str):
+    # Quiesce any in-flight live run for this project FIRST, else its writer thread
+    # re-creates the moved-away run tree and defeats the soft-delete (corruption + leak).
+    stopped = optimizer_runner.stop_runs_for(project_id=project_id)
     try:
         trash_id = project_service.soft_delete_project(project_id)
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
         raise HTTPException(400, f"delete failed: {e}")
-    return {"ok": True, "trash_id": trash_id}
+    return {"ok": True, "trash_id": trash_id, "stopped_runs": stopped}
 
 
 @router.get("/trash")
@@ -147,11 +150,15 @@ def restore_trash(trash_id: str):
         raise HTTPException(404, str(e))
     except ValueError as e:
         raise HTTPException(409, str(e))
+    except RuntimeError as e:  # corrupt trash metadata — a data error, not a conflict
+        raise HTTPException(500, str(e))
     return {"id": pid}
 
 
 @router.patch("/projects/{project_id}/runs/{run_id}")
 def rename_run(project_id: str, run_id: str, body: RenameRunRequest):
+    if not project_service.project_exists(project_id):
+        raise HTTPException(404, f"project '{project_id}' not found")
     try:
         run = project_service.rename_run(project_id, run_id, body.label)
     except FileNotFoundError as e:
@@ -163,6 +170,10 @@ def rename_run(project_id: str, run_id: str, body: RenameRunRequest):
 
 @router.delete("/projects/{project_id}/runs/{run_id}")
 def delete_run(project_id: str, run_id: str):
+    if not project_service.project_exists(project_id):
+        raise HTTPException(404, f"project '{project_id}' not found")
+    # Stop the run if it's live (same writer-resurrection hazard as project delete).
+    optimizer_runner.stop_runs_for(project_id=project_id, run_id=run_id)
     try:
         trash_id = project_service.delete_run(project_id, run_id)
     except FileNotFoundError as e:

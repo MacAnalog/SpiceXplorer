@@ -583,5 +583,28 @@ def stop_run(run_id: str) -> None:
         state.stop_event.set()
 
 
+def stop_runs_for(*, project_id: str | None = None, run_id: str | None = None,
+                  timeout: float = 10.0) -> int:
+    """Stop + join any IN-FLIGHT live runs matching a project or a specific run, returning
+    the count stopped. A lifecycle op (delete project/run) must call this BEFORE moving the
+    run dir to trash: otherwise the worker thread holds a cached absolute ``run_dir`` and its
+    next ``save_checkpoint`` re-``mkdir``s the moved-away tree at the old path — escaping the
+    trash (incomplete soft-delete) and resurrecting a ``projects/P`` dir that then blocks
+    restore. Setting ``stop_event`` makes the optimizer exit at the next trial boundary; we
+    join the thread so the dir is quiescent when the caller moves it."""
+    targets = [
+        st for st in _runs.values()
+        if not st.done
+        and (run_id is None or st.run_id == run_id)
+        and (project_id is None or st.project_id == project_id)
+    ]
+    for st in targets:
+        st.stop_event.set()
+    for st in targets:
+        if st.thread is not None and st.thread.is_alive():
+            st.thread.join(timeout=timeout)
+    return len(targets)
+
+
 def get_run(run_id: str) -> RunState | None:
     return _runs.get(run_id)

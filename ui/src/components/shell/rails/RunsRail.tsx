@@ -1,8 +1,8 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Route } from "next";
 import { useRouter } from "next/navigation";
-import { RefreshCw, X, Trash2, Play, Pencil, Check } from "lucide-react";
+import { RefreshCw, X, Trash2, Play, Pencil, Check, Undo2 } from "lucide-react";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { useRunStore } from "@/stores/runStore";
 import { useUIStore } from "@/stores/uiStore";
@@ -12,7 +12,7 @@ import { resumeLiveRun } from "@/lib/launchRun";
 import { cn, formatEng } from "@/lib/utils";
 import { Sparkline } from "@/components/ui/sparkline";
 import { RailHeading, RailHint } from "./parts";
-import type { ProjectRun } from "@/types/api";
+import type { ProjectRun, TrashItem } from "@/types/api";
 
 const RUN_STATUS_CLS: Record<string, string> = {
   running: "bg-primary-soft text-primary",
@@ -38,10 +38,13 @@ export function RunsRail() {
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [projectRuns, setProjectRuns] = useState<ProjectRun[]>([]);
+  const [runTrash, setRunTrash] = useState<TrashItem[]>([]);
   // Per-run lifecycle UI state (report.md P4): inline rename draft + armed delete.
   const [editingRunId, setEditingRunId] = useState<string | null>(null);
   const [editRunLabel, setEditRunLabel] = useState("");
   const [pendingRunDelete, setPendingRunDelete] = useState<string | null>(null);
+  // Guards against the run-rename input firing commit twice (Enter then the unmount blur).
+  const runRenameInFlight = useRef(false);
 
   // Per-project run history (report.md P3) — server-persisted, replacing the
   // localStorage list when a registered project is active. Refetched on project
@@ -49,28 +52,45 @@ export function RunsRail() {
   useEffect(() => {
     if (!projectId) {
       setProjectRuns([]);
+      setRunTrash([]);
       return;
     }
     let alive = true;
     api.getProjectRuns(projectId)
       .then((r) => { if (alive) setProjectRuns(r.runs); })
       .catch(() => { if (alive) setProjectRuns([]); });
+    api.listTrash()
+      .then((r) => { if (alive) setRunTrash(r.trash.filter((t) => t.kind === "run" && t.project_id === projectId)); })
+      .catch(() => { if (alive) setRunTrash([]); });
     return () => { alive = false; };
   }, [projectId, isRunning]);
 
   const refreshProjectRuns = async () => {
     if (!projectId) return;
     try {
-      const r = await api.getProjectRuns(projectId);
+      const [r, t] = await Promise.all([api.getProjectRuns(projectId), api.listTrash()]);
       setProjectRuns(r.runs);
+      setRunTrash(t.trash.filter((x) => x.kind === "run" && x.project_id === projectId));
     } catch {
       /* best-effort */
     }
   };
 
+  const handleRestoreRun = async (trashId: string) => {
+    setError(null);
+    try {
+      await api.restoreTrash(trashId);
+      await refreshProjectRuns();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Restore failed");
+    }
+  };
+
   const commitRunRename = async (runId: string) => {
+    if (runRenameInFlight.current) return;  // Enter + blur both fire — commit once.
     const label = editRunLabel.trim();
     if (!projectId || !label) { setEditingRunId(null); return; }
+    runRenameInFlight.current = true;
     setError(null);
     try {
       await api.renameRun(projectId, runId, label);
@@ -79,6 +99,7 @@ export function RunsRail() {
       setError(e instanceof Error ? e.message : "Rename failed");
     } finally {
       setEditingRunId(null);
+      runRenameInFlight.current = false;
     }
   };
 
@@ -133,7 +154,7 @@ export function RunsRail() {
     setPendingDelete(id);
     setError(null);
     try {
-      await api.deleteCheckpoint(id);
+      await api.deleteCheckpoint(id, projectId ?? undefined);
       setAvailableCheckpoints(await api.listCheckpoints(projectId ?? undefined));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
@@ -165,7 +186,8 @@ export function RunsRail() {
       {/* Per-project server runs (report.md P3): honest status pills (the startup
           reconciler flips crashed 'running' → 'error'), best score, algo·budget. */}
       {projectId ? (
-        projectRuns.length === 0 ? (
+        <>
+        {projectRuns.length === 0 ? (
           <RailHint>No runs yet for this project.</RailHint>
         ) : (
           projectRuns.map((r) => {
@@ -198,7 +220,7 @@ export function RunsRail() {
                         <span className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                           <button
                             type="button"
-                            onClick={() => { setEditingRunId(r.run_id); setEditRunLabel(r.label ?? r.algorithm ?? ""); }}
+                            onClick={() => { setPendingRunDelete(null); setEditingRunId(r.run_id); setEditRunLabel(r.label ?? r.algorithm ?? ""); }}
                             aria-label="Rename run"
                             title="Rename run"
                             className="rounded p-0.5 text-faint hover:bg-hairline hover:text-fg"
@@ -206,15 +228,26 @@ export function RunsRail() {
                             <Pencil className="h-3 w-3" />
                           </button>
                           {isConfirming ? (
-                            <button
-                              type="button"
-                              onClick={() => void handleDeleteRun(r.run_id)}
-                              aria-label="Confirm delete run"
-                              title="Click again to delete"
-                              className="rounded p-0.5 text-danger hover:bg-danger-soft"
-                            >
-                              <Check className="h-3 w-3" />
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteRun(r.run_id)}
+                                aria-label="Confirm delete run"
+                                title="Confirm delete"
+                                className="rounded p-0.5 text-danger hover:bg-danger-soft"
+                              >
+                                <Check className="h-3 w-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPendingRunDelete(null)}
+                                aria-label="Cancel delete run"
+                                title="Cancel"
+                                className="rounded p-0.5 text-muted hover:bg-hairline hover:text-fg"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </>
                           ) : (
                             <button
                               type="button"
@@ -246,7 +279,29 @@ export function RunsRail() {
               </div>
             );
           })
-        )
+        )}
+        {runTrash.length > 0 && (
+          <div className="mt-1">
+            <div className="px-1.5 pb-0.5 text-[9px] font-medium uppercase tracking-wider text-faint">
+              Recently deleted
+            </div>
+            {runTrash.map((t) => (
+              <div key={t.trash_id} className="flex items-center justify-between gap-1 rounded px-1.5 py-1 text-muted">
+                <span className="truncate text-[11px] line-through decoration-faint">{t.name}</span>
+                <button
+                  type="button"
+                  onClick={() => void handleRestoreRun(t.trash_id)}
+                  aria-label="Restore run"
+                  title="Restore run"
+                  className="inline-flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-fg hover:bg-hairline"
+                >
+                  <Undo2 className="h-3 w-3" /> Restore
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        </>
       ) : history.length === 0 ? (
         <RailHint>No runs yet. Replay a checkpoint on Optimize.</RailHint>
       ) : (

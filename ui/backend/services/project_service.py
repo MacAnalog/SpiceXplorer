@@ -393,25 +393,53 @@ def list_trash() -> list[dict[str, Any]]:
 
 
 def restore_project(trash_id: str) -> str:
-    """MOVE a trashed project back to the registry. Returns the restored project id.
-    Refuses if a project with the original id now exists (no clobber)."""
+    """MOVE a trashed item back to the registry. Returns the restored project id (for a
+    run item, the OWNING project id). Refuses to clobber an existing destination.
+
+    A trash item is either a project (``kind: project`` → restored to ``project_dir``) or a
+    single run (``kind: run`` → restored to the owning project's ``runs/``). Branching on
+    ``kind`` is essential: a run dir restored as a project would be a corrupt registry entry
+    (no ``project.yaml``) that squats the owner's slug — so deleted runs MUST round-trip
+    back into ``runs/``, never ``project_dir``."""
     if "/" in trash_id or ".." in trash_id or "\\" in trash_id:
         raise ValueError(f"invalid trash id: {trash_id!r}")
     src = trash_root() / trash_id
-    if not (src / ".trashmeta.json").exists():
+    sidecar = src / ".trashmeta.json"
+    if not sidecar.exists():
         raise FileNotFoundError(f"trash item '{trash_id}' not found")
-    meta = json.loads((src / ".trashmeta.json").read_text())
+    # A corrupt sidecar is a data error, NOT a 409 conflict — re-raise as non-ValueError so
+    # the route maps it to 500 rather than swallowing it as "already exists".
+    try:
+        meta = json.loads(sidecar.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        raise RuntimeError(f"corrupt trash metadata for '{trash_id}': {e}") from e
+    _assert_under_work_root(src)
+
+    if meta.get("kind") == "run":
+        owner = meta.get("project_id") or None
+        # Refuse BEFORE runs_dir() (which would mkdir the tree): restoring into a deleted
+        # owner would recreate a bare projects/<owner>/ with no project.yaml — a corrupt
+        # entry that then blocks the owner's own restore (dst.exists 409).
+        if owner and not project_exists(owner):
+            raise ValueError(
+                f"cannot restore run: owning project '{owner}' no longer exists — restore it first"
+            )
+        dst = runs_dir(owner) / meta.get("name", trash_id)
+        _assert_under_work_root(dst)
+        if dst.exists():
+            raise ValueError(f"cannot restore: run '{meta.get('run_id')}' already exists")
+        shutil.move(str(src), str(dst))
+        (dst / ".trashmeta.json").unlink(missing_ok=True)
+        return owner or ""
+
     project_id = meta.get("project_id") or trash_id.split("__", 1)[0]
     dst = project_dir(project_id)
-    _assert_under_work_root(src)
     _assert_under_work_root(dst)
     if dst.exists():
         raise ValueError(f"cannot restore: project '{project_id}' already exists")
     shutil.move(str(src), str(dst))
     # Drop the trash sidecar — it's meaningless once restored.
-    sidecar = dst / ".trashmeta.json"
-    if sidecar.exists():
-        sidecar.unlink()
+    (dst / ".trashmeta.json").unlink(missing_ok=True)
     touch_manifest(project_id)
     return project_id
 
@@ -456,7 +484,10 @@ def delete_run(project_id: str | None, run_id: str) -> str:
         raise FileNotFoundError(f"run '{run_id}' not found")
     _assert_under_work_root(rd)
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    trash_id = f"run__{run_id[:8]}__{ts}"
+    # Use the FULL run_id plus a random suffix: a truncated id + whole-second timestamp
+    # could collide (two runs sharing an 8-hex prefix deleted in the same second), and
+    # shutil.move would then nest one inside the other and clobber its sidecar (silent loss).
+    trash_id = f"run__{run_id}__{ts}_{uuid.uuid4().hex[:6]}"
     dst = trash_root() / trash_id
     _assert_under_work_root(dst)
     meta = {

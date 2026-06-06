@@ -97,6 +97,55 @@ def test_run_rename_and_delete_routes(client):
 
     dr = client.delete(f"/api/projects/{pid}/runs/run-1")
     assert dr.status_code == 200, dr.text
+    trash_id = dr.json()["trash_id"]
     assert client.get(f"/api/projects/{pid}/runs").json()["runs"] == []
     # Deleting an already-gone run is a 404.
     assert client.delete(f"/api/projects/{pid}/runs/run-1").status_code == 404
+    # The deleted run is restorable and round-trips back into the project's runs.
+    rr = client.post(f"/api/trash/{trash_id}/restore")
+    assert rr.status_code == 200, rr.text
+    assert rr.json()["id"] == pid
+    runs = client.get(f"/api/projects/{pid}/runs").json()["runs"]
+    assert [r["run_id"] for r in runs] == ["run-1"]
+
+
+def test_run_routes_404_on_missing_project(client):
+    # rename/delete-run on a bogus project must 404 (and not mkdir a ghost project tree).
+    assert client.patch("/api/projects/ghost-00000000/runs/x", json={"label": "y"}).status_code == 404
+    assert client.delete("/api/projects/ghost-00000000/runs/x").status_code == 404
+    from ui.backend.services import project_service
+    assert not project_service.project_dir("ghost-00000000").exists()
+
+
+def test_fork_inherits_example_preset_family(client):
+    """A fork's catalog must show its example ancestor's presets — so _project_family has to
+    follow the fork's source.ref (a project id) up to the example."""
+    from ui.backend.routes.checkpoint import _project_family
+    from ui.backend.services import project_service
+    examples = project_service.list_examples()
+    cascode = next((e for e in examples if "cascode" in e["key"]), examples[0])
+    parent = project_service.copy_example(cascode["key"], "Parent")
+    fam = _project_family(parent)
+    assert fam  # e.g. "OTA/cascode"
+    fork = project_service.fork_project(parent, "Forked")
+    assert _project_family(fork) == fam
+
+
+def test_checkpoint_delete_is_project_scoped(client):
+    """Deleting a checkpoint with project_id must not touch another project's same-named one."""
+    import json as _json
+
+    from ui.backend.services import project_service
+    a = client.post("/api/projects", json={"name": "A"}).json()["id"]
+    b = client.post("/api/projects", json={"name": "B"}).json()["id"]
+    paths = {}
+    for pid in (a, b):
+        ck = project_service.run_dir(pid, "2026_x_aaaa1111") / "checkpoints"
+        ck.mkdir(parents=True, exist_ok=True)
+        p = ck / "shared_LhsDE_3_1.json"
+        p.write_text(_json.dumps({"optimization_log": []}))
+        paths[pid] = p
+    r = client.delete(f"/api/checkpoint/shared_LhsDE_3_1?project_id={a}")
+    assert r.status_code == 200, r.text
+    assert not paths[a].exists()      # A's copy gone
+    assert paths[b].exists()          # B's identically-named copy untouched
