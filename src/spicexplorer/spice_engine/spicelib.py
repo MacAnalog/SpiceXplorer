@@ -297,26 +297,32 @@ class NGSpice_Wrapper:
     def update_params(self, parameterization: Dict[str, float]) -> bool:
         logger = self.logger
         logger.debug("Updating parameters...")
-        RES_UNIT = 'k' # kilo
-        CAP_UNIT = 'p' # pico
         if self.editor is None:
             raise RuntimeError("Editor not initialized")
 
         for key, value in parameterization.items():
-            try: # Validate parameter already exists
+            try:  # Validate parameter already exists
                 self.editor.get_parameter(key)
             except ParameterNotFoundError:
-                logger.error(f"❌ Parameter {key} not found in the netlist... exiting")
-                return False
+                # A testbench whose netlist doesn't declare this param (e.g. a loopgain
+                # tb that omits CL/VCM) must NOT abort the whole run — keep the netlist's
+                # own default and move on. (Was: log ERROR + `return False`, which killed
+                # the optimization the moment one testbench/netlist was inconsistent.)
+                logger.warning(
+                    f"⚠️ Parameter {key} is not declared in this testbench netlist — "
+                    f"skipping it (keeping the netlist's own default)."
+                )
+                continue
 
-            if key.startswith("C"):
-                self.editor.set_parameter(key, f"{value}{CAP_UNIT}")
-            elif key.startswith("R"):
-                self.editor.set_parameter(key, f"{value}{RES_UNIT}")
-            else:
-                self.editor.set_parameter(key, f"{value}")
-                logger.debug(f"... Parameter {key} set to {value:.3e}")
-        logger.debug("✅  All parameters updated successfully")
+            # Values arrive ALREADY in absolute SI: engineering YAML strings ("50f") are
+            # resolved to floats (5e-14) by parse_value before they reach here. So set the
+            # value directly. The previous code appended a unit by NAME PREFIX —
+            # C* → 'p' (pico), R* → 'k' (kilo) — which DOUBLE-converted: e.g. CL 5e-14
+            # became "5e-14p" = 5e-26 F (1e12× too small), silently corrupting capacitor
+            # params (the only C*/R* param in the examples is CL).
+            self.editor.set_parameter(key, f"{value}")
+            logger.debug(f"... Parameter {key} set to {value:.3e}")
+        logger.debug("✅  Parameters updated (any undeclared ones were skipped)")
         return True
 
     def _strip_matching_instructions(self, pattern: str) -> bool:
