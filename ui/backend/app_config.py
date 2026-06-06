@@ -2,12 +2,36 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 BACKEND_DIR = Path(__file__).parent
 UI_DIR = BACKEND_DIR.parent
 REPO_ROOT = UI_DIR.parent
+
+
+def work_root() -> Path:
+    """The single root for all MUTABLE state (run checkpoints, scratch sims).
+
+    ``WORK_ROOT`` env (the Docker backend sets it to ``/work``, a host bind mount)
+    else ``<repo>/work`` (gitignored). Read-only assets — examples, presets, the
+    schematic SVG — stay ``REPO_ROOT``-relative via ``resolve()``; only durable run
+    artifacts go under here. This de-CWDs the autosave so checkpoints survive a
+    ``docker rm`` instead of dying in the ephemeral image layer (report.md P1).
+    """
+    env = os.environ.get("WORK_ROOT")
+    root = (Path(env).expanduser() if env else (REPO_ROOT / "work")).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def auto_save_root() -> Path:
+    """Base dir for optimizer autosave checkpoints (persistent, under ``work_root``)."""
+    d = work_root() / "auto_save"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
 
 _app_config: dict[str, Any] | None = None
 

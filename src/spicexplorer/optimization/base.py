@@ -54,13 +54,19 @@ EPSILON = np.float64(1e-12)
 # ------------------------------------------------
 class Base_Optimizer(ABC):
     """Base abstract class for all circuit optimizers"""
-    def __init__(self, setup_obj: Project_Setup):
+    def __init__(self, setup_obj: Project_Setup, output_root: Path | None = None):
         self.setup_obj = setup_obj
         self.optimizer_config = setup_obj.optimizer_config
 
         self._TIMESTAMP = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.autosave_checkpoint_freqeucny : int = 2500
-        self.autosave_checkpoint_dir : Path = Path(f"./auto_save/{self.setup_obj.name}_{self.setup_obj.optimizer_config.name}_{self._TIMESTAMP}")
+        # Autosave base is CWD-relative `./auto_save` by default (CLI/example scripts
+        # rely on this, byte-identical). When a caller passes `output_root` (the UI
+        # backend passes a persistent dir under WORK_ROOT), checkpoints go there instead
+        # — so a Docker run's checkpoints survive `docker rm` rather than dying in the
+        # ephemeral image layer (report.md P1). The run-named subdir keeps runs disjoint.
+        _autosave_base = Path(output_root) if output_root is not None else Path("./auto_save")
+        self.autosave_checkpoint_dir : Path = _autosave_base / f"{self.setup_obj.name}_{self.setup_obj.optimizer_config.name}_{self._TIMESTAMP}"
         self.autosave_checkpoint_dir.mkdir(parents=True, exist_ok=True)
         logger.critical(f"Autosave checkpoints (frequency : {self.autosave_checkpoint_freqeucny}) will be placed in {self.autosave_checkpoint_dir.absolute()}.")
         self.disable_autosave : bool = False
@@ -453,10 +459,11 @@ class Base_Optimizer(ABC):
 # ------------------------------------------------
 class Spice_Base_Optimizer(Base_Optimizer):
     """ Base class for optimizers that use SPICE simulations."""
-    def __init__(self,  
+    def __init__(self,
                 setup_obj: Project_Setup,
-                spicelib_wrappers : Dict[str, NGSpice_Wrapper]):
-        super().__init__(setup_obj = setup_obj)
+                spicelib_wrappers : Dict[str, NGSpice_Wrapper],
+                output_root: Path | None = None):
+        super().__init__(setup_obj = setup_obj, output_root = output_root)
         self.spicelib_wrappers = spicelib_wrappers
         self.__post_init__()
 
@@ -843,8 +850,9 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
 class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
     def __init__(self,
                  setup_obj: Project_Setup,
-                 spicelib_wrappers : Dict[str, NGSpice_Wrapper]):
-        """ 
+                 spicelib_wrappers : Dict[str, NGSpice_Wrapper],
+                 output_root: Path | None = None):
+        """
         A Concrete implementation of Spice_Base_Optimizer that evaluates a circuit 
         against a list of TargetSpecs.
         
@@ -853,7 +861,7 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
         2. Extract scalar metrics defined in TargetSpecs.
         3. Calculate a scalar fitness score (Penalty only).
         """
-        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers)
+        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers, output_root = output_root)
         self.target_specs: ListTargetSpec = setup_obj.optimizer_config.target_specs
         logger.info(f"Initialized the Nevergrad_Spice_Multi_Spec_Optimizer with {len(self.target_specs.targets)} target specs")
     
@@ -1003,8 +1011,9 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
 class Spice_Single_Objective(Spice_Constraint_Satisfaction):
     def __init__(self,
                 setup_obj: Project_Setup,
-                spicelib_wrappers : Dict[str, NGSpice_Wrapper]):
-        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers)
+                spicelib_wrappers : Dict[str, NGSpice_Wrapper],
+                output_root: Path | None = None):
+        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers, output_root = output_root)
     
     def compute_fitness_for_spec(self, curr_val: np.float64 | float, target_spec: TargetSpec) -> np.float64:
         """Computes the fitness score for current achieved metric given the target spec. Negative values """

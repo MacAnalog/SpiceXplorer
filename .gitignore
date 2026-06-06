@@ -29,6 +29,8 @@ venv/
 .env
 !.env.example
 work/
+# Legacy CWD-relative optimizer autosave (now persists under work/ — report.md P1)
+auto_save/
 
 # Build and distribution directories
 build/

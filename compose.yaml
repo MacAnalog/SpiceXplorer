@@ -34,6 +34,10 @@ services:
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       BACKEND_PORT: 8000
+      # All mutable run state (autosave checkpoints) lives under the /work bind
+      # mount below, so checkpoints persist on the host across `docker rm` instead
+      # of dying in the ephemeral image layer (report.md P1).
+      WORK_ROOT: /work
       # Align in-container file ownership to the host user (Linux bind mounts).
       HOST_UID: ${UID:-1000}
       HOST_GID: ${GID:-1000}

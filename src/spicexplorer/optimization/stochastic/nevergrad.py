@@ -3,6 +3,7 @@ import logging
 import numpy        as np
 import nevergrad    as ng
 
+from    pathlib     import Path
 from    typing      import Dict, Tuple, Any, Optional
 
 # Symxplorer Specific Imports
@@ -218,7 +219,8 @@ class Nevergrad_Spice_Constraint_Satisfaction(NevergradMixin, Spice_Constraint_S
 class Nevergrad_Spice_Single_Objective(NevergradMixin, Spice_Single_Objective):
     def __init__(self,
                  setup_obj: Project_Setup,
-                 spicelib_wrappers : Dict[TestbenchParams, NGSpice_Wrapper]):
-        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers)
+                 spicelib_wrappers : Dict[TestbenchParams, NGSpice_Wrapper],
+                 output_root: Path | None = None):
+        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers, output_root = output_root)
         self.parametrization: ng.p.Dict | None = None
         logger.info(f"started the {__class__} optimizer class")

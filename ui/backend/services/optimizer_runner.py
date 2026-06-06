@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from spicexplorer.core.domains import Project_Setup
+from ui.backend.app_config import auto_save_root
 from ui.backend.services.num import safe_float as _safe_float
 
 logger = logging.getLogger(__name__)
@@ -304,15 +305,18 @@ def _run_live(state: RunState, project_path: str) -> None:
         # rmtree — a concurrent manual sim (which uses outdir/manual_sim) (BUG-A8 / OPT-2).
         wrappers = _build_spicelib_wrappers(project, output_subdir="live")
         stream_cls = _streaming_optimizer_class(state)
+        # Persist autosave checkpoints under WORK_ROOT (the Docker /work bind mount),
+        # NOT the CWD-relative ./auto_save that dies with the container (report.md P1).
+        save_root = auto_save_root()
         if state.resume_path:
             logger.info("[run %s] resuming from checkpoint %s", state.run_id[:8], state.resume_path)
-            opt = stream_cls(setup_obj=project, spicelib_wrappers=wrappers)
+            opt = stream_cls(setup_obj=project, spicelib_wrappers=wrappers, output_root=save_root)
             opt.optimization_log = _load_checkpoint_log(state.resume_path)
             logger.info("[run %s] restored %d prior trials", state.run_id[:8], len(opt.optimization_log))
             keep_history = True
         else:
             logger.info("[run %s] building optimizer", state.run_id[:8])
-            opt = stream_cls(setup_obj=project, spicelib_wrappers=wrappers)
+            opt = stream_cls(setup_obj=project, spicelib_wrappers=wrappers, output_root=save_root)
             keep_history = False
         if state.autosave_every and state.autosave_every > 0:
             opt.autosave_checkpoint_freqeucny = state.autosave_every

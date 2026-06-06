@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ui.backend.app_config import preset_checkpoint_paths, REPO_ROOT
+from ui.backend.app_config import preset_checkpoint_paths, REPO_ROOT, auto_save_root
 from ui.backend.services.checkpoint_reader import read_checkpoint, compute_envelope, compute_scatter
 
 router = APIRouter()
@@ -86,7 +86,9 @@ def _autosave_roots() -> list[Path]:
     (BUG-A9 / OPT-3)."""
     roots: list[Path] = []
     seen: set[Path] = set()
-    for r in (REPO_ROOT / "auto_save", Path.cwd() / "auto_save"):
+    # WORK_ROOT/auto_save is where runs now persist (report.md P1); the legacy
+    # REPO_ROOT/auto_save + cwd/auto_save are kept so older runs aren't orphaned.
+    for r in (auto_save_root(), REPO_ROOT / "auto_save", Path.cwd() / "auto_save"):
         rr = r.resolve()
         if rr not in seen and rr.exists():
             seen.add(rr)
