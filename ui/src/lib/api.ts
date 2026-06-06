@@ -13,6 +13,7 @@ import type {
   SanityCheckResponse,
   SimulateOnceResponse,
   NetlistParseResponse,
+  SpecLibraryResponse,
   GenerateProjectResponse,
   ParseProjectResponse,
   WizardForm,
@@ -67,12 +68,14 @@ export const api = {
       body: JSON.stringify({ yaml_path }),
     }),
 
-  // Apply edited/uploaded YAML that has no on-disk path (returns yaml_path: "").
-  loadProjectContent: (yaml_content: string) =>
+  // Apply edited/uploaded YAML. Pass yaml_path when the content was edited from a
+  // loaded file so the backend anchors relative ws_root/netlist resolution to the
+  // original directory (the applied YAML is persisted to a temp file).
+  loadProjectContent: (yaml_content: string, yaml_path?: string) =>
     req<LoadProjectResponse>("/api/project/load", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ yaml_content }),
+      body: JSON.stringify({ yaml_content, yaml_path }),
     }),
 
   validateYaml: (yaml_content: string) =>
@@ -158,6 +161,14 @@ export const api = {
 
   schematicUrl: () => `${BASE}/api/schematic`,
 
+  // URL for the downloadable run-report zip (checkpoint + YAML + summary.md).
+  reportUrl: (checkpointId: string, yamlPath?: string) => {
+    const q = new URLSearchParams();
+    if (yamlPath) q.set("yaml_path", yamlPath);
+    const qs = q.toString();
+    return `${BASE}/api/checkpoint/${encodeURIComponent(checkpointId)}/report${qs ? `?${qs}` : ""}`;
+  },
+
   sanityCheck: (yaml_path: string, active_corner?: string) =>
     req<SanityCheckResponse>("/api/sanity-check", {
       method: "POST",
@@ -218,6 +229,9 @@ export const api = {
     }
     return res.json();
   },
+
+  // Shipped analog-spec templates for the wizard's one-click "Spec library".
+  specLibrary: () => req<SpecLibraryResponse>("/api/spec-library"),
 
   generateProject: (form: WizardForm, save_path?: string) =>
     req<GenerateProjectResponse>("/api/project/generate", {

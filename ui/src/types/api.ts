@@ -331,10 +331,24 @@ export interface NetlistParam {
   default_val: string;
 }
 
+export interface MeasCandidate {
+  name: string;
+  sim_type: string;
+}
+
 export interface NetlistParseResponse {
   ok: boolean;
   filename: string;
   params: NetlistParam[];
+  /** `.meas` result names discovered in the netlist (Target-Specs auto-discovery). */
+  meas_candidates?: MeasCandidate[];
+}
+
+/** A shipped analog-spec template (examples/spec_library.yaml) for one-click adds. */
+export type SpecLibraryEntry = Partial<WizardTargetSpec> & { name: string };
+
+export interface SpecLibraryResponse {
+  specs: SpecLibraryEntry[];
 }
 
 export interface GenerateProjectResponse {
