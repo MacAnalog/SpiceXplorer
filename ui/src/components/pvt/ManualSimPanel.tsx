@@ -29,7 +29,7 @@ type Mode = "manual" | "checkpoint";
  * blocks; a spinner + elapsed time cover it.
  */
 export function ManualSimPanel() {
-  const { summary, yamlPath, isApplied } = useProjectStore();
+  const { summary, yamlPath, isApplied, projectId } = useProjectStore();
   const env = useUIStore((s) => s.env);
 
   const dutParams = useMemo(() => summary?.dut_params ?? [], [summary]);
@@ -60,17 +60,18 @@ export function ManualSimPanel() {
 
   useEffect(() => setValues(initDefaults), [initDefaults]);
 
-  // Checkpoint list for Mode A (best-effort; empty list just disables the mode).
+  // Checkpoint list for Mode A (best-effort; empty list just disables the mode),
+  // scoped to the active project.
   useEffect(() => {
     let alive = true;
     api
-      .listCheckpoints()
+      .listCheckpoints(projectId ?? undefined)
       .then((cks) => alive && setCheckpoints(cks))
       .catch(() => alive && setCheckpoints([]));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [projectId]);
 
   const pdkMissing = env != null && !env.live_runs_enabled;
   const canSimulate =

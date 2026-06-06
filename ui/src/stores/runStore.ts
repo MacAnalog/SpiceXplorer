@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
 import { useExplorerStore } from "@/stores/explorerStore";
+import { useProjectStore } from "@/stores/projectStore";
 import type { SSEEvent, CheckpointEvent } from "@/types/api";
 
 /**
@@ -249,9 +250,10 @@ export const useRunStore = create<RunStore>((set, get) => ({
   pushCheckpoint: (c) => {
     set((state) => ({ checkpoints: [...state.checkpoints, c] }));
     // Refresh the on-disk checkpoint list so the new file appears in the rail
-    // (and becomes available to Resume / Explore) while the run is still going.
+    // (and becomes available to Resume / Explore) while the run is still going —
+    // scoped to the active project so it doesn't list other projects' runs.
     api
-      .listCheckpoints()
+      .listCheckpoints(useProjectStore.getState().projectId ?? undefined)
       .then(useExplorerStore.getState().setAvailableCheckpoints)
       .catch(() => {});
   },

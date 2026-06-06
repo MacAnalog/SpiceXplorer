@@ -143,10 +143,12 @@ export const api = {
   streamUrl: (run_id: string) => `${streamBase()}/api/optimize/stream/${run_id}`,
 
   // Checkpoints
-  listCheckpoints: () =>
-    req<{ checkpoints: CheckpointMeta[] }>("/api/checkpoint").then(
-      (r) => r.checkpoints,
-    ),
+  // Pass projectId to scope per-run checkpoints to the active project (presets +
+  // unscoped runs are always included); omit it for the global view.
+  listCheckpoints: (projectId?: string) =>
+    req<{ checkpoints: CheckpointMeta[] }>(
+      `/api/checkpoint${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`,
+    ).then((r) => r.checkpoints),
 
   loadCheckpoint: (id: string, limit = 0) =>
     req<CheckpointData>(`/api/checkpoint/${id}?limit=${limit}`),

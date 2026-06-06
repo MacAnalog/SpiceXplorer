@@ -54,6 +54,14 @@ export function RunsRail() {
     return () => { alive = false; };
   }, [projectId, isRunning]);
 
+  // Re-scope the checkpoint catalog to the active project so it stops showing
+  // OTHER projects' per-run checkpoints when you switch projects.
+  useEffect(() => {
+    api.listCheckpoints(projectId ?? undefined)
+      .then(setAvailableCheckpoints)
+      .catch(() => {});
+  }, [projectId, isRunning, setAvailableCheckpoints]);
+
   // Resume needs an applied project, the PDK, and no run in flight.
   const canResume = isApplied && !(env != null && !env.live_runs_enabled) && !isRunning;
 
@@ -68,7 +76,7 @@ export function RunsRail() {
     setRefreshing(true);
     setError(null);
     try {
-      setAvailableCheckpoints(await api.listCheckpoints());
+      setAvailableCheckpoints(await api.listCheckpoints(projectId ?? undefined));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Refresh failed");
     } finally {
@@ -82,7 +90,7 @@ export function RunsRail() {
     setError(null);
     try {
       await api.deleteCheckpoint(id);
-      setAvailableCheckpoints(await api.listCheckpoints());
+      setAvailableCheckpoints(await api.listCheckpoints(projectId ?? undefined));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
     } finally {

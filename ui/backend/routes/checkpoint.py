@@ -86,14 +86,36 @@ def _autosave_roots() -> list[Path]:
     ``REPO_ROOT/auto_save`` — they coincide only when CWD == REPO_ROOT. Search both
     (deduped) so live checkpoints + resume work regardless of where uvicorn was launched
     (BUG-A9 / OPT-3)."""
+    return _autosave_roots_for(all_projects=True)
+
+
+def _autosave_roots_for(project_id: str | None = None, all_projects: bool = False) -> list[Path]:
+    """Checkpoint search roots.
+
+    - ``project_id`` (and not ``all_projects``): STRICT — only that project's
+      ``runs/<run>/checkpoints``. The caller adds the read-only presets separately, so
+      an active project's catalog shows exactly its own runs + presets and never another
+      project's (or orphan/legacy) checkpoints.
+    - default: the legacy ``auto_save`` dirs + the unscoped ``runs/`` checkpoints (the
+      global, project-less view).
+    - ``all_projects``: also every project's per-run checkpoints — used to RESOLVE or
+      DELETE a checkpoint by id regardless of the active project.
+    """
+    candidates: list[Path] = []
+    if project_id and not all_projects:
+        from ui.backend.services import project_service
+        try:
+            pruns = project_service.project_dir(project_id) / "runs"
+            candidates.extend(ck for ck in pruns.rglob("checkpoints") if ck.is_dir())
+        except Exception:
+            pass
+    else:
+        candidates = [auto_save_root(), REPO_ROOT / "auto_save", Path.cwd() / "auto_save"]
+        candidates.extend(ck for ck in runs_root().rglob("checkpoints") if ck.is_dir())
+        if all_projects:
+            candidates.extend(ck for ck in projects_root().rglob("checkpoints") if ck.is_dir())
     roots: list[Path] = []
     seen: set[Path] = set()
-    candidates = [auto_save_root(), REPO_ROOT / "auto_save", Path.cwd() / "auto_save"]
-    # Per-run checkpoint dirs (report.md P2): projects/<id>/runs/<run>/checkpoints and
-    # the unscoped runs/<run>/checkpoints. Globbing the `checkpoints` leaf (not *.json
-    # at the tree root) keeps manifest.json / run.json out of the checkpoint catalog.
-    for base in (projects_root(), runs_root()):
-        candidates.extend(ck for ck in base.rglob("checkpoints") if ck.is_dir())
     for r in candidates:
         rr = r.resolve()
         if rr not in seen and rr.exists():
@@ -102,10 +124,10 @@ def _autosave_roots() -> list[Path]:
     return roots
 
 
-def _list_autosave_checkpoints() -> list[dict[str, Any]]:
+def _list_autosave_checkpoints(project_id: str | None = None) -> list[dict[str, Any]]:
     results = []
     seen_ids: set[str] = set()
-    for autosave_root in _autosave_roots():
+    for autosave_root in _autosave_roots_for(project_id=project_id):
         for p in sorted(autosave_root.rglob("*.json")):
             if p.stem in seen_ids:  # same checkpoint reachable via two roots
                 continue
@@ -123,7 +145,7 @@ def _list_autosave_checkpoints() -> list[dict[str, Any]]:
 
 
 @router.get("/checkpoint")
-def list_checkpoints():
+def list_checkpoints(project_id: str = Query(default="")):
     items = []
     for key, path in preset_checkpoint_paths().items():
         if path.exists():
@@ -136,7 +158,7 @@ def list_checkpoints():
                 "n_iters": _count_iters(path),
                 "source": "preset",
             })
-    items += _list_autosave_checkpoints()
+    items += _list_autosave_checkpoints(project_id=project_id or None)
     return {"checkpoints": items}
 
 
