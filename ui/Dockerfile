@@ -27,9 +27,19 @@ ARG BACKEND_URL=http://backend:8000
 ENV BACKEND_URL=${BACKEND_URL} \
     NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
+
+# Copy the whole build context (.dockerignore excludes node_modules/, .next/,
+# env files). A selective allowlist is fragile — forgetting a config file (e.g.
+# tailwind.config.ts) makes the build succeed but ship unstyled output.
 COPY . .
-# Guarantee a public/ dir exists so the runner COPY below always succeeds.
-RUN mkdir -p public && npm run build
+
+# Build with Next.js cache mount — .next/cache persists compiled modules and the
+# webpack cache across builds, speeding up rebuilds when only source changes.
+# Note: this cache can pin stale output across a config change; if styling/build
+# looks wrong after editing a config, prune it:
+#   docker builder prune --filter type=exec.cachemount
+RUN --mount=type=cache,target=/app/.next/cache \
+    npm run build
 
 # ---- runner: minimal production image ----------------------------------------
 FROM node:${NODE_TAG} AS runner
@@ -41,7 +51,7 @@ ENV NODE_ENV=production \
 RUN groupadd -g 1001 nodejs && useradd -u 1001 -g nodejs -m nextjs
 # .next/standalone bundles a minimal server.js + only the needed node_modules;
 # public/ and .next/static must be copied alongside it (standalone omits them).
-COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 USER nextjs

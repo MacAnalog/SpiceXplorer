@@ -72,8 +72,9 @@ ENV RUSTUP_HOME=/opt/rustup \
     PATH=/opt/cargo/bin:/usr/lib/llvm-18/bin:$PATH \
     LLVM_SYS_180_PREFIX=/usr/lib/llvm-18
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-RUN --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/root/.cargo/git \
+RUN --mount=type=cache,target=/opt/cargo/registry \
+    --mount=type=cache,target=/opt/cargo/git \
+    rm -rf /src/openvaf && \
     git clone --filter=blob:none "$OPENVAF_REPO" /src/openvaf \
     && cd /src/openvaf && git checkout "$OPENVAF_COMMIT" \
     && cargo build --release --features llvm18 --bin openvaf-r \
@@ -129,6 +130,7 @@ ENV PATH=/opt/ngspice/bin:/app/.venv/bin:$PATH \
     IHP_PDK_ROOT=/opt/pdk/ihp-sg13g2 \
     SPICE_USERINIT_DIR=/opt/pdk/ihp-sg13g2/libs.tech/ngspice \
     XSCHEM_LIBRARY_PATH=/opt/xschem_library:/opt/xschem_library/devices \
+    UV_CACHE_DIR=/root/.cache/uv \
     UV_PYTHON=/usr/bin/python3 \
     UV_PYTHON_DOWNLOADS=never \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
