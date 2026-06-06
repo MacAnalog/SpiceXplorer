@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { RefreshCw, X, Trash2, Play } from "lucide-react";
@@ -12,6 +12,14 @@ import { resumeLiveRun } from "@/lib/launchRun";
 import { cn, formatEng } from "@/lib/utils";
 import { Sparkline } from "@/components/ui/sparkline";
 import { RailHeading, RailHint } from "./parts";
+import type { ProjectRun } from "@/types/api";
+
+const RUN_STATUS_CLS: Record<string, string> = {
+  running: "bg-primary-soft text-primary",
+  done: "bg-ok-soft text-ok",
+  stopped: "bg-hairline text-muted",
+  error: "bg-danger-soft text-danger",
+};
 
 /**
  * Run-centric rail (Optimize, Explore): run history with score sparklines plus
@@ -25,9 +33,26 @@ export function RunsRail() {
   const { selectedRunId, openRun } = useUIStore();
   const env = useUIStore((s) => s.env);
   const isApplied = useProjectStore((s) => s.isApplied);
+  const projectId = useProjectStore((s) => s.projectId);
   const [refreshing, setRefreshing] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [projectRuns, setProjectRuns] = useState<ProjectRun[]>([]);
+
+  // Per-project run history (report.md P3) — server-persisted, replacing the
+  // localStorage list when a registered project is active. Refetched on project
+  // switch and when a run finishes (isRunning flips false).
+  useEffect(() => {
+    if (!projectId) {
+      setProjectRuns([]);
+      return;
+    }
+    let alive = true;
+    api.getProjectRuns(projectId)
+      .then((r) => { if (alive) setProjectRuns(r.runs); })
+      .catch(() => { if (alive) setProjectRuns([]); });
+    return () => { alive = false; };
+  }, [projectId, isRunning]);
 
   // Resume needs an applied project, the PDK, and no run in flight.
   const canResume = isApplied && !(env != null && !env.live_runs_enabled) && !isRunning;
@@ -69,7 +94,7 @@ export function RunsRail() {
     <>
       <RailHeading
         right={
-          history.length > 0 ? (
+          !projectId && history.length > 0 ? (
             <button
               type="button"
               onClick={clearHistory}
@@ -82,9 +107,39 @@ export function RunsRail() {
           ) : undefined
         }
       >
-        Runs
+        {projectId ? "Project runs" : "Runs"}
       </RailHeading>
-      {history.length === 0 ? (
+
+      {/* Per-project server runs (report.md P3): honest status pills (the startup
+          reconciler flips crashed 'running' → 'error'), best score, algo·budget. */}
+      {projectId ? (
+        projectRuns.length === 0 ? (
+          <RailHint>No runs yet for this project.</RailHint>
+        ) : (
+          projectRuns.map((r) => (
+            <div key={r.run_id} className="flex w-full items-center gap-2 rounded px-1.5 py-1">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="truncate text-[11px]">
+                    {r.label ?? r.algorithm ?? r.run_id.slice(0, 8)}
+                  </span>
+                  <span className="font-mono text-[10px] text-muted">
+                    {r.best_score != null ? formatEng(r.best_score) : "—"}
+                  </span>
+                </div>
+                <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[9px] text-faint">
+                  <span className={cn("rounded px-1", RUN_STATUS_CLS[r.status] ?? "bg-hairline text-muted")}>
+                    {r.status}
+                  </span>
+                  <span className="truncate">
+                    {r.algorithm ?? r.kind}{r.budget ? ` · ${r.budget} it` : ""}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))
+        )
+      ) : history.length === 0 ? (
         <RailHint>No runs yet. Replay a checkpoint on Optimize.</RailHint>
       ) : (
         history.map((r) => {
