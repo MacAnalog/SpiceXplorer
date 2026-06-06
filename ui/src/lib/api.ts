@@ -18,6 +18,10 @@ import type {
   ParseProjectResponse,
   WizardForm,
   SensitivityResponse,
+  ProjectMeta,
+  ProjectDetail,
+  ProjectRun,
+  ExampleMeta,
 } from "@/types/api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -111,6 +115,9 @@ export const api = {
   // Optimization run
   startRun: (body: {
     yaml_path?: string;
+    /** Owning project — the run is isolated under its runs/ dir (report.md P3). */
+    project_id?: string;
+    label?: string;
     replay?: boolean;
     checkpoint_id?: string;
     budget?: number;
@@ -232,6 +239,25 @@ export const api = {
 
   // Shipped analog-spec templates for the wizard's one-click "Spec library".
   specLibrary: () => req<SpecLibraryResponse>("/api/spec-library"),
+
+  // Projects (report.md P3) — the registry IS WORK_ROOT/projects/.
+  listProjects: () => req<{ projects: ProjectMeta[] }>("/api/projects"),
+  listExamples: () => req<{ examples: ExampleMeta[] }>("/api/examples"),
+  createProject: (name: string, yaml_content?: string) =>
+    req<{ id: string }>("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, yaml_content }),
+    }),
+  fromExample: (example_key: string, name?: string) =>
+    req<{ id: string }>("/api/projects/from-example", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ example_key, name }),
+    }),
+  getProject: (id: string) => req<ProjectDetail>(`/api/projects/${encodeURIComponent(id)}`),
+  getProjectRuns: (id: string) =>
+    req<{ runs: ProjectRun[] }>(`/api/projects/${encodeURIComponent(id)}/runs`),
 
   generateProject: (form: WizardForm, save_path?: string) =>
     req<GenerateProjectResponse>("/api/project/generate", {

@@ -351,6 +351,45 @@ export interface SpecLibraryResponse {
   specs: SpecLibraryEntry[];
 }
 
+// ---- Projects (report.md P3) ----
+export interface ProjectMeta {
+  id: string;
+  name: string;
+  updated: string | null;
+  run_count: number;
+  best_score: number | null;
+  source: string;
+}
+
+export interface ProjectDetail {
+  id: string;
+  yaml_path: string;
+  summary: ProjectSummary;
+  manifest: Record<string, unknown>;
+}
+
+export interface ProjectRun {
+  run_id: string;
+  project_id: string | null;
+  label: string | null;
+  kind: string;
+  algorithm: string | null;
+  seed: number | null;
+  budget: number | null;
+  active_corner: string | null;
+  status: string;
+  best_score: number | null;
+  started: string | null;
+  ended: string | null;
+  resume_from: string | null;
+}
+
+export interface ExampleMeta {
+  key: string;
+  name: string;
+  yaml_path: string;
+}
+
 export interface GenerateProjectResponse {
   ok: boolean;
   yaml: string;

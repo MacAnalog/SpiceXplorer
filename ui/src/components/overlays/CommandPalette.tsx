@@ -28,7 +28,7 @@ export function CommandPalette() {
   const router = useRouter();
   const pathname = usePathname();
   const { commandOpen, openCommand, closeCommand, setSelectedSpec, openRun, openWizard,
-    helpOpen, toggleHelp, closeHelp } = useUIStore();
+    helpOpen, toggleHelp, closeHelp, projectsOpen, openProjects, closeProjects } = useUIStore();
   const { summary, isApplied } = useProjectStore();
   const { history, isRunning, stopRun, rerun } = useRunStore();
 
@@ -147,9 +147,17 @@ export function CommandPalette() {
         else openCommand();
         return;
       }
+      // ⌘P → Projects overlay (report.md P3); overrides the browser print dialog.
+      if (mod && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        if (projectsOpen) closeProjects();
+        else openProjects();
+        return;
+      }
       if (e.key === "Escape") {
         if (commandOpen) { e.preventDefault(); closeCommand(); return; }
         if (helpOpen) { e.preventDefault(); closeHelp(); return; }
+        if (projectsOpen) { e.preventDefault(); closeProjects(); return; }
       }
       // `?` (Shift+/) toggles the keyboard-shortcut help sheet (not while typing).
       if (e.key === "?" && !mod && !isTyping(e)) {
@@ -182,7 +190,7 @@ export function CommandPalette() {
     return () => window.removeEventListener("keydown", onKey);
     // go/router are stable enough for this listener; re-bind on gating change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [commandOpen, helpOpen, isApplied, openCommand, closeCommand, toggleHelp, closeHelp]);
+  }, [commandOpen, helpOpen, projectsOpen, isApplied, openCommand, closeCommand, toggleHelp, closeHelp, openProjects, closeProjects]);
 
   // Reset query/cursor + focus on open.
   useEffect(() => {
@@ -304,6 +312,7 @@ export function CommandPalette() {
 function ShortcutHelp({ onClose }: { onClose: () => void }) {
   const rows: { keys: string; desc: string }[] = [
     { keys: "⌘K", desc: "Open command palette" },
+    { keys: "⌘P", desc: "Open projects" },
     { keys: "?", desc: "Toggle this help" },
     { keys: "esc", desc: "Close overlay" },
     { keys: "⌘1 … ⌘8", desc: "Switch view" },

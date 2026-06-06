@@ -21,7 +21,7 @@ export interface LaunchResult {
  * surface the error inline.
  */
 async function startLive(resumeCheckpointId?: string): Promise<LaunchResult> {
-  const { yamlPath, isApplied } = useProjectStore.getState();
+  const { yamlPath, isApplied, projectId } = useProjectStore.getState();
   const { env, runConfig } = useUIStore.getState();
   const { startRun } = useRunStore.getState();
 
@@ -38,6 +38,7 @@ async function startLive(resumeCheckpointId?: string): Promise<LaunchResult> {
   try {
     const res = await api.startRun({
       yaml_path: yamlPath || undefined,
+      project_id: projectId ?? undefined,
       budget: runConfig.budget,
       algorithm: runConfig.algorithm,
       seed: runConfig.seed ?? undefined,

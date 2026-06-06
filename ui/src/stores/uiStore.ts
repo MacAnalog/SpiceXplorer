@@ -56,6 +56,7 @@ interface UIStore {
   commandOpen: boolean;
   wizardOpen: boolean;
   helpOpen: boolean;
+  projectsOpen: boolean;
 
   // Shared live-run overrides (Run popover ⇄ Optimize toolbar)
   runConfig: RunConfig;
@@ -74,6 +75,8 @@ interface UIStore {
   closeWizard: () => void;
   toggleHelp: () => void;
   closeHelp: () => void;
+  openProjects: () => void;
+  closeProjects: () => void;
   /** Merge a partial into the shared run config (algorithm/budget/seed). */
   setRunConfig: (patch: Partial<RunConfig>) => void;
 }
@@ -89,6 +92,7 @@ export const useUIStore = create<UIStore>((set) => ({
   commandOpen: false,
   wizardOpen: false,
   helpOpen: false,
+  projectsOpen: false,
   runConfig: DEFAULT_RUN_CONFIG,
 
   setAppConfig: (appConfig) => set({ appConfig }),
@@ -104,5 +108,7 @@ export const useUIStore = create<UIStore>((set) => ({
   closeWizard: () => set({ wizardOpen: false }),
   toggleHelp: () => set((s) => ({ helpOpen: !s.helpOpen })),
   closeHelp: () => set({ helpOpen: false }),
+  openProjects: () => set({ projectsOpen: true, commandOpen: false }),
+  closeProjects: () => set({ projectsOpen: false }),
   setRunConfig: (patch) => set((s) => ({ runConfig: { ...s.runConfig, ...patch } })),
 }));
