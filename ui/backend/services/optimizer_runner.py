@@ -584,14 +584,23 @@ def stop_run(run_id: str) -> None:
 
 
 def stop_runs_for(*, project_id: str | None = None, run_id: str | None = None,
-                  timeout: float = 10.0) -> int:
-    """Stop + join any IN-FLIGHT live runs matching a project or a specific run, returning
-    the count stopped. A lifecycle op (delete project/run) must call this BEFORE moving the
-    run dir to trash: otherwise the worker thread holds a cached absolute ``run_dir`` and its
-    next ``save_checkpoint`` re-``mkdir``s the moved-away tree at the old path — escaping the
-    trash (incomplete soft-delete) and resurrecting a ``projects/P`` dir that then blocks
-    restore. Setting ``stop_event`` makes the optimizer exit at the next trial boundary; we
-    join the thread so the dir is quiescent when the caller moves it."""
+                  timeout: float = 10.0) -> tuple[int, list[str]]:
+    """Stop + join any IN-FLIGHT live runs matching a project or a specific run.
+
+    Returns ``(attempted, still_alive)`` — the number of runs signalled to stop, and the ids
+    of any whose worker thread was STILL ALIVE after the join. A lifecycle op (delete
+    project/run) MUST call this before moving the run dir to trash AND must refuse to proceed
+    while ``still_alive`` is non-empty (BUG-B4): the worker holds a cached absolute ``run_dir``,
+    so its next ``save_checkpoint`` re-``mkdir``s the moved-away tree at the old path —
+    escaping the trash (incomplete soft-delete) and resurrecting a ``projects/P`` dir that then
+    blocks restore.
+
+    ``stop_event`` is only checked at a trial boundary, so a single in-flight ngspice trial
+    longer than ``timeout`` can outlast the join; in that case the run id is reported in
+    ``still_alive`` and the caller should 409 ("retry") rather than move the dir out from under
+    a live writer. Once a thread is no longer alive, ``optimize()`` has returned and its
+    ``finally`` (the last checkpoint/run.json write) has run, so the dir is genuinely quiescent.
+    """
     targets = [
         st for st in _runs.values()
         if not st.done
@@ -603,7 +612,11 @@ def stop_runs_for(*, project_id: str | None = None, run_id: str | None = None,
     for st in targets:
         if st.thread is not None and st.thread.is_alive():
             st.thread.join(timeout=timeout)
-    return len(targets)
+    still_alive = [
+        st.run_id for st in targets
+        if st.thread is not None and st.thread.is_alive()
+    ]
+    return len(targets), still_alive
 
 
 def get_run(run_id: str) -> RunState | None:

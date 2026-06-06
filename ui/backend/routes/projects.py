@@ -127,7 +127,14 @@ def fork_project(project_id: str, body: ForkRequest):
 def delete_project(project_id: str):
     # Quiesce any in-flight live run for this project FIRST, else its writer thread
     # re-creates the moved-away run tree and defeats the soft-delete (corruption + leak).
-    stopped = optimizer_runner.stop_runs_for(project_id=project_id)
+    # If a worker is still mid-trial after the join, do NOT move the dir out from under it
+    # (BUG-B4) — 409 and let the caller retry once the trial finishes.
+    stopped, still_alive = optimizer_runner.stop_runs_for(project_id=project_id)
+    if still_alive:
+        raise HTTPException(
+            409,
+            f"{len(still_alive)} run(s) for '{project_id}' are still stopping; retry shortly.",
+        )
     try:
         trash_id = project_service.soft_delete_project(project_id)
     except FileNotFoundError as e:
@@ -172,8 +179,11 @@ def rename_run(project_id: str, run_id: str, body: RenameRunRequest):
 def delete_run(project_id: str, run_id: str):
     if not project_service.project_exists(project_id):
         raise HTTPException(404, f"project '{project_id}' not found")
-    # Stop the run if it's live (same writer-resurrection hazard as project delete).
-    optimizer_runner.stop_runs_for(project_id=project_id, run_id=run_id)
+    # Stop the run if it's live (same writer-resurrection hazard as project delete). If it's
+    # still mid-trial after the join, 409 rather than move its dir out from under it (BUG-B4).
+    _, still_alive = optimizer_runner.stop_runs_for(project_id=project_id, run_id=run_id)
+    if still_alive:
+        raise HTTPException(409, "run is still stopping; retry shortly.")
     try:
         trash_id = project_service.delete_run(project_id, run_id)
     except FileNotFoundError as e:

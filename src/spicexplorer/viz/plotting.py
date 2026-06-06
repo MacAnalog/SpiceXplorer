@@ -1,3 +1,4 @@
+import ast
 import logging
 import json
 import numpy                as np
@@ -49,16 +50,25 @@ class Optimization_Log_Visualizer:
 
 
         raw_log_data = data.get("optimization_log", [])
+        if not isinstance(raw_log_data, list):
+            logger.warning("optimization_log is not a list; treating as empty")
+            raw_log_data = []
 
-        # PATCH: specific fix for stringified log_file dictionaries containing PosixPath
+        # ``log_file`` may have been serialized as the repr of a dict containing
+        # ``PosixPath(...)`` wrappers. It is per-trial ngspice log paths only — never used
+        # for analysis/plotting (it is popped before plotting below and ignored by the web
+        # readers). Earlier code ran ``eval()`` on it, which is a remote-code-execution sink
+        # for any untrusted checkpoint (checkpoints live under the writable WORK_ROOT bind
+        # mount). Parse it WITHOUT executing code: ``ast.literal_eval`` accepts plain dict
+        # literals and rejects calls like ``PosixPath(...)``; anything it can't parse safely
+        # is dropped to ``None`` (the field is Optional and unused downstream).
         for entry in raw_log_data:
-            if "log_file" in entry and isinstance(entry["log_file"], str):
+            if isinstance(entry, dict) and isinstance(entry.get("log_file"), str):
                 try:
-                    # CAUTION: eval() executes the string as code. 
-                    # Only use this on trusted checkpoint files.
-                    entry["log_file"] = eval(entry["log_file"])
-                except Exception as e:
-                    print(f"Warning: Could not parse log_file entry: {e}")
+                    entry["log_file"] = ast.literal_eval(entry["log_file"])
+                except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+                    logger.debug("Dropping unparseable log_file entry to None")
+                    entry["log_file"] = None
 
         # Rebuild optimization log
         optimization_log = OptimizationLog([

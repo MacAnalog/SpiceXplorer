@@ -210,14 +210,22 @@ def yaml_text(path: str = Query(..., description="Absolute path of a project YAM
     """Return the raw text of a project YAML for the Setup editor.
 
     The Setup view populates Monaco from this after /project/load fills the
-    rails. Gated to existing .yaml/.yml files (the same files /project/load
-    already reads), served as plain text (the client reads ``response.text()``).
+    rails. Served as plain text (the client reads ``response.text()``).
+
+    Gated through the shared path validator (BUG-B2 sibling): the path must be a .yaml/.yml
+    file resolving under an allowed root (examples / WORK_ROOT / an ``spx_uploaded_*`` temp),
+    so this can't be turned into an arbitrary-file read of any YAML on the host.
     """
-    resolved = Path(path).expanduser()
-    if not resolved.exists() or not resolved.is_file():
+    from ui.backend.routes.checkpoint import _validated_yaml_path
+
+    resolved = _validated_yaml_path(path)
+    if resolved is None:
+        raise HTTPException(
+            status_code=400,
+            detail="path must be a .yaml/.yml file under the repo examples or workspace",
+        )
+    if not resolved.is_file():
         raise HTTPException(status_code=404, detail=f"YAML file not found: {resolved}")
-    if resolved.suffix.lower() not in {".yaml", ".yml"}:
-        raise HTTPException(status_code=400, detail=f"Not a YAML file: {resolved}")
     return resolved.read_text()
 
 

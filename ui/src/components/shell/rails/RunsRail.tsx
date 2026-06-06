@@ -151,12 +151,14 @@ export function RunsRail() {
     }
   };
 
-  const handleDelete = async (id: string, label: string) => {
+  const handleDelete = async (id: string, label: string, path?: string) => {
     if (!window.confirm(`Delete checkpoint "${label}"? This removes the file on disk.`)) return;
     setPendingDelete(id);
     setError(null);
     try {
-      await api.deleteCheckpoint(id, projectId ?? undefined);
+      // Pass the exact file path so the delete targets only this row's file, never a
+      // same-named checkpoint in another run/project (BUG-B3).
+      await api.deleteCheckpoint(id, projectId ?? undefined, path);
       setAvailableCheckpoints(await api.listCheckpoints(projectId ?? undefined));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
@@ -358,7 +360,7 @@ export function RunsRail() {
               {deletable && (
                 <button
                   type="button"
-                  onClick={() => handleDelete(c.id, c.label)}
+                  onClick={() => handleDelete(c.id, c.label, c.path)}
                   disabled={isDeleting}
                   aria-label={`Delete checkpoint ${c.label}`}
                   title="Delete this autosaved checkpoint"

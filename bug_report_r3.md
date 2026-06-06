@@ -20,6 +20,14 @@
 
 ## Tier 0 — Security & data-integrity (fix first)
 
+> **✅ STATUS: all four FIXED 2026-06-06** (uncommitted in the worktree; see TODO §19 Tier 0). Verified by
+> `pytest` (121 pass), `tsc`/`eslint`, +21 regression tests, and a 5-agent adversarial bypass review.
+> The review surfaced (and these fixes now cover): a B3 *cross-run* residual (catalog dedups same-stemmed
+> checkpoints from different runs → fixed with a precise `?path=` delete) and a B2 *sibling* LFI on
+> `project.py /yaml-text` (fixed via the shared validator). One residual is **deferred**: a B4
+> *start-after-stop* TOCTOU (a run starting in the join→move gap can still resurrect the dir — needs a
+> per-project delete tombstone; low risk on single-user localhost).
+
 ### BUG-B1 — `eval()` on checkpoint JSON → server-side RCE  🟡 major *(verifier: "could argue critical")*
 `viz/plotting.py:54-61` `load_checkpoint` runs `eval(entry["log_file"])` (the author's own comment: *"Only
 use this on trusted checkpoint files"*). `checkpoint_reader.read_json_checkpoint:16-18` calls exactly that,

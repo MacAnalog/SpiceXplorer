@@ -7,11 +7,60 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from ui.backend.app_config import (
-    preset_checkpoint_paths, REPO_ROOT, auto_save_root, projects_root, runs_root,
+    preset_checkpoint_paths, REPO_ROOT, auto_save_root, projects_root, runs_root, work_root,
 )
 from ui.backend.services.checkpoint_reader import read_checkpoint, compute_envelope, compute_scatter
 
 router = APIRouter()
+
+_YAML_SUFFIXES = {".yaml", ".yml"}
+_CKPT_SUFFIXES = {".json", ".csv"}
+_UPLOAD_PREFIX = "spx_uploaded_"  # NamedTemporaryFile prefix used by routes/project.py
+
+
+def _validated_yaml_path(yaml_path: str) -> Path | None:
+    """Resolve a caller-supplied ``yaml_path`` to a safe, real file — or ``None``.
+
+    Guards the arbitrary-file-read surface (BUG-B2): a ``yaml_path`` is honored only when it
+    (a) has a ``.yaml``/``.yml`` suffix and (b) resolves under an allowed root. The roots are
+    deliberately NARROW so this can't leak unrelated repo files (``.env`` has no .yaml suffix,
+    but ``compose.yaml`` / ``.github/*.yml`` / ``.venv/**`` would be under a bare REPO_ROOT):
+
+      - ``REPO_ROOT/examples`` — the read-only example projects (the default project lives here);
+      - ``work_root()``        — encapsulated projects' ``project.yaml`` under WORK_ROOT;
+      - the temp dir, but ONLY files named ``spx_uploaded_*`` — where edited/uploaded YAML lands
+        (so a stray ``.yaml`` another tenant drops in a shared ``/tmp`` isn't disclosable).
+
+    ``resolve()`` runs before the containment check, so a ``.yaml`` symlink pointing at
+    ``/etc/passwd`` is rejected (the symlink TARGET is what's checked). Returns ``None`` for an
+    empty / wrong-suffix / out-of-bounds path (callers decide 400 vs silent skip)."""
+    if not yaml_path:
+        return None
+    p = Path(yaml_path)
+    if p.suffix.lower() not in _YAML_SUFFIXES:
+        return None
+    try:
+        rp = p.resolve()
+    except (ValueError, OSError):
+        return None  # e.g. embedded NUL byte → ValueError; don't 500
+    import tempfile
+    allowed: list[tuple[Path, str | None]] = [
+        ((REPO_ROOT / "examples").resolve(), None),
+        (work_root().resolve(), None),
+    ]
+    try:
+        allowed.append((Path(tempfile.gettempdir()).resolve(), _UPLOAD_PREFIX))
+    except Exception:
+        pass
+    for root, name_prefix in allowed:
+        try:
+            rp.relative_to(root)
+        except ValueError:
+            continue
+        if name_prefix and not rp.name.startswith(name_prefix):
+            continue  # under the temp dir but not one of OUR uploads
+        return rp
+    return None
 
 
 def _count_iters(path: Path) -> int | None:
@@ -49,11 +98,12 @@ def _target_specs_from_yaml(yaml_path: str) -> list[dict[str, Any]] | None:
 
     Returns None when no path is given or the project fails to load.
     """
-    if not yaml_path:
+    vp = _validated_yaml_path(yaml_path)
+    if vp is None:
         return None
     from spicexplorer.core.domains import Project_Setup
     try:
-        project = Project_Setup.from_yaml(Path(yaml_path))
+        project = Project_Setup.from_yaml(vp)
     except Exception:
         return None
     return [
@@ -221,13 +271,22 @@ def load_checkpoint(checkpoint_id: str, limit: int = Query(default=0)):
 
 
 @router.delete("/checkpoint/{checkpoint_id}")
-def delete_checkpoint(checkpoint_id: str, project_id: str = Query(default="")):
+def delete_checkpoint(
+    checkpoint_id: str,
+    project_id: str = Query(default=""),
+    path: str = Query(default=""),
+):
     """Delete an autosave checkpoint. Preset checkpoints are protected.
 
-    ``project_id`` scopes the search to that project's own runs — essential because a
-    checkpoint stem carries no project/run id, so a forked/copied project produces
-    identically-named stems; an unscoped delete would unlink another project's same-named
-    checkpoint the user never touched. Omitted → the legacy global search (delete-by-id).
+    A checkpoint stem carries no project/run id, so copied/forked projects — and even two RUNS
+    of one project with the same algorithm+budget — produce identically-named stems, and the
+    catalog dedups them to a single row (BUG-B3). Deleting by bare stem is therefore ambiguous
+    and can silently unlink a same-named checkpoint the user never targeted, across projects OR
+    across runs. To delete exactly the file behind a catalog row, the UI passes its resolved
+    ``path``; we then delete only that file (after confirming it is a real checkpoint under an
+    autosave root, not a preset). When no ``path`` is given (legacy delete-by-id), a single
+    unambiguous match is deleted, but a multi-file match is REFUSED with 409 — the caller must
+    disambiguate with ``path``. ``project_id`` still scopes the search to that project's runs.
     """
     presets = preset_checkpoint_paths()
     if checkpoint_id in presets:
@@ -239,29 +298,50 @@ def delete_checkpoint(checkpoint_id: str, project_id: str = Query(default="")):
     roots = _autosave_roots_for(project_id=project_id or None, all_projects=not project_id)
     if not roots:
         raise HTTPException(404, "No autosave directory.")
+    resolved_roots = [r.resolve() for r in roots]
+    preset_paths = {p.resolve() for p in presets.values()}
 
-    # Match any file whose stem == checkpoint_id under ANY autosave root — list/load use the
-    # same multi-root search, so delete must too, else a CWD-rooted autosave is undeletable.
+    def _under_autosave(p: Path) -> bool:
+        parents = p.parents
+        return any(root in parents for root in resolved_roots)
+
+    # Precise delete: the UI supplies the exact file path behind the (deduped) catalog row, so
+    # we remove only that one file — no stem-based fan-out across runs/projects.
+    if path:
+        target = Path(path).resolve()
+        if target in preset_paths:
+            raise HTTPException(403, "Refusing to delete a preset checkpoint.")
+        if not (target.is_file() and target.suffix.lower() in _CKPT_SUFFIXES):
+            raise HTTPException(404, f"Checkpoint file not found: {path}")
+        if target.stem != checkpoint_id:
+            raise HTTPException(400, "path does not match checkpoint id")
+        if not _under_autosave(target):
+            raise HTTPException(403, f"Refusing to delete file outside auto_save: {path}")
+        target.unlink()
+        return {"ok": True, "deleted": [str(target)]}
+
+    # Legacy delete-by-stem. Restrict to checkpoint suffixes so a same-stemmed sidecar can't
+    # inflate the count into a spurious 409 (or get caught in the fan-out).
     candidates = [
         p
         for root in roots
         for p in root.rglob("*")
-        if p.is_file() and p.stem == checkpoint_id
+        if p.is_file() and p.suffix.lower() in _CKPT_SUFFIXES and p.stem == checkpoint_id
     ]
     if not candidates:
         raise HTTPException(404, f"Checkpoint '{checkpoint_id}' not found in auto_save.")
+    if len(candidates) > 1:
+        raise HTTPException(
+            409,
+            f"'{checkpoint_id}' matches {len(candidates)} checkpoint files (across "
+            f"projects/runs); pass the exact ?path= to delete a specific one.",
+        )
 
-    # Defence-in-depth: confirm every candidate really lives under one of the autosave roots.
-    resolved_roots = [r.resolve() for r in roots]
-    for path in candidates:
-        parents = path.resolve().parents
-        if not any(root in parents for root in resolved_roots):
-            raise HTTPException(403, f"Refusing to delete file outside auto_save: {path}")
-
-    for path in candidates:
-        path.unlink()
-
-    return {"ok": True, "deleted": [str(p) for p in candidates]}
+    target = candidates[0]
+    if not _under_autosave(target.resolve()):
+        raise HTTPException(403, f"Refusing to delete file outside auto_save: {target}")
+    target.unlink()
+    return {"ok": True, "deleted": [str(target)]}
 
 
 @router.get("/checkpoint/{checkpoint_id}/envelope")
@@ -305,6 +385,13 @@ def checkpoint_report(checkpoint_id: str, yaml_path: str = Query(default="")):
     if path is None:
         raise HTTPException(404, f"Checkpoint '{checkpoint_id}' not found")
 
+    # Reject a yaml_path that isn't a real .yaml/.yml under an allowed root BEFORE reading it
+    # into the zip — this route returns file CONTENTS, so an unvalidated path is arbitrary
+    # file disclosure (BUG-B2). An empty yaml_path is fine (the YAML is just omitted).
+    safe_yaml = _validated_yaml_path(yaml_path)
+    if yaml_path and safe_yaml is None:
+        raise HTTPException(400, "yaml_path must be a .yaml/.yml file under the repo or workspace")
+
     data = read_checkpoint(path)
     target_specs = _target_specs_from_yaml(yaml_path)
     envelope = compute_envelope(data, target_specs) if target_specs else []
@@ -336,10 +423,8 @@ def checkpoint_report(checkpoint_id: str, yaml_path: str = Query(default="")):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(path.name, path.read_text())
-        if yaml_path:
-            yp = Path(yaml_path)
-            if yp.exists() and yp.is_file():
-                z.writestr("project_setup.yaml", yp.read_text())
+        if safe_yaml is not None and safe_yaml.exists() and safe_yaml.is_file():
+            z.writestr("project_setup.yaml", safe_yaml.read_text())
         z.writestr("summary.md", summary_md)
     buf.seek(0)
     return StreamingResponse(

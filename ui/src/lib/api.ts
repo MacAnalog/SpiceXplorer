@@ -154,14 +154,19 @@ export const api = {
   loadCheckpoint: (id: string, limit = 0) =>
     req<CheckpointData>(`/api/checkpoint/${id}?limit=${limit}`),
 
-  // Pass projectId to scope the delete to that project's own runs — checkpoint stems
-  // carry no project id, so a forked/copied project has identically-named checkpoints; an
-  // unscoped delete would unlink another project's same-named file.
-  deleteCheckpoint: (id: string, projectId?: string) =>
-    req<{ ok: boolean; deleted: string[] }>(
-      `/api/checkpoint/${encodeURIComponent(id)}${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`,
+  // Pass projectId to scope the delete to that project's own runs. `path` targets the EXACT
+  // file behind a (deduped) catalog row so the delete can't fan out to a same-named checkpoint
+  // in another run/project — checkpoint stems carry no project/run id (BUG-B3).
+  deleteCheckpoint: (id: string, projectId?: string, path?: string) => {
+    const q = new URLSearchParams();
+    if (projectId) q.set("project_id", projectId);
+    if (path) q.set("path", path);
+    const qs = q.toString();
+    return req<{ ok: boolean; deleted: string[] }>(
+      `/api/checkpoint/${encodeURIComponent(id)}${qs ? `?${qs}` : ""}`,
       { method: "DELETE" },
-    ),
+    );
+  },
 
   envelope: (id: string, yaml_path?: string) =>
     req<{ envelope: EnvelopeEntry[] }>(

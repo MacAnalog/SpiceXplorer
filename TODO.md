@@ -434,11 +434,19 @@ each with a regression test.
 > opt-in or the shipped example dodges it (e.g. `log_scale` tolerance, duplicate spec names, serial-mode sim
 > abort, replay-without-id hang). Severities below are the verifier-corrected ones.
 
-### Tier 0 — Security & data-integrity (fix first)
-- [ ] **BUG-B1** 🟡 *major (≈critical)* · `viz/plotting.py:54-61` via `checkpoint.py:215,273,289,308` — **`eval()` on a checkpoint's `log_file` → server-side RCE** from `/checkpoint/{id}`,`/envelope`,`/scatter`,`/report` (checkpoints live under the writable `WORK_ROOT` bind-mount). Use `ast.literal_eval`/the non-eval reader.
-- [ ] **BUG-B2** 🟡 *major* · `checkpoint.py:339-342` — **LFI: `GET /checkpoint/{id}/report?yaml_path=/etc/passwd`** reads & zips any file (no suffix/root check). Gate to an allowed root + `.yaml/.yml`.
-- [ ] **BUG-B3** 🟢 *major (irreversible)* · `checkpoint.py:223-264` + `RunsRail.tsx:157` — **unscoped `DELETE /checkpoint/{id}` `unlink`s same-named checkpoints across ALL projects** (stems carry no project id; global-view delete sends no `project_id`). Require/scope by `project_id`.
-- [ ] **BUG-B4** 🟡 *major (med-conf)* · `optimizer_runner.py:601-606` + `projects.py:130,176` + `base.py:428` — **soft-delete/delete-run races a >10 s trial**: bounded `join` ignores liveness, the dir is moved to `.trash`, the still-live worker's `save_checkpoint` re-`mkdir`s the old path → **resurrection outside trash**. Check `is_alive()`/poll stop inside the sim.
+### Tier 0 — Security & data-integrity (fix first) ✅ FIXED 2026-06-06
+
+> Landed (uncommitted in the worktree). Verified by `uv run pytest` (121 pass + the documented
+> PDK-gated `test_ngspice_sanity_check` fail), `tsc --noEmit`, `eslint --max-warnings=0`, +21 new
+> regression tests in [tests/test_audit_r3_tier0.py](tests/test_audit_r3_tier0.py), and a 5-agent
+> adversarial bypass review (B1/B2 SOLID; B3 cross-run residual + B4 TOCTOU surfaced and handled below).
+
+- [x] **BUG-B1** *(fixed)* · `viz/plotting.py` — replaced `eval(entry["log_file"])` with `ast.literal_eval` + drop-to-`None` fallback (`import ast`); `log_file` is unused downstream (popped before plotting, ignored by the web readers). Reviewer-confirmed: no other `eval`/`exec`/unsafe-`yaml`/untrusted-`pickle` on the checkpoint read path; DoS-safe (SyntaxError/Memory/Recursion caught). Also guarded a non-list `optimization_log`.
+- [x] **BUG-B2** *(fixed)* · `checkpoint.py` — new `_validated_yaml_path` (`.yaml/.yml` + `resolve()` under **narrowed** roots: `REPO_ROOT/examples`, `work_root()`, and temp **only for `spx_uploaded_*`**); NUL-byte → `None` (no 500); report 400s on a bad non-empty path; envelope/scatter route through it. **Sibling LFI also fixed:** `project.py /yaml-text` now uses the same validator (was suffix+existence only → arbitrary `.yaml` read). *(new: tracked as BUG-B53.)*
+- [x] **BUG-B3** *(fixed, incl. cross-run residual)* · `checkpoint.py` + `api.ts`/`RunsRail.tsx` — unscoped multi-match → 409; **and** because the catalog dedups same-stemmed checkpoints from different *runs* of one project to a single row (reviewer finding), the delete now takes a precise `?path=` (UI passes `c.path`) and removes exactly that file; bare-stem multi-match 409s in the scoped case too; candidate match restricted to `.json/.csv`; preset + under-autosave containment enforced for the path case.
+- [x] **BUG-B4** *(fixed; one residual deferred)* · `optimizer_runner.stop_runs_for` returns `(attempted, still_alive)`; `delete_project`/`delete_run` **409 instead of moving** the dir while a worker is alive (reviewer-confirmed `is_alive()==False` is a sound quiescence signal — all run-dir writes finish before the thread exits). **Residual (deferred):** a *start-after-stop* TOCTOU — a run that STARTS in the gap between the join and the `shutil.move` isn't seen, so it can still resurrect the dir. Needs a per-project "deleting" tombstone that `start_run`/`run_dir` honor; tracked below.
+- [x] **BUG-B53** *(new, fixed)* · `project.py:208-221` `/yaml-text` — was an arbitrary-file read of any `.yaml/.yml` on the host (suffix+existence only, no containment); now gated through `_validated_yaml_path`. Surfaced by the Tier-0 bypass review.
+- [ ] **B4-residual** *(deferred follow-up)* · start-after-stop TOCTOU on project/run delete (see B4). Single-user/localhost + microsecond window → low risk; close with a delete tombstone honored by `start_run`. Same writer-resurrection family also touches `/simulate/once` (no `stop_runs_for`).
 
 ### Tier 1 — Major: NEWCAS core library (`examples/OTA/cascode` path)
 - [ ] **BUG-B5** 🟡 · `base.py:178-198` — base `optimize()` empties `optimization_log` on autosave but not `global_best_index` → **IndexError mid-run** (`budget ≥ 2500` default, or any lower cadence; CLI/base path — the UI subclass dodges it). Reset index / track best on the instance.
