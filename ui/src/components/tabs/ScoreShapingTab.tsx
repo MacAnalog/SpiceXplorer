@@ -4,27 +4,30 @@ import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
 import { useProjectStore } from "@/stores/projectStore";
 import { useUIStore } from "@/stores/uiStore";
 import { api } from "@/lib/api";
-import { formatEng } from "@/lib/utils";
+import { formatEng, goalSymbol } from "@/lib/utils";
 import type { ScoreResponse, TargetSpec } from "@/types/api";
 import { PenaltyCurveChart } from "@/components/charts/PenaltyCurveChart";
+import { ScoreWaterfallChart } from "@/components/charts/ScoreWaterfallChart";
 import { EmptyState } from "@/components/ui/empty-state";
 import { selectCn } from "@/components/ui/select";
 import { Thead, Th, Tr, Td } from "@/components/ui/table";
 import { Slider } from "@/components/ui/slider";
+import { Stat } from "@/components/ui/stat";
+import { Segmented } from "@/components/ui/segmented";
 import { Toolbar, ToolbarLabel, ToolbarSpacer } from "@/components/shell/Toolbar";
 import { Separator } from "@/components/ui/separator";
 
-function goalSym(g: string): string {
-  if (g === "exceed") return ">";
-  if (g === "minimize") return "<";
-  return "≈";
-}
+type Shaping = "sigmoid" | "linear";
 
 export function ScoreShapingTab() {
   const { summary, yamlPath, isApplied } = useProjectStore();
   // Deep-link target set by the ⌘K palette ("Jump to spec").
   const uiSelectedSpec = useUIStore((s) => s.selectedSpec);
   const [selectedSpec, setSelectedSpec] = useState<string>("");
+  // Global shaping toggle — drives the waterfall + the F(x) KPI card so the user
+  // sees how one normalization rebalances which spec binds (the penalty curve and
+  // breakdown table keep showing both for direct comparison).
+  const [shaping, setShaping] = useState<Shaping>("sigmoid");
   // Per-spec "try" values (each defaults to its target). The WHOLE vector is
   // sent to /api/score so the aggregate F(x) and the per-spec breakdown reflect
   // all specs simultaneously — not just the one in the slider.
@@ -161,6 +164,17 @@ export function ScoreShapingTab() {
         .sort(([, a], [, b]) => b - a)[0]
     : null;
 
+  // Shaping-aware derived values (KPI cards + waterfall).
+  const dominant = shaping === "sigmoid" ? dominantSig : dominantLin;
+  const aggValue = aggregate ? (shaping === "sigmoid" ? aggregate.sigmoid : aggregate.linear) : null;
+  const waterfallBars = scoreData
+    ? enabledSpecs.map((s) => {
+        const e = scoreData.per_spec[s.name];
+        const pen = (shaping === "sigmoid" ? e?.sigmoid : e?.linear) ?? 0;
+        return { name: s.name, contribution: pen * (s.weight ?? 0), passes: e?.passes ?? null };
+      })
+    : [];
+
   return (
     <>
       <Toolbar>
@@ -173,11 +187,21 @@ export function ScoreShapingTab() {
         >
           {effectiveSpecs.map((s) => (
             <option key={s.name} value={s.name}>
-              {s.name} · {goalSym(s.goal)} {formatEng(s.target)}
+              {s.name} · {goalSymbol(s.goal)} {formatEng(s.target)}
               {s.enable ? "" : " (off)"}
             </option>
           ))}
         </select>
+        <Separator />
+        <ToolbarLabel>shaping</ToolbarLabel>
+        <Segmented<Shaping>
+          value={shaping}
+          onChange={setShaping}
+          options={[
+            { value: "sigmoid", label: "sigmoid" },
+            { value: "linear", label: "linear" },
+          ]}
+        />
         <Separator />
         <ToolbarLabel>range</ToolbarLabel>
         <span className="font-mono text-[11px] text-fg">
@@ -197,6 +221,20 @@ export function ScoreShapingTab() {
           POST /api/score · 150ms debounce
         </span>
       </Toolbar>
+
+      <div className="grid shrink-0 grid-cols-3 gap-2.5 border-b border-border px-3 py-2.5">
+        <Stat
+          eyebrow={`F(x) · ${shaping}`}
+          value={aggValue != null ? aggValue.toFixed(3) : "—"}
+          tone={aggValue != null && aggValue > 0 ? "warn" : "ok"}
+        />
+        <Stat
+          eyebrow="highest-penalty spec"
+          value={dominant && dominant[1] > 0 ? dominant[0] : "—"}
+          unit={dominant && dominant[1] > 0 ? `wᵢ·P̂ ${dominant[1].toFixed(3)}` : "all pass"}
+        />
+        <Stat eyebrow="active specs" value={String(enabledSpecs.length)} unit={`Σw ${weightSum.toFixed(1)}`} />
+      </div>
 
       <div
         className="grid min-h-0 flex-1 gap-3 overflow-auto p-3"
@@ -232,7 +270,7 @@ export function ScoreShapingTab() {
               right={
                 currentSpec && (
                   <span className="font-mono text-[10px] text-muted">
-                    {currentSpec.name} · {goalSym(currentSpec.goal)}{" "}
+                    {currentSpec.name} · {goalSymbol(currentSpec.goal)}{" "}
                     {formatEng(currentSpec.target)}
                   </span>
                 )
@@ -286,6 +324,27 @@ export function ScoreShapingTab() {
               </div>
             </div>
           )}
+
+          <Panel>
+            <PanelHeader
+              title="score contribution"
+              mute={`· ${shaping} · wᵢ·P̂ᵢ per spec`}
+              right={
+                <span className="font-mono text-[10px] text-muted">
+                  green = pass · red = binding
+                </span>
+              }
+            />
+            <PanelBody>
+              {waterfallBars.length > 0 ? (
+                <ScoreWaterfallChart bars={waterfallBars} />
+              ) : (
+                <EmptyState minHeight="h-[240px]">
+                  {loading ? "Computing…" : "No data."}
+                </EmptyState>
+              )}
+            </PanelBody>
+          </Panel>
         </div>
 
         {/* Right: per-spec breakdown */}
@@ -321,17 +380,25 @@ export function ScoreShapingTab() {
                           {s.name}
                         </span>
                       </Td>
-                      <Td
-                        className={
-                          "font-mono " +
-                          (passes === true
-                            ? "text-ok"
-                            : passes === false
-                              ? "text-danger"
-                              : "text-fg")
-                        }
-                      >
-                        {entry?.value != null ? formatEng(entry.value) : "—"}
+                      <Td className="font-mono">
+                        {/* Inline try-value editor — edits flow into the shared
+                            `values` vector, so the aggregate F(x), waterfall, and
+                            (for the selected spec) the slider all update live. */}
+                        <input
+                          aria-label={`${s.name} value`}
+                          type="number"
+                          step="any"
+                          value={Number.isFinite(values[s.name]) ? values[s.name] : ""}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            if (Number.isFinite(v)) setSpecValue(s.name, v);
+                          }}
+                          className={
+                            selectCn("xs") +
+                            " w-[96px] " +
+                            (passes === true ? "text-ok" : passes === false ? "text-danger" : "text-fg")
+                          }
+                        />
                       </Td>
                       <Td className="font-mono">
                         <PenaltyBar
