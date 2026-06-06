@@ -5,22 +5,30 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { useProjectStore } from "@/stores/projectStore";
+import { useUIStore } from "@/stores/uiStore";
 import { api } from "@/lib/api";
-import { formatEng, statusForGoal } from "@/lib/utils";
+import { formatEng, goalSymbol, statusForGoal } from "@/lib/utils";
 import { COLORS } from "@/components/charts/PlotlyChart";
 import { ScoreConvergenceChart } from "@/components/charts/ScoreConvergenceChart";
 import { MetricConvergenceChart } from "@/components/charts/MetricConvergenceChart";
 import { MetricScatterChart } from "@/components/charts/MetricScatterChart";
 import { MetricHistogramChart } from "@/components/charts/MetricHistogramChart";
+import { ParallelCoordinatesChart } from "@/components/charts/ParallelCoordinatesChart";
+import { Stat } from "@/components/ui/stat";
 import { EmptyState } from "@/components/ui/empty-state";
 import { selectCn } from "@/components/ui/select";
 import { Thead, Th, Tr, Td } from "@/components/ui/table";
-import type { ScatterPoint, TargetSpec } from "@/types/api";
+import type { CheckpointData, ScatterPoint, SimulateOnceResponse, TargetSpec } from "@/types/api";
 import { Toolbar, ToolbarLabel, ToolbarSpacer } from "@/components/shell/Toolbar";
 import { Separator } from "@/components/ui/separator";
 
-function goalSym(g: string): string {
-  return g === "exceed" ? ">" : g === "minimize" ? "<" : "≈";
+function lastFinite(arr: (number | null)[] | undefined): number | null {
+  if (!arr) return null;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    const v = arr[i];
+    if (v != null && Number.isFinite(v)) return v;
+  }
+  return null;
 }
 
 function bestOf(values: number[], goal: string, target?: number | string | null): number | null {
@@ -43,6 +51,7 @@ function passesSpec(s: TargetSpec, val: number | null): boolean | null {
 
 export function ExplorerTab() {
   const { summary, yamlPath } = useProjectStore();
+  const env = useUIStore((s) => s.env);
   const {
     availableCheckpoints,
     runA,
@@ -63,6 +72,13 @@ export function ExplorerTab() {
   const [loadingBoth, setLoadingBoth] = useState(false);
   const [scatterPointsA, setScatterPointsA] = useState<ScatterPoint[]>([]);
   const [scatterPointsB, setScatterPointsB] = useState<ScatterPoint[]>([]);
+  // Design-point inspector: which loaded run + iteration the user clicked in the scatter.
+  const [inspect, setInspect] = useState<{ run: "A" | "B"; iter: number } | null>(null);
+  const [resim, setResim] = useState<{
+    loading: boolean;
+    result: SimulateOnceResponse | null;
+    error: string | null;
+  }>({ loading: false, result: null, error: null });
 
   // Replace any selection (selectedMetric / scatter X / Y) that the freshly
   // loaded checkpoint doesn't actually contain, so non-cascode projects and
@@ -217,6 +233,84 @@ export function ExplorerTab() {
 
   const totalEvals = (runA?.n_iters ?? 0) + (runB?.n_iters ?? 0);
 
+  // KPI cards (A vs B). Pass rate over loaded specs; worst = the failing spec with
+  // the biggest range-normalized miss; final score = last finite best-so-far.
+  const passRate = (which: "aBest" | "bBest") => {
+    const rows = envelopeRows.filter((r) => r[which] != null);
+    if (!rows.length) return null;
+    const pass = rows.filter((r) => passesSpec(r.spec, r[which]) === true).length;
+    return { pass, total: rows.length };
+  };
+  const worstSpec = (which: "aBest" | "bBest") => {
+    let name: string | null = null;
+    let worst = 0;
+    for (const r of envelopeRows) {
+      const best = r[which];
+      if (best == null || passesSpec(r.spec, best) !== false) continue;
+      const rng = r.spec.range && r.spec.range > 0 ? r.spec.range : Math.max(Math.abs(Number(r.spec.target)) || 1, 1);
+      const miss = Math.abs(best - Number(r.spec.target)) / rng;
+      if (miss > worst) { worst = miss; name = r.spec.name; }
+    }
+    return name;
+  };
+  const finalA = lastFinite(runA?.best_scores);
+  const finalB = lastFinite(runB?.best_scores);
+  const passA = passRate("aBest");
+  const passB = passRate("bBest");
+
+  // Parallel-coordinates dimensions (metrics + params) + per-point color (score),
+  // dropping points with any null across the dimensions so axes stay aligned.
+  const parcoords = useMemo(() => {
+    const run: CheckpointData | null = runA ?? runB;
+    if (!run) return null;
+    const dims = [
+      ...Object.entries(run.per_metric).map(([k, v]) => ({ label: k, values: v })),
+      ...Object.entries(run.params ?? {}).map(([k, v]) => ({ label: k, values: v })),
+    ];
+    if (dims.length < 2) return null;
+    const n = run.scores.length;
+    const clean = dims.map((d) => ({ label: d.label, values: [] as number[] }));
+    const color: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const row = dims.map((d) => d.values[i]);
+      if (row.some((v) => v == null || !Number.isFinite(v as number))) continue;
+      row.forEach((v, di) => clean[di].values.push(v as number));
+      const sc = run.scores[i];
+      color.push(sc != null && Number.isFinite(sc) ? sc : 0);
+    }
+    return clean[0].values.length > 0 ? { dims: clean, color } : null;
+  }, [runA, runB]);
+
+  // Resolve the inspected scatter point → its params + metrics at that iteration.
+  const inspectedRun: CheckpointData | null = inspect ? (inspect.run === "B" ? runB : runA) : null;
+  const inspected = (() => {
+    if (!inspect || !inspectedRun) return null;
+    const i = inspect.iter;
+    const params: Record<string, number> = {};
+    for (const [k, arr] of Object.entries(inspectedRun.params ?? {})) {
+      const v = arr[i];
+      if (v != null && Number.isFinite(v)) params[k] = v;
+    }
+    const metrics: Record<string, number> = {};
+    for (const [k, arr] of Object.entries(inspectedRun.per_metric)) {
+      const v = arr[i];
+      if (v != null && Number.isFinite(v)) metrics[k] = v;
+    }
+    return { run: inspect.run, label: inspectedRun.label, iter: i, params, metrics, score: inspectedRun.scores[i] ?? null };
+  })();
+
+  const liveDisabled = env != null && !env.live_runs_enabled;
+  const reSimulate = async () => {
+    if (!inspected || !yamlPath) return;
+    setResim({ loading: true, result: null, error: null });
+    try {
+      const res = await api.simulateOnce({ yaml_path: yamlPath, params: inspected.params });
+      setResim({ loading: false, result: res, error: res.error ?? null });
+    } catch (e) {
+      setResim({ loading: false, result: null, error: e instanceof Error ? e.message : "Re-simulate failed" });
+    }
+  };
+
   return (
     <>
       <Toolbar>
@@ -255,11 +349,13 @@ export function ExplorerTab() {
           {totalEvals > 0 && <> · {totalEvals} evals</>}
         </span>
         <ToolbarSpacer />
-        <Button variant="default" disabled={!hasData}>
-          Export CSV
-        </Button>
-        <Button variant="primary" disabled={!hasData}>
-          Compare report
+        <Button
+          variant="primary"
+          disabled={!runA}
+          onClick={() => { if (runA) window.open(api.reportUrl(runA.id, yamlPath || undefined), "_blank"); }}
+          title={runA ? "Download a zip: checkpoint + project YAML + summary.md" : "Load run A first"}
+        >
+          Download report
         </Button>
       </Toolbar>
 
@@ -270,6 +366,37 @@ export function ExplorerTab() {
           <EmptyState bordered minHeight="min-h-32">
             Pick run A and/or B and click Load both to start exploring.
           </EmptyState>
+        )}
+
+        {hasData && (
+          <div className="grid grid-cols-3 gap-2.5">
+            <Stat
+              eyebrow="final score"
+              value={finalA != null ? formatEng(finalA) : "—"}
+              delta={
+                runB
+                  ? `B ${finalB != null ? formatEng(finalB) : "—"}${finalA != null && finalB != null ? ` · Δ ${formatEng(finalA - finalB)}` : ""}`
+                  : undefined
+              }
+              deltaTone={
+                finalA != null && finalB != null
+                  ? finalA > finalB ? "up" : finalA < finalB ? "down" : "neutral"
+                  : "neutral"
+              }
+            />
+            <Stat
+              eyebrow="spec pass rate"
+              value={passA ? `${passA.pass}/${passA.total}` : "—"}
+              tone={passA && passA.pass === passA.total ? "ok" : passA && passA.pass === 0 ? "danger" : "warn"}
+              delta={runB && passB ? `B ${passB.pass}/${passB.total}` : undefined}
+            />
+            <Stat
+              eyebrow="worst spec (A)"
+              value={worstSpec("aBest") ?? "all pass"}
+              tone={worstSpec("aBest") ? "danger" : "ok"}
+              delta={runB ? `B ${worstSpec("bBest") ?? "all pass"}` : undefined}
+            />
+          </div>
         )}
 
         {/* Row 1: F(x) overlay + metric overlay */}
@@ -379,6 +506,10 @@ export function ExplorerTab() {
                     targetY={targetY}
                     goalX={goalX}
                     goalY={goalY}
+                    onPointClick={(sp, runLabel) => {
+                      setInspect({ run: runLabel === runB?.label ? "B" : "A", iter: sp.iter });
+                      setResim({ loading: false, result: null, error: null });
+                    }}
                   />
                 ) : (
                   <EmptyState minHeight="h-[240px]">No scatter data.</EmptyState>
@@ -405,7 +536,7 @@ export function ExplorerTab() {
                         <Tr key={spec.name}>
                           <Td className="font-mono">{spec.name}</Td>
                           <Td className="font-mono text-muted">
-                            {goalSym(spec.goal)} {formatEng(spec.target)}
+                            {goalSymbol(spec.goal)} {formatEng(spec.target)}
                           </Td>
                           <Td
                             className="font-mono"
@@ -440,6 +571,20 @@ export function ExplorerTab() {
               </div>
             </Panel>
           </div>
+        )}
+
+        {/* Parallel coordinates — every metric + param dimension, one line per point */}
+        {hasData && parcoords && (
+          <Panel>
+            <PanelHeader
+              title="parallel coordinates"
+              mute="· metrics + params · one line per evaluated point"
+              right={<span className="font-mono text-[10px] text-muted">color = score</span>}
+            />
+            <PanelBody>
+              <ParallelCoordinatesChart dims={parcoords.dims} color={parcoords.color} colorLabel="score" />
+            </PanelBody>
+          </Panel>
         )}
 
         {/* Row 3: histogram + spec summary */}
@@ -515,7 +660,7 @@ export function ExplorerTab() {
                         <Tr key={s.name}>
                           <Td className="font-mono">{s.name}</Td>
                           <Td className="font-mono text-muted">
-                            {goalSym(s.goal)} {formatEng(s.target)}
+                            {goalSymbol(s.goal)} {formatEng(s.target)}
                           </Td>
                           {runA && (
                             <Td>
@@ -586,6 +731,95 @@ export function ExplorerTab() {
                 </tbody>
               </table>
             </div>
+          </Panel>
+        )}
+
+        {/* Design-point inspector — click a scatter point to open. Shows the point's
+            full param vector + metrics at that iteration, and re-simulates it through
+            the same /api/simulate/once primitive the Manual Sim view uses. */}
+        {inspected && (
+          <Panel>
+            <PanelHeader
+              title="design point"
+              mute={`· run ${inspected.run} · iter ${inspected.iter}`}
+              right={
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="primary"
+                    onClick={reSimulate}
+                    disabled={resim.loading || liveDisabled || !yamlPath || Object.keys(inspected.params).length === 0}
+                    title={liveDisabled ? "Re-simulate needs live SPICE (the IHP PDK)." : undefined}
+                  >
+                    {resim.loading ? "Simulating…" : "Re-simulate"}
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setInspect(null)}
+                    className="rounded px-1.5 text-muted hover:text-fg"
+                    aria-label="Close inspector"
+                  >
+                    ✕
+                  </button>
+                </div>
+              }
+            />
+            <PanelBody className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted">
+                  params ({Object.keys(inspected.params).length})
+                </div>
+                <table className="w-full text-xs">
+                  <tbody>
+                    {Object.entries(inspected.params).map(([k, v]) => (
+                      <tr key={k} className="border-b border-border last:border-0">
+                        <td className="py-0.5 font-mono text-muted">{k}</td>
+                        <td className="py-0.5 text-right font-mono">{formatEng(v)}</td>
+                      </tr>
+                    ))}
+                    {Object.keys(inspected.params).length === 0 && (
+                      <tr><td className="py-1 text-muted">No params in checkpoint.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div>
+                <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted">
+                  metrics @ iter {inspected.iter}
+                  {inspected.score != null && <> · score {formatEng(inspected.score)}</>}
+                </div>
+                <table className="w-full text-xs">
+                  <tbody>
+                    {Object.entries(inspected.metrics).map(([k, v]) => {
+                      const re = resim.result?.metrics?.[k];
+                      return (
+                        <tr key={k} className="border-b border-border last:border-0">
+                          <td className="py-0.5 font-mono text-muted">{k}</td>
+                          <td className="py-0.5 text-right font-mono">{formatEng(v)}</td>
+                          {resim.result && (
+                            <td className="py-0.5 text-right font-mono text-secondary" title="re-simulated">
+                              {re ? formatEng(re.curr_val) : "—"}
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {liveDisabled && (
+                  <p className="mt-1.5 text-[10px] text-[#b45309]">PDK missing — re-simulate is disabled here (works in Docker).</p>
+                )}
+                {resim.error && (
+                  <p className="mt-1.5 text-[11px] text-danger" role="alert">{resim.error}</p>
+                )}
+                {resim.result && !resim.error && (
+                  <p className="mt-1.5 text-[10px] text-muted">
+                    Re-simulated score {resim.result.score != null ? formatEng(resim.result.score) : "—"}
+                    {resim.result.active_corner ? ` · corner ${resim.result.active_corner}` : ""}
+                    {resim.result.elapsed_ms != null ? ` · ${(resim.result.elapsed_ms / 1000).toFixed(1)}s` : ""}
+                  </p>
+                )}
+              </div>
+            </PanelBody>
           </Panel>
         )}
       </div>
