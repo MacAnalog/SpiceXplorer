@@ -144,20 +144,48 @@ def _list_autosave_checkpoints(project_id: str | None = None) -> list[dict[str, 
     return results
 
 
+def _example_family(parts: tuple[str, ...]) -> str | None:
+    """The example a path belongs to — ``examples/OTA/<topology>/…`` → ``OTA/<topology>``."""
+    if "examples" in parts:
+        i = parts.index("examples")
+        if i + 2 < len(parts):
+            return "/".join(parts[i + 1:i + 3])
+    return None
+
+
+def _project_family(project_id: str) -> str | None:
+    """The example family a project was copied from (manifest source.ref), if any."""
+    from ui.backend.services import project_service
+    ref = (project_service.read_manifest(project_id).get("source") or {}).get("ref")
+    if isinstance(ref, str):
+        rp = ref.split("/")
+        if len(rp) >= 2:
+            return "/".join(rp[:2])
+    return None
+
+
 @router.get("/checkpoint")
 def list_checkpoints(project_id: str = Query(default="")):
     items = []
+    # Preset demo checkpoints are EXAMPLE-specific (their metrics/params are that
+    # topology). Show them only when no project is active, or when the active project
+    # was derived from the SAME example as the preset — so e.g. the cascode presets
+    # don't pollute a 5T-OTA project's catalog.
+    proj_family = _project_family(project_id) if project_id else None
     for key, path in preset_checkpoint_paths().items():
-        if path.exists():
-            items.append({
-                "id": key,
-                "label": key.replace("_", " ").title(),
-                "path": str(path),
-                "type": "csv" if path.suffix == ".csv" else "json",
-                "score_fn": _infer_score_fn(path),
-                "n_iters": _count_iters(path),
-                "source": "preset",
-            })
+        if not path.exists():
+            continue
+        if project_id and _example_family(path.parts) != proj_family:
+            continue
+        items.append({
+            "id": key,
+            "label": key.replace("_", " ").title(),
+            "path": str(path),
+            "type": "csv" if path.suffix == ".csv" else "json",
+            "score_fn": _infer_score_fn(path),
+            "n_iters": _count_iters(path),
+            "source": "preset",
+        })
     items += _list_autosave_checkpoints(project_id=project_id or None)
     return {"checkpoints": items}
 
