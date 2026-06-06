@@ -366,11 +366,19 @@ class NGSpice_Wrapper:
         log = self.logger
         log.info(f"🌡️  Applying PVT corner '{corner.name}' to testbench '{self.testbench_name}'")
 
-        # (1) process model includes — strip the prior selection for the same library
-        #     file (path-agnostic: matches a bare basename or a full path), then add ours.
+        # (1) process model includes — strip the netlist's prior `.lib <file> <section>` selection
+        #     for each referenced library EXACTLY ONCE (path-agnostic: matches a bare basename or a
+        #     full path), THEN add all corner includes. Stripping inside the per-include loop would
+        #     delete a sibling section of the SAME lib_file that an earlier include just added,
+        #     collapsing multiple sections of one `.lib` to only the last (BUG-B11). Re-apply stays
+        #     idempotent: the upfront strip also removes any prior corner's includes for those libs.
+        stripped_libs: set[str] = set()
         for inc in corner.model_includes:
-            basename = re.escape(Path(inc.lib_file).name)
-            self._strip_matching_instructions(rf"^\s*\.lib\s+\S*{basename}\s+\S+")
+            basename = Path(inc.lib_file).name
+            if basename not in stripped_libs:
+                self._strip_matching_instructions(rf"^\s*\.lib\s+\S*{re.escape(basename)}\s+\S+")
+                stripped_libs.add(basename)
+        for inc in corner.model_includes:
             path = inc.lib_file if not model_lib_root else str(Path(model_lib_root) / inc.lib_file)
             ed.add_instruction(f".lib {path} {inc.section}")
             log.info(f"\t🧩 .lib {path} {inc.section}")
@@ -381,7 +389,23 @@ class NGSpice_Wrapper:
         log.info(f"\t🌡️  .options temp={corner.temp}")
 
         # (3) environment overrides — supplies then extra params (override `.param` defaults).
+        #     A supply override is a `.param <node>=<value>`; spicelib's set_parameter SILENTLY
+        #     INSERTS a dangling `.param` when <node> isn't already declared, so a mis-named rail
+        #     (e.g. the source instance `Vdd` instead of the param `VDD`, or an undeclared `VSS`)
+        #     would leave the sim at the netlist's DEFAULT supply with no error. Warn loudly when
+        #     the node isn't a declared `.param` so this isn't silent (BUG-B12).
+        try:
+            declared = {str(n).upper() for n in ed.get_all_parameter_names()}
+        except Exception:
+            declared = None  # param introspection unavailable → skip the check, still apply
         for s in corner.supplies:
+            if declared is not None and str(s.node).upper() not in declared:
+                log.warning(
+                    f"⚠️ PVT corner '{corner.name}': supply node '{s.node}' is NOT a declared "
+                    f".param in testbench '{self.testbench_name}' — this override adds a dangling "
+                    f".param and will NOT change the supply. 'node' must match a .param name "
+                    f"(e.g. .param VDD=...). Declared params: {sorted(declared)}"
+                )
             ed.set_parameter(s.node, s.value)
             log.info(f"\t🔌 .param {s.node}={s.value}")
         for k, v in corner.params.items():

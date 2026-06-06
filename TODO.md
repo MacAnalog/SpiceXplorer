@@ -461,9 +461,16 @@ each with a regression test.
 - [x] **BUG-B9** *(fixed)* · `domains.py` `TargetSpec.__post_init__` — a `None` / non-finite `weight` (explicit `weight:`/`weight: null`) is coerced to `1.0`, so `np.float64(weight)` can't NaN-poison the aggregate fitness; string weights are `parse_value`'d.
 - [x] **BUG-B10** *(fixed)* · `domains.py` `resolve_all_parameter_ranges` — frozen params skip the mandatory-bounds path: `val`/`init` eng-strings are resolved and min/max validated only when both are present, so a frozen constant like `freeze: true, val: "0.18u"` (no bounds) loads instead of raising "missing min or max".
 
-### Tier 2 — Major: PVT
-- [ ] **BUG-B11** 🟡 *pvt* · `spicelib.py:369-376` — `apply_corner` strips by **lib-file basename only**, so two `model_includes` sharing one `.lib` (different sections) collapse to the last → **wrong device models, silent**. Key the strip on `(basename, section)`.
-- [ ] **BUG-B12** 🟡 *pvt* · `spicelib.py:383-389` — PVT supply override `set_parameter(node,…)` **silently inserts a dangling `.PARAM`** when `node` isn't a declared `.param` (or names the source instance) → sim at the **wrong default supply**, no error. Verify the param existed; validate `node`.
+### Tier 2 — Major: PVT ✅ FIXED 2026-06-06
+
+> Landed (uncommitted in the worktree). Verified by `uv run pytest` (142 pass) + 4 regression tests
+> in [tests/test_pvt_corner.py](tests/test_pvt_corner.py), and **against real ngspice + the IHP PDK in
+> the container**: a `ss_125C_1V62` corner-applied folded-cascode netlist simulated cleanly
+> (`run_sanity_check` True; `mos_ss` in / `mos_tt` out / VDD→1.62), and the PVT + slow-optimization
+> suites passed (26).
+
+- [x] **BUG-B11** *(fixed)* · `spicelib.py` `apply_corner` — strip each referenced `.lib` basename **exactly once up front**, then add all corner includes, so two `model_includes` sharing one `lib_file` (different sections) no longer collapse to the last; re-apply stays idempotent (the upfront strip clears prior corner includes too).
+- [x] **BUG-B12** *(fixed)* · `spicelib.py` `apply_corner` — before applying supply overrides, compute the netlist's declared `.param` names (`ed.get_all_parameter_names()`); a supply `node` that isn't declared (e.g. the source instance `Vdd` instead of the param `VDD`, or an undeclared `VSS`) now logs a loud WARNING (via the `spicexplorer` logger, so it surfaces in the SSE log) that the override adds a dangling `.param` and will NOT change the supply — instead of silently running at the netlist default.
 
 ### Tier 3 — Major: backend & UI (encapsulation / lifecycle)
 - [ ] **BUG-B13** 🟡 · `optimizer_runner.py:372-412` — concurrent runs **cross-contaminate `run.log` + SSE** via unscoped handlers on the shared `spicexplorer` logger (dir isolation was designed for concurrency; logging wasn't). Filter by worker thread / per-run child logger.

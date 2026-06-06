@@ -183,3 +183,77 @@ def test_apply_corner_idempotent_when_switching(tmp_path):
     assert ".lib cornerMOSlv.lib mos_ss" not in joined
     # exactly one injected temp option
     assert len(re.findall(r"\.options?\s+temp\s*=", joined)) == 1
+
+
+# ── BUG-B11/B12: apply_corner hardening ─────────────────────────────────────
+
+@pytest.mark.skipif(not FC_TB_NETLIST.exists(), reason="folded_cascode testbench netlist missing")
+def test_apply_corner_keeps_multiple_sections_of_one_lib(tmp_path):
+    """Two model_includes sharing ONE lib_file (different sections) must BOTH survive — the
+    per-include basename strip used to delete the sibling section just added (BUG-B11)."""
+    from spicexplorer.core.domains import Corner, ModelInclude
+
+    w = _make_wrapper(tmp_path)
+    corner = Corner(
+        name="multi_section",
+        model_includes=[
+            ModelInclude(lib_file="models.lib", section="nmos_tt"),
+            ModelInclude(lib_file="models.lib", section="pmos_tt"),
+        ],
+        temp=27.0,
+    )
+    w.apply_corner(corner)
+    joined = _joined(w)
+    assert ".lib models.lib nmos_tt" in joined, "first section was collapsed (B11)"
+    assert ".lib models.lib pmos_tt" in joined, "second section missing"
+
+
+@pytest.mark.skipif(not FC_TB_NETLIST.exists(), reason="folded_cascode testbench netlist missing")
+def test_apply_corner_multi_section_idempotent_on_reapply(tmp_path):
+    """Re-applying the same multi-section corner replaces (not accumulates) both sections."""
+    from spicexplorer.core.domains import Corner, ModelInclude
+
+    w = _make_wrapper(tmp_path)
+    corner = Corner(
+        name="multi_section",
+        model_includes=[ModelInclude(lib_file="models.lib", section="nmos_tt"),
+                        ModelInclude(lib_file="models.lib", section="pmos_tt")],
+        temp=27.0,
+    )
+    w.apply_corner(corner)
+    w.apply_corner(corner)
+    joined = _joined(w)
+    assert joined.count(".lib models.lib nmos_tt") == 1
+    assert joined.count(".lib models.lib pmos_tt") == 1
+
+
+@pytest.mark.skipif(not FC_TB_NETLIST.exists(), reason="folded_cascode testbench netlist missing")
+def test_apply_corner_warns_on_undeclared_supply(tmp_path, caplog):
+    """A supply node that isn't a declared .param must produce a loud warning, not silently
+    add a dangling .param and run at the netlist default supply (BUG-B12)."""
+    import logging
+    from spicexplorer.core.domains import Corner, SupplyOverride
+
+    w = _make_wrapper(tmp_path)
+    corner = Corner(name="bad_supply",
+                    supplies=[SupplyOverride(node="NOT_A_PARAM_XYZ", value=1.2)], temp=27.0)
+    with caplog.at_level(logging.WARNING, logger="spicexplorer.spice_engine.spicelib"):
+        w.apply_corner(corner)
+    assert any("NOT_A_PARAM_XYZ" in r.getMessage() for r in caplog.records), \
+        "undeclared supply node was applied silently (B12)"
+
+
+@pytest.mark.skipif(not FC_TB_NETLIST.exists(), reason="folded_cascode testbench netlist missing")
+def test_apply_corner_no_warn_on_declared_supply(tmp_path, caplog):
+    """A supply node that IS a declared .param (VDD) applies cleanly with no B12 warning."""
+    import logging
+    from spicexplorer.core.domains import Corner, SupplyOverride
+
+    w = _make_wrapper(tmp_path)
+    corner = Corner(name="ok_supply",
+                    supplies=[SupplyOverride(node="VDD", value=1.5)], temp=27.0)
+    with caplog.at_level(logging.WARNING, logger="spicexplorer.spice_engine.spicelib"):
+        w.apply_corner(corner)
+    assert not any("VDD" in r.getMessage() and "not a declared" in r.getMessage().lower()
+                   for r in caplog.records)
+    assert abs(float(w.editor.get_parameter("VDD")) - 1.5) < 1e-9

@@ -129,6 +129,10 @@ params (resolve only their `val`/`init`).
 
 ## Tier 2 — Major: PVT
 
+> **✅ STATUS: both (B11, B12) FIXED 2026-06-06** (uncommitted in the worktree; see TODO §19 Tier 2).
+> Verified by `pytest` (142 pass) + 4 regression tests, and against real ngspice + IHP PDK in the
+> container — a corner-applied folded-cascode netlist simulated cleanly (`run_sanity_check` True).
+
 ### BUG-B11 — `apply_corner` collapses multiple `model_includes` sharing one `lib_file` to only the last section  🟡 major/pvt
 `spicelib.py:369-376`: the strip key is the lib-file **basename only** (`\.lib\s+\S*<basename>\s+\S+`). A
 corner with `[{models.lib, nmos_tt}, {models.lib, pmos_tt}]` ends up with only `.lib models.lib pmos_tt` —
