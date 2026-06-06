@@ -8,10 +8,13 @@ import threading
 import traceback
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
+import yaml
+
 from spicexplorer.core.domains import Project_Setup
-from ui.backend.app_config import auto_save_root
+from ui.backend.services import project_service
 from ui.backend.services.num import safe_float as _safe_float
 
 logger = logging.getLogger(__name__)
@@ -63,6 +66,12 @@ class RunState:
     # resume from (load_checkpoint + optimize(keep_history=True)).
     autosave_every: int | None = None
     resume_path: str | None = None
+    # Per-run isolation (report.md P2): the owning project (None → unscoped runs/)
+    # and the run's self-contained dir (checkpoints/ run.log events.ndjson sim/ …),
+    # created once the project + effective algorithm are known.
+    project_id: str | None = None
+    label: str | None = None
+    run_dir: Path | None = None
     done: bool = False
 
 
@@ -79,16 +88,22 @@ def _prune_finished_runs() -> None:
 
 # ---------- live optimizer ----------
 
-def _build_spicelib_wrappers(project: Project_Setup, output_subdir: str | None = None):
+def _build_spicelib_wrappers(
+    project: Project_Setup,
+    output_subdir: str | None = None,
+    output_folder: Path | None = None,
+):
     from pathlib import Path
     from spicexplorer.spice_engine import NGSpice_Wrapper, Sim_Execution_Type
 
-    output_folder = Path(project.ws_root) / Path(project.outdir)
-    # An optional subfolder isolates these wrappers' outputs from a concurrent live
-    # run — the wrapper constructor rmtree's its output_folder, so a manual sim
-    # sharing ws_root/outdir would otherwise clobber a running optimization.
-    if output_subdir:
-        output_folder = output_folder / output_subdir
+    # An explicit `output_folder` (a live run's per-run `runs/<id>/sim`) takes
+    # precedence so the run dir is fully self-contained and the wrapper's `rmtree`
+    # can never touch another run. Otherwise default to ws_root/outdir[/subdir] — the
+    # optional subfolder isolates outputs (e.g. a concurrent manual sim) from a live run.
+    if output_folder is None:
+        output_folder = Path(project.ws_root) / Path(project.outdir)
+        if output_subdir:
+            output_folder = output_folder / output_subdir
     sim_execution_t = Sim_Execution_Type.RUN_AND_WAIT
     path_to_simulator = Path(project.simulator)
 
@@ -104,6 +119,74 @@ def _build_spicelib_wrappers(project: Project_Setup, output_subdir: str | None =
             path_to_simulator=path_to_simulator,
         )
     return wrappers
+
+
+def _config_snapshot_yaml(project_path: str, state: "RunState") -> str:
+    """The exact config a run used: the original YAML with the ephemeral overrides
+    (algorithm/budget/seed/active_corner) BAKED IN — so the run dir reproduces itself
+    (report.md §6). Best-effort: on any parse error, persist the original text."""
+    try:
+        text = Path(project_path).read_text()
+        data = yaml.safe_load(text) or {}
+    except Exception:
+        return ""
+    # The DSL nests everything under a top-level `project:` key (optimizer_config,
+    # pvt, …); fall back to the document root for robustness.
+    roots = [r for r in (data.get("project") if isinstance(data, dict) else None, data)
+             if isinstance(r, dict)]
+    for root in roots:
+        for key in ("optimizer_config", "optimizer"):
+            opt = root.get(key)
+            if isinstance(opt, dict):
+                if state.algorithm:
+                    opt["name"] = state.algorithm
+                if state.budget:
+                    opt["budget"] = state.budget
+                if state.seed is not None:
+                    opt["random_seed"] = state.seed
+        if state.active_corner and isinstance(root.get("pvt"), dict):
+            root["pvt"]["active_corner"] = state.active_corner
+    try:
+        return yaml.safe_dump(data, sort_keys=False)
+    except Exception:
+        return text
+
+
+def _tee_event(state: "RunState", event: dict) -> None:
+    """Append one SSE event to the run's replayable ``events.ndjson`` (report.md §6)."""
+    rd = state.run_dir
+    if rd is None:
+        return
+    try:
+        with (rd / "events.ndjson").open("a") as f:
+            f.write(json.dumps(event) + "\n")
+    except (OSError, TypeError):
+        pass
+
+
+def _write_run_json(state: "RunState", *, status: str, started: str,
+                    best_score: float | None = None, ended: str | None = None) -> None:
+    """Commit the per-run ``run.json`` (label/algo/seed/budget/corner/status/timing/best)."""
+    if state.run_dir is None:
+        return
+    try:
+        (state.run_dir / "run.json").write_text(json.dumps({
+            "run_id": state.run_id,
+            "project_id": state.project_id,
+            "label": state.label,
+            "kind": "resume" if state.resume_path else "live",
+            "algorithm": state.algorithm,
+            "seed": state.seed,
+            "budget": state.budget,
+            "active_corner": state.active_corner,
+            "status": status,
+            "best_score": best_score,
+            "started": started,
+            "ended": ended,
+            "resume_from": state.resume_path,
+        }, indent=2))
+    except OSError:
+        pass
 
 
 def _load_checkpoint_log(path: str):
@@ -150,6 +233,7 @@ def _streaming_optimizer_class(state: RunState):
     from spicexplorer.optimization.stochastic.nevergrad import Nevergrad_Spice_Single_Objective
 
     def _emit(event: dict) -> None:
+        _tee_event(state, event)  # persist to events.ndjson for offline replay
         asyncio.run_coroutine_threadsafe(state.queue.put(event), state.loop)
 
     class _StreamingOpt(Nevergrad_Spice_Single_Objective):
@@ -290,6 +374,10 @@ def _run_live(state: RunState, project_path: str) -> None:
         lib_logger.setLevel(logging.INFO)
     log_handler = _QueueLogHandler(state)
     lib_logger.addHandler(log_handler)
+    started = datetime.now().isoformat(timespec="seconds")
+    final_status = "done"
+    best_for_json: float | None = None
+    file_log_handler: logging.Handler | None = None
     try:
         logger.info("[run %s] loading project YAML", state.run_id[:8])
         project = Project_Setup.from_yaml(project_path)
@@ -301,13 +389,34 @@ def _run_live(state: RunState, project_path: str) -> None:
             seed=state.seed,
             active_corner=state.active_corner,
         )
-        # Isolate live-run sim outputs under outdir/live so they can't be rmtree'd by — or
-        # rmtree — a concurrent manual sim (which uses outdir/manual_sim) (BUG-A8 / OPT-2).
-        wrappers = _build_spicelib_wrappers(project, output_subdir="live")
+        # Per-run isolation (report.md P2): a self-contained dir under the owning
+        # project's runs/ (or work_root/runs/ when unscoped). Carries the config
+        # snapshot (overrides baked in), a DEBUG run.log, the replayable
+        # events.ndjson, checkpoints/, and sim/ — a folder you can zip and hand over.
+        _algo = project.optimizer_config.name
+        # Record the EFFECTIVE algorithm (post-override) in run.json so the run list
+        # shows what actually ran, not just an absent override.
+        if not state.algorithm:
+            state.algorithm = _algo
+        _ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
+        rdir = project_service.run_dir(state.project_id, f"{_ts}_{_algo}_{state.run_id[:8]}")
+        state.run_dir = rdir
+        _snap = _config_snapshot_yaml(project_path, state)
+        if _snap:
+            (rdir / "config_snapshot.yaml").write_text(_snap)
+        _write_run_json(state, status="running", started=started)
+        file_log_handler = logging.FileHandler(rdir / "run.log")
+        file_log_handler.setLevel(logging.DEBUG)
+        file_log_handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        lib_logger.addHandler(file_log_handler)
+        logger.info("[run %s] isolated run dir: %s", state.run_id[:8], rdir)
+
+        # sim outputs live INSIDE the run dir so the wrapper's rmtree can never touch
+        # another run (report.md §6), and checkpoints autosave to runs/<id>/checkpoints.
+        wrappers = _build_spicelib_wrappers(project, output_folder=rdir / "sim")
         stream_cls = _streaming_optimizer_class(state)
-        # Persist autosave checkpoints under WORK_ROOT (the Docker /work bind mount),
-        # NOT the CWD-relative ./auto_save that dies with the container (report.md P1).
-        save_root = auto_save_root()
+        save_root = rdir / "checkpoints"
         if state.resume_path:
             logger.info("[run %s] resuming from checkpoint %s", state.run_id[:8], state.resume_path)
             opt = stream_cls(setup_obj=project, spicelib_wrappers=wrappers, output_root=save_root)
@@ -350,16 +459,32 @@ def _run_live(state: RunState, project_path: str) -> None:
         logger.info("[run %s] starting optimize() — budget %d%s", state.run_id[:8], state.budget,
                     " (resume)" if keep_history else "")
         opt.optimize(keep_history=keep_history)
+        best_for_json = _safe_float(getattr(opt, "_best_score", None))
         logger.info("[run %s] optimize() finished", state.run_id[:8])
     except KeyboardInterrupt:
+        final_status = "stopped"
+        best_for_json = _safe_float(getattr(locals().get("opt"), "_best_score", None))
         logger.info("[run %s] stopped by user", state.run_id[:8])
     except Exception as e:
+        final_status = "error"
         logger.error("[run %s] optimizer error: %s\n%s", state.run_id[:8], e, traceback.format_exc())
         asyncio.run_coroutine_threadsafe(
             state.queue.put({"error": str(e)}), state.loop
         )
     finally:
+        if file_log_handler is not None:
+            lib_logger.removeHandler(file_log_handler)
+            file_log_handler.close()
         lib_logger.removeHandler(log_handler)
+        # Commit the final run.json (status/best/ended) so the run list is honest even
+        # if the SSE client disconnected; touch the owning project's manifest.
+        _write_run_json(state, status=final_status, started=started, best_score=best_for_json,
+                        ended=datetime.now().isoformat(timespec="seconds"))
+        if state.project_id:
+            try:
+                project_service.touch_manifest(state.project_id)
+            except Exception:
+                pass
         state.done = True
         asyncio.run_coroutine_threadsafe(state.queue.put(None), state.loop)
 
@@ -409,6 +534,8 @@ async def _run_replay(state: RunState, checkpoint_path: Path) -> None:
 def start_run(
     *,
     project_path: str | None = None,
+    project_id: str | None = None,
+    label: str | None = None,
     replay: bool = False,
     checkpoint_id: str | None = None,
     checkpoint_path: Path | None = None,
@@ -435,6 +562,8 @@ def start_run(
         active_corner=active_corner,
         autosave_every=autosave_every,
         resume_path=resume_path,
+        project_id=project_id,
+        label=label,
     )
     _runs[run_id] = state
 

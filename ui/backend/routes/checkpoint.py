@@ -6,7 +6,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ui.backend.app_config import preset_checkpoint_paths, REPO_ROOT, auto_save_root
+from ui.backend.app_config import (
+    preset_checkpoint_paths, REPO_ROOT, auto_save_root, projects_root, runs_root,
+)
 from ui.backend.services.checkpoint_reader import read_checkpoint, compute_envelope, compute_scatter
 
 router = APIRouter()
@@ -86,9 +88,13 @@ def _autosave_roots() -> list[Path]:
     (BUG-A9 / OPT-3)."""
     roots: list[Path] = []
     seen: set[Path] = set()
-    # WORK_ROOT/auto_save is where runs now persist (report.md P1); the legacy
-    # REPO_ROOT/auto_save + cwd/auto_save are kept so older runs aren't orphaned.
-    for r in (auto_save_root(), REPO_ROOT / "auto_save", Path.cwd() / "auto_save"):
+    candidates = [auto_save_root(), REPO_ROOT / "auto_save", Path.cwd() / "auto_save"]
+    # Per-run checkpoint dirs (report.md P2): projects/<id>/runs/<run>/checkpoints and
+    # the unscoped runs/<run>/checkpoints. Globbing the `checkpoints` leaf (not *.json
+    # at the tree root) keeps manifest.json / run.json out of the checkpoint catalog.
+    for base in (projects_root(), runs_root()):
+        candidates.extend(ck for ck in base.rglob("checkpoints") if ck.is_dir())
+    for r in candidates:
         rr = r.resolve()
         if rr not in seen and rr.exists():
             seen.add(rr)
