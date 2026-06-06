@@ -47,6 +47,14 @@ def runs_root() -> Path:
     return d
 
 
+def trash_root() -> Path:
+    """Soft-delete bin under WORK_ROOT (recoverable). Projects/runs are MOVED here on
+    delete (never rm'd), so a delete is always restorable (report.md P4)."""
+    d = work_root() / ".trash"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 _app_config: dict[str, Any] | None = None
 
 

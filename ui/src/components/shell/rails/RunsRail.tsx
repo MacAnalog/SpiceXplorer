@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import type { Route } from "next";
 import { useRouter } from "next/navigation";
-import { RefreshCw, X, Trash2, Play } from "lucide-react";
+import { RefreshCw, X, Trash2, Play, Pencil, Check } from "lucide-react";
 import { useExplorerStore } from "@/stores/explorerStore";
 import { useRunStore } from "@/stores/runStore";
 import { useUIStore } from "@/stores/uiStore";
@@ -38,6 +38,10 @@ export function RunsRail() {
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [projectRuns, setProjectRuns] = useState<ProjectRun[]>([]);
+  // Per-run lifecycle UI state (report.md P4): inline rename draft + armed delete.
+  const [editingRunId, setEditingRunId] = useState<string | null>(null);
+  const [editRunLabel, setEditRunLabel] = useState("");
+  const [pendingRunDelete, setPendingRunDelete] = useState<string | null>(null);
 
   // Per-project run history (report.md P3) — server-persisted, replacing the
   // localStorage list when a registered project is active. Refetched on project
@@ -53,6 +57,46 @@ export function RunsRail() {
       .catch(() => { if (alive) setProjectRuns([]); });
     return () => { alive = false; };
   }, [projectId, isRunning]);
+
+  const refreshProjectRuns = async () => {
+    if (!projectId) return;
+    try {
+      const r = await api.getProjectRuns(projectId);
+      setProjectRuns(r.runs);
+    } catch {
+      /* best-effort */
+    }
+  };
+
+  const commitRunRename = async (runId: string) => {
+    const label = editRunLabel.trim();
+    if (!projectId || !label) { setEditingRunId(null); return; }
+    setError(null);
+    try {
+      await api.renameRun(projectId, runId, label);
+      await refreshProjectRuns();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Rename failed");
+    } finally {
+      setEditingRunId(null);
+    }
+  };
+
+  const handleDeleteRun = async (runId: string) => {
+    if (!projectId) return;
+    setPendingRunDelete(runId);
+    setError(null);
+    try {
+      await api.deleteRun(projectId, runId);
+      await refreshProjectRuns();
+      // A deleted run's checkpoints vanish too — re-scope the catalog.
+      setAvailableCheckpoints(await api.listCheckpoints(projectId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setPendingRunDelete(null);
+    }
+  };
 
   // Re-scope the checkpoint catalog to the active project so it stops showing
   // OTHER projects' per-run checkpoints when you switch projects.
@@ -124,28 +168,84 @@ export function RunsRail() {
         projectRuns.length === 0 ? (
           <RailHint>No runs yet for this project.</RailHint>
         ) : (
-          projectRuns.map((r) => (
-            <div key={r.run_id} className="flex w-full items-center gap-2 rounded px-1.5 py-1">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-1">
-                  <span className="truncate text-[11px]">
-                    {r.label ?? r.algorithm ?? r.run_id.slice(0, 8)}
-                  </span>
-                  <span className="font-mono text-[10px] text-muted">
-                    {r.best_score != null ? formatEng(r.best_score) : "—"}
-                  </span>
-                </div>
-                <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[9px] text-faint">
-                  <span className={cn("rounded px-1", RUN_STATUS_CLS[r.status] ?? "bg-hairline text-muted")}>
-                    {r.status}
-                  </span>
-                  <span className="truncate">
-                    {r.algorithm ?? r.kind}{r.budget ? ` · ${r.budget} it` : ""}
-                  </span>
+          projectRuns.map((r) => {
+            const isEditing = editingRunId === r.run_id;
+            const isConfirming = pendingRunDelete === r.run_id;
+            return (
+              <div key={r.run_id} className="group flex w-full items-center gap-2 rounded px-1.5 py-1 hover:bg-hairline">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-1">
+                    {isEditing ? (
+                      <input
+                        autoFocus
+                        value={editRunLabel}
+                        onChange={(e) => setEditRunLabel(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void commitRunRename(r.run_id);
+                          if (e.key === "Escape") setEditingRunId(null);
+                        }}
+                        onBlur={() => void commitRunRename(r.run_id)}
+                        aria-label="Rename run"
+                        className="min-w-0 flex-1 rounded border border-border bg-transparent px-1 py-0.5 text-[11px] text-fg outline-none"
+                      />
+                    ) : (
+                      <span className="truncate text-[11px]">
+                        {r.label ?? r.algorithm ?? r.run_id.slice(0, 8)}
+                      </span>
+                    )}
+                    <span className="flex shrink-0 items-center gap-1">
+                      {!isEditing && (
+                        <span className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                          <button
+                            type="button"
+                            onClick={() => { setEditingRunId(r.run_id); setEditRunLabel(r.label ?? r.algorithm ?? ""); }}
+                            aria-label="Rename run"
+                            title="Rename run"
+                            className="rounded p-0.5 text-faint hover:bg-hairline hover:text-fg"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                          {isConfirming ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteRun(r.run_id)}
+                              aria-label="Confirm delete run"
+                              title="Click again to delete"
+                              className="rounded p-0.5 text-danger hover:bg-danger-soft"
+                            >
+                              <Check className="h-3 w-3" />
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setPendingRunDelete(r.run_id)}
+                              aria-label="Delete run"
+                              title="Delete run (recoverable)"
+                              className="rounded p-0.5 text-faint hover:bg-danger-soft hover:text-danger"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          )}
+                        </span>
+                      )}
+                      <span className="font-mono text-[10px] text-muted">
+                        {r.best_score != null ? formatEng(r.best_score) : "—"}
+                      </span>
+                    </span>
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[9px] text-faint">
+                    <span className={cn("rounded px-1", RUN_STATUS_CLS[r.status] ?? "bg-hairline text-muted")}>
+                      {r.status}
+                    </span>
+                    <span className="truncate">
+                      {r.algorithm ?? r.kind}{r.budget ? ` · ${r.budget} it` : ""}
+                    </span>
+                    {isConfirming && <span className="text-danger">delete?</span>}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )
       ) : history.length === 0 ? (
         <RailHint>No runs yet. Replay a checkpoint on Optimize.</RailHint>

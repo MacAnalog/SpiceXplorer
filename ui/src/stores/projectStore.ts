@@ -25,10 +25,16 @@ interface ProjectStore {
   refreshProjects: () => Promise<void>;
   /** Switch to a registered project: load its summary + bind project_id. */
   switchProject: (id: string) => Promise<boolean>;
+  /** Rename a project (manifest only — the dir id is stable). Updates the active name. */
+  renameProject: (id: string, name: string) => Promise<boolean>;
+  /** Soft-delete (recoverable). Detaches the active binding if the deleted project was active. */
+  deleteProject: (id: string) => Promise<boolean>;
+  /** Fork = copy everything but run history into a new project. Returns the new id. */
+  forkProject: (id: string, name?: string) => Promise<string | null>;
   reset: () => void;
 }
 
-export const useProjectStore = create<ProjectStore>((set) => ({
+export const useProjectStore = create<ProjectStore>((set, get) => ({
   yaml: "",
   yamlPath: "",
   summary: null,
@@ -87,6 +93,40 @@ export const useProjectStore = create<ProjectStore>((set) => ({
       return true;
     } catch {
       return false;
+    }
+  },
+  renameProject: async (id, name) => {
+    try {
+      await api.renameProject(id, name);
+      await get().refreshProjects();
+      // Keep the active label in sync if we renamed the open project.
+      if (get().projectId === id) set({ projectName: name });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  deleteProject: async (id) => {
+    try {
+      await api.deleteProject(id);
+      await get().refreshProjects();
+      // If the active project was deleted, detach so runs no longer resolve to a gone
+      // project.yaml (they become unscoped until the user switches to another project).
+      if (get().projectId === id) {
+        set({ projectId: null, projectName: null });
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  forkProject: async (id, name) => {
+    try {
+      const { id: newId } = await api.forkProject(id, name);
+      await get().refreshProjects();
+      return newId;
+    } catch {
+      return null;
     }
   },
   reset: () =>

@@ -31,6 +31,7 @@ from ui.backend.app_config import (
     default_yaml_path,
     projects_root,
     runs_root,
+    trash_root,
     work_root,
 )
 
@@ -299,3 +300,170 @@ def copy_example(example_key: str, name: str | None = None) -> str:
         "source": {"kind": "example", "ref": example_key}, "schema_version": SCHEMA_VERSION,
     })
     return pid
+
+
+# ---------- lifecycle: rename / fork / soft-delete + restore (report.md P4) ----------
+#
+# The directory id (``<slug>-<id8>``) is the STABLE handle and never moves on rename —
+# only the manifest ``name`` (and ``updated``) change, so checkpoint paths, run dirs, and
+# the active-project pointer all stay valid. Delete is a *move* to ``trash_root()`` (never
+# an ``rm``), so it is always restorable. Fork is a ``copytree`` of everything EXCEPT
+# ``runs/`` (a fresh project starts with no run history) into a new id.
+
+
+def rename_project(project_id: str, name: str) -> dict[str, Any]:
+    """Rename a project = edit its manifest ``name`` only. The dir id is immutable, so
+    nothing on disk moves and every existing path/run/checkpoint keeps resolving."""
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("project name is required")
+    if not project_exists(project_id):
+        raise FileNotFoundError(f"project '{project_id}' not found")
+    man = read_manifest(project_id)
+    man["name"] = name
+    man["updated"] = datetime.now().isoformat(timespec="seconds")
+    write_manifest(project_id, man)
+    return man
+
+
+def fork_project(project_id: str, name: str | None = None) -> str:
+    """Copy a project into a NEW id, excluding ``runs/`` (a fork starts run-history-free).
+    The ``project.yaml`` / netlists / schematics / scratch are duplicated verbatim."""
+    if not project_exists(project_id):
+        raise FileNotFoundError(f"project '{project_id}' not found")
+    src = read_manifest(project_id)
+    src_name = src.get("name", project_id)
+    new_name = (name or "").strip() or f"{src_name} (copy)"
+    new_id = new_project_id(new_name)
+    dst = project_dir(new_id)
+    _assert_under_work_root(dst)
+    src_dir = project_dir(project_id)
+    # Copy everything except per-run state (runs/ + the .trash bin if nested).
+    shutil.copytree(
+        src_dir, dst,
+        ignore=shutil.ignore_patterns("runs", ".trash"),
+        dirs_exist_ok=True,
+    )
+    (dst / "runs").mkdir(parents=True, exist_ok=True)
+    (dst / "scratch").mkdir(parents=True, exist_ok=True)
+    now = datetime.now().isoformat(timespec="seconds")
+    write_manifest(new_id, {
+        "id": new_id, "slug": new_id.rsplit("-", 1)[0], "name": new_name,
+        "created": now, "updated": now,
+        "source": {"kind": "fork", "ref": project_id}, "schema_version": SCHEMA_VERSION,
+    })
+    return new_id
+
+
+def soft_delete_project(project_id: str) -> str:
+    """MOVE a project dir into ``trash_root()`` (recoverable). Returns the trash id."""
+    if not project_exists(project_id):
+        raise FileNotFoundError(f"project '{project_id}' not found")
+    src = project_dir(project_id)
+    _assert_under_work_root(src)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    trash_id = f"{project_id}__{ts}"
+    dst = trash_root() / trash_id
+    _assert_under_work_root(dst)
+    # Record where it came from + when, so restore can put it back and the trash list
+    # can show a human label without re-reading the buried manifest.
+    man = read_manifest(project_id)
+    meta = {
+        "trash_id": trash_id, "kind": "project", "project_id": project_id,
+        "name": man.get("name", project_id),
+        "deleted": datetime.now().isoformat(timespec="seconds"),
+    }
+    shutil.move(str(src), str(dst))
+    (dst / ".trashmeta.json").write_text(json.dumps(meta, indent=2))
+    return trash_id
+
+
+def list_trash() -> list[dict[str, Any]]:
+    """Deleted projects awaiting restore/purge, newest first."""
+    out: list[dict[str, Any]] = []
+    for td in sorted(trash_root().glob("*"), reverse=True):
+        meta_p = td / ".trashmeta.json"
+        if not meta_p.exists():
+            continue
+        try:
+            out.append(json.loads(meta_p.read_text()))
+        except Exception:
+            pass
+    return out
+
+
+def restore_project(trash_id: str) -> str:
+    """MOVE a trashed project back to the registry. Returns the restored project id.
+    Refuses if a project with the original id now exists (no clobber)."""
+    if "/" in trash_id or ".." in trash_id or "\\" in trash_id:
+        raise ValueError(f"invalid trash id: {trash_id!r}")
+    src = trash_root() / trash_id
+    if not (src / ".trashmeta.json").exists():
+        raise FileNotFoundError(f"trash item '{trash_id}' not found")
+    meta = json.loads((src / ".trashmeta.json").read_text())
+    project_id = meta.get("project_id") or trash_id.split("__", 1)[0]
+    dst = project_dir(project_id)
+    _assert_under_work_root(src)
+    _assert_under_work_root(dst)
+    if dst.exists():
+        raise ValueError(f"cannot restore: project '{project_id}' already exists")
+    shutil.move(str(src), str(dst))
+    # Drop the trash sidecar — it's meaningless once restored.
+    sidecar = dst / ".trashmeta.json"
+    if sidecar.exists():
+        sidecar.unlink()
+    touch_manifest(project_id)
+    return project_id
+
+
+# ---------- lifecycle: per-run rename / delete ----------
+
+def _find_run_dir(project_id: str | None, run_id: str) -> Path | None:
+    """Locate a run's directory by its ``run.json`` ``run_id`` (the dir name embeds only
+    the first 8 chars, so match on the stored id, not the folder name)."""
+    for rd in runs_dir(project_id).glob("*"):
+        rj = rd / "run.json"
+        if not rj.exists():
+            continue
+        try:
+            d = json.loads(rj.read_text())
+        except Exception:
+            continue
+        if d.get("run_id") == run_id or rd.name == run_id:
+            return rd
+    return None
+
+
+def rename_run(project_id: str | None, run_id: str, label: str) -> dict[str, Any]:
+    """Rename a run = edit its ``run.json`` ``label`` (the dir name never moves)."""
+    label = (label or "").strip()
+    if not label:
+        raise ValueError("run label is required")
+    rd = _find_run_dir(project_id, run_id)
+    if rd is None:
+        raise FileNotFoundError(f"run '{run_id}' not found")
+    rj = rd / "run.json"
+    d = json.loads(rj.read_text())
+    d["label"] = label
+    rj.write_text(json.dumps(d, indent=2))
+    return d
+
+
+def delete_run(project_id: str | None, run_id: str) -> str:
+    """MOVE a single run dir into ``trash_root()`` (recoverable). Returns the trash id."""
+    rd = _find_run_dir(project_id, run_id)
+    if rd is None:
+        raise FileNotFoundError(f"run '{run_id}' not found")
+    _assert_under_work_root(rd)
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    trash_id = f"run__{run_id[:8]}__{ts}"
+    dst = trash_root() / trash_id
+    _assert_under_work_root(dst)
+    meta = {
+        "trash_id": trash_id, "kind": "run", "project_id": project_id or "",
+        "run_id": run_id, "name": rd.name,
+        "deleted": datetime.now().isoformat(timespec="seconds"),
+    }
+    shutil.move(str(rd), str(dst))
+    (dst / ".trashmeta.json").write_text(json.dumps(meta, indent=2))
+    return trash_id

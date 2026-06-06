@@ -390,6 +390,16 @@ export interface ExampleMeta {
   yaml_path: string;
 }
 
+// Soft-delete bin (report.md P4) — a deleted project/run MOVED to WORK_ROOT/.trash.
+export interface TrashItem {
+  trash_id: string;
+  kind: "project" | "run";
+  project_id: string;
+  run_id?: string;
+  name: string;
+  deleted: string;
+}
+
 export interface GenerateProjectResponse {
   ok: boolean;
   yaml: string;

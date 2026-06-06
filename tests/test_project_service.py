@@ -82,3 +82,78 @@ def test_guards_reject_path_traversal(ps):
         ps.project_dir("../escape")
     with pytest.raises(ValueError):
         ps.project_dir("a/b")
+
+
+# ---------- P4 lifecycle: rename / fork / soft-delete + restore ----------
+
+
+def test_rename_project_edits_manifest_only_dir_stable(ps):
+    pid = ps.create_project("Old Name")
+    man = ps.rename_project(pid, "New Name")
+    assert man["name"] == "New Name"
+    # The dir id is the stable handle — it does NOT move on rename.
+    assert ps.project_dir(pid).exists()
+    assert ps.read_manifest(pid)["name"] == "New Name"
+    with pytest.raises(ValueError):
+        ps.rename_project(pid, "   ")
+    with pytest.raises(FileNotFoundError):
+        ps.rename_project("missing-00000000", "x")
+
+
+def test_fork_copies_everything_except_runs(ps):
+    pid = ps.create_project("Source")
+    # Give the source a run + a stray netlist; the fork must copy the netlist, not the run.
+    rd = ps.run_dir(pid, "2026_algo_deadbeef")
+    (rd / "run.json").write_text(json.dumps({"run_id": "r1", "status": "done"}))
+    (ps.project_dir(pid) / "spice" / "amp.cir").write_text("* netlist\n")
+
+    new_id = ps.fork_project(pid, "Forked")
+    assert new_id != pid
+    npd = ps.project_dir(new_id)
+    assert (npd / "project.yaml").exists()
+    assert (npd / "spice" / "amp.cir").exists()           # design copied
+    assert list((npd / "runs").glob("*")) == []           # run history NOT copied
+    assert ps.read_manifest(new_id)["source"] == {"kind": "fork", "ref": pid}
+    assert ps.list_runs(new_id) == []
+
+
+def test_soft_delete_moves_to_trash_and_restores(ps):
+    pid = ps.create_project("Doomed")
+    trash_id = ps.soft_delete_project(pid)
+    # Gone from the registry, present in the trash.
+    assert not ps.project_exists(pid)
+    assert not ps.project_dir(pid).exists()
+    assert any(t["trash_id"] == trash_id for t in ps.list_trash())
+    # Restore brings it back under its original id with metadata intact.
+    restored = ps.restore_project(trash_id)
+    assert restored == pid
+    assert ps.project_exists(pid)
+    assert ps.read_manifest(pid)["name"] == "Doomed"
+    assert all(t["trash_id"] != trash_id for t in ps.list_trash())
+
+
+def test_restore_refuses_to_clobber_existing(ps):
+    pid = ps.create_project("Clash")
+    trash_id = ps.soft_delete_project(pid)
+    # Re-create a project that lands on the same id is impossible (uuid8), but simulate a
+    # clash by recreating the dir then restoring.
+    ps.project_dir(pid).mkdir(parents=True, exist_ok=True)
+    ps.project_yaml(pid).write_text("project: {}\n")
+    with pytest.raises(ValueError):
+        ps.restore_project(trash_id)
+
+
+def test_rename_and_delete_run(ps):
+    pid = ps.create_project("Runs")
+    rd = ps.run_dir(pid, "2026_algo_abcd1234")
+    (rd / "run.json").write_text(json.dumps({"run_id": "run-xyz", "status": "done"}))
+    # Rename by the stored run_id (not the dir name).
+    out = ps.rename_run(pid, "run-xyz", "Best so far")
+    assert out["label"] == "Best so far"
+    assert json.loads((rd / "run.json").read_text())["label"] == "Best so far"
+    # Delete moves the run dir into the trash (recoverable); it leaves the run list.
+    ps.delete_run(pid, "run-xyz")
+    assert ps.list_runs(pid) == []
+    assert not rd.exists()
+    with pytest.raises(FileNotFoundError):
+        ps.rename_run(pid, "run-xyz", "gone")

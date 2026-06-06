@@ -1,38 +1,55 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { FolderOpen, Plus, Beaker, Loader2 } from "lucide-react";
+import {
+  FolderOpen, Plus, Beaker, Loader2, Pencil, GitFork, Trash2, Check, X, Undo2, Trash,
+} from "lucide-react";
 import { useUIStore } from "@/stores/uiStore";
 import { useProjectStore } from "@/stores/projectStore";
 import { api } from "@/lib/api";
 import { cn, formatEng } from "@/lib/utils";
-import type { ExampleMeta } from "@/types/api";
+import type { ExampleMeta, TrashItem } from "@/types/api";
 
 /**
- * ⌘P Projects overlay (report.md P3) — the project registry surface. A project IS a
- * directory under WORK_ROOT/projects. Lists existing projects (click to switch), loads
- * a demo AS a new project (copy-on-load), and creates a new (example-structured)
- * project. NOT a new ActivityBar view, so the nav 1..8 shortcut invariant is preserved.
+ * ⌘P Projects overlay (report.md P3/P4) — the project registry surface. A project IS a
+ * directory under WORK_ROOT/projects. Lists existing projects (click to switch, hover to
+ * rename/fork/delete), loads a demo AS a new project (copy-on-load), creates a new
+ * (example-structured) project, and exposes the soft-delete trash (restore). NOT a new
+ * ActivityBar view, so the nav 1..8 shortcut invariant is preserved.
  */
 export function ProjectsOverlay() {
   const projectsOpen = useUIStore((s) => s.projectsOpen);
   const closeProjects = useUIStore((s) => s.closeProjects);
   const openWizard = useUIStore((s) => s.openWizard);
-  const { projects, projectId, refreshProjects, switchProject } = useProjectStore();
+  const {
+    projects, projectId, refreshProjects, switchProject,
+    renameProject, deleteProject, forkProject,
+  } = useProjectStore();
 
   const [query, setQuery] = useState("");
   const [examples, setExamples] = useState<ExampleMeta[]>([]);
+  const [trash, setTrash] = useState<TrashItem[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Per-row UI state: which project is being renamed (+ the draft) and which is armed to delete.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const refreshTrash = () =>
+    api.listTrash().then((r) => setTrash(r.trash.filter((t) => t.kind === "project"))).catch(() => setTrash([]));
 
   useEffect(() => {
     if (!projectsOpen) return;
     setQuery("");
     setNewName("");
     setError(null);
+    setEditingId(null);
+    setConfirmDeleteId(null);
     void refreshProjects();
     api.listExamples().then((r) => setExamples(r.examples)).catch(() => setExamples([]));
+    void refreshTrash();
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [projectsOpen, refreshProjects]);
 
@@ -83,6 +100,57 @@ export function ProjectsOverlay() {
     }
   };
 
+  const startRename = (id: string, current: string) => {
+    setConfirmDeleteId(null);
+    setEditingId(id);
+    setEditName(current);
+  };
+
+  const commitRename = async (id: string) => {
+    const name = editName.trim();
+    if (!name) { setEditingId(null); return; }
+    setBusy(id);
+    setError(null);
+    const ok = await renameProject(id, name);
+    setBusy(null);
+    setEditingId(null);
+    if (!ok) setError("Rename failed.");
+  };
+
+  const doFork = async (id: string) => {
+    setBusy(id);
+    setError(null);
+    const newId = await forkProject(id);
+    setBusy(null);
+    if (!newId) { setError("Fork failed."); return; }
+    const ok = await switchProject(newId);
+    if (ok) closeProjects();
+  };
+
+  const doDelete = async (id: string) => {
+    setBusy(id);
+    setError(null);
+    const ok = await deleteProject(id);
+    setBusy(null);
+    setConfirmDeleteId(null);
+    if (!ok) setError("Delete failed.");
+    else void refreshTrash();
+  };
+
+  const doRestore = async (trashId: string) => {
+    setBusy(trashId);
+    setError(null);
+    try {
+      await api.restoreTrash(trashId);
+      await refreshProjects();
+      await refreshTrash();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Restore failed.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[10vh]"
@@ -112,28 +180,94 @@ export function ProjectsOverlay() {
           {filteredProjects.length === 0 && (
             <div className="px-4 py-2 text-[12px] text-faint">No projects yet — create one or load a demo below.</div>
           )}
-          {filteredProjects.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => doSwitch(p.id)}
-              className={cn(
-                "flex w-full items-center justify-between gap-3 px-4 py-1.5 text-left text-[13px] transition",
-                p.id === projectId ? "bg-primary-soft text-primary" : "text-fg hover:bg-hairline",
-              )}
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-faint" />
-                <span className="truncate">{p.name}</span>
-                <span className="shrink-0 rounded bg-hairline px-1.5 text-[10px] text-muted">{p.source}</span>
-              </span>
-              <span className="flex shrink-0 items-center gap-2 font-mono text-[10px] text-muted">
-                {busy === p.id && <Loader2 className="h-3 w-3 animate-spin" />}
-                {p.run_count} run{p.run_count === 1 ? "" : "s"}
-                {p.best_score != null && <> · best {formatEng(p.best_score)}</>}
-              </span>
-            </button>
-          ))}
+          {filteredProjects.map((p) => {
+            const isEditing = editingId === p.id;
+            const isConfirming = confirmDeleteId === p.id;
+            return (
+              <div
+                key={p.id}
+                className={cn(
+                  "group flex items-center justify-between gap-2 px-4 py-1.5 text-[13px] transition",
+                  p.id === projectId ? "bg-primary-soft" : "hover:bg-hairline",
+                )}
+              >
+                {isEditing ? (
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <FolderOpen className="h-3.5 w-3.5 shrink-0 text-faint" />
+                    <input
+                      autoFocus
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void commitRename(p.id);
+                        if (e.key === "Escape") setEditingId(null);
+                      }}
+                      className="min-w-0 flex-1 rounded border border-border bg-transparent px-1.5 py-0.5 text-[13px] text-fg outline-none"
+                      aria-label="Rename project"
+                    />
+                    <button type="button" onClick={() => void commitRename(p.id)} title="Save"
+                      className="shrink-0 rounded p-1 text-primary hover:bg-hairline">
+                      <Check className="h-3.5 w-3.5" />
+                    </button>
+                    <button type="button" onClick={() => setEditingId(null)} title="Cancel"
+                      className="shrink-0 rounded p-1 text-muted hover:bg-hairline">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => doSwitch(p.id)}
+                      className={cn(
+                        "flex min-w-0 flex-1 items-center gap-2 text-left",
+                        p.id === projectId ? "text-primary" : "text-fg",
+                      )}
+                    >
+                      <FolderOpen className="h-3.5 w-3.5 shrink-0 text-faint" />
+                      <span className="truncate">{p.name}</span>
+                      <span className="shrink-0 rounded bg-hairline px-1.5 text-[10px] text-muted">{p.source}</span>
+                    </button>
+                    {isConfirming ? (
+                      <span className="flex shrink-0 items-center gap-1 text-[11px] text-danger">
+                        Delete?
+                        <button type="button" onClick={() => void doDelete(p.id)} title="Confirm delete"
+                          className="rounded p-1 hover:bg-danger-soft">
+                          {busy === p.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                        </button>
+                        <button type="button" onClick={() => setConfirmDeleteId(null)} title="Cancel"
+                          className="rounded p-1 text-muted hover:bg-hairline">
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </span>
+                    ) : (
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="flex items-center gap-2 font-mono text-[10px] text-muted">
+                          {busy === p.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                          {p.run_count} run{p.run_count === 1 ? "" : "s"}
+                          {p.best_score != null && <> · best {formatEng(p.best_score)}</>}
+                        </span>
+                        <span className="flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
+                          <button type="button" onClick={() => startRename(p.id, p.name)} title="Rename"
+                            className="rounded p-1 text-muted hover:bg-hairline hover:text-fg">
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button type="button" onClick={() => void doFork(p.id)} title="Fork (copy without run history)"
+                            className="rounded p-1 text-muted hover:bg-hairline hover:text-fg">
+                            <GitFork className="h-3.5 w-3.5" />
+                          </button>
+                          <button type="button" onClick={() => { setEditingId(null); setConfirmDeleteId(p.id); }} title="Delete"
+                            className="rounded p-1 text-muted hover:bg-danger-soft hover:text-danger">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </span>
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
 
           {/* Examples (load demo as project) */}
           <div className="px-4 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wider text-faint">
@@ -155,6 +289,36 @@ export function ProjectsOverlay() {
               </span>
             </button>
           ))}
+
+          {/* Trash (soft-deleted projects — restore) */}
+          {trash.length > 0 && (
+            <>
+              <div className="flex items-center gap-1.5 px-4 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wider text-faint">
+                <Trash className="h-3 w-3" /> Recently deleted ({trash.length})
+              </div>
+              {trash.map((t) => (
+                <div
+                  key={t.trash_id}
+                  className="flex items-center justify-between gap-3 px-4 py-1.5 text-[13px] text-muted"
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Trash2 className="h-3.5 w-3.5 shrink-0 text-faint" />
+                    <span className="truncate line-through decoration-faint">{t.name}</span>
+                    <span className="shrink-0 font-mono text-[10px] text-faint">{t.deleted}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void doRestore(t.trash_id)}
+                    title="Restore"
+                    className="inline-flex shrink-0 items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] text-fg hover:bg-hairline"
+                  >
+                    {busy === t.trash_id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Undo2 className="h-3 w-3" />}
+                    Restore
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
         </div>
 
         {error && (

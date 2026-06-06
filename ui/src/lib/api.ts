@@ -22,6 +22,7 @@ import type {
   ProjectDetail,
   ProjectRun,
   ExampleMeta,
+  TrashItem,
 } from "@/types/api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -260,6 +261,47 @@ export const api = {
   getProject: (id: string) => req<ProjectDetail>(`/api/projects/${encodeURIComponent(id)}`),
   getProjectRuns: (id: string) =>
     req<{ runs: ProjectRun[] }>(`/api/projects/${encodeURIComponent(id)}/runs`),
+
+  // Lifecycle (report.md P4) — rename keeps the stable dir id; delete is a recoverable
+  // MOVE to WORK_ROOT/.trash; fork copies everything except run history.
+  renameProject: (id: string, name: string) =>
+    req<{ id: string; manifest: Record<string, unknown> }>(
+      `/api/projects/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      },
+    ),
+  forkProject: (id: string, name?: string) =>
+    req<{ id: string }>(`/api/projects/${encodeURIComponent(id)}/fork`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
+  deleteProject: (id: string) =>
+    req<{ ok: boolean; trash_id: string }>(`/api/projects/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  listTrash: () => req<{ trash: TrashItem[] }>("/api/trash"),
+  restoreTrash: (trashId: string) =>
+    req<{ id: string }>(`/api/trash/${encodeURIComponent(trashId)}/restore`, {
+      method: "POST",
+    }),
+  renameRun: (projectId: string, runId: string, label: string) =>
+    req<{ run: ProjectRun }>(
+      `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label }),
+      },
+    ),
+  deleteRun: (projectId: string, runId: string) =>
+    req<{ ok: boolean; trash_id: string }>(
+      `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`,
+      { method: "DELETE" },
+    ),
 
   generateProject: (form: WizardForm, save_path?: string) =>
     req<GenerateProjectResponse>("/api/project/generate", {
