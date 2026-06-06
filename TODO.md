@@ -377,3 +377,101 @@ Actionable list from the **second** audit (static analysis on the server — **n
 - [x] **BUG-A14** *(fixed)* · [`score_service.py:103`](ui/backend/services/score_service.py#L103) (`return … "linear": -total_linear, "sigmoid": -total_sigmoid`) vs [`ScoreShapingTab.tsx:228`](ui/src/components/tabs/ScoreShapingTab.tsx#L228) (header defines `F(x) = Σ wᵢ · P̂ᵢ`, a sum of non-negative penalties) and [`:292-296`](ui/src/components/tabs/ScoreShapingTab.tsx#L292-L296) (footer renders `aggregate.sigmoid`/`aggregate.linear` raw) — **the "F(x) aggregate" footer shows a negated value under a header that defines F(x) as a sum of non-negative penalties.** Fix: either return the unnegated penalty sum or relabel the footer (and keep the optimizer-facing negation separate).
 - [x] **BUG-A15** *(fixed)* · [`env_probe.py:28-33`](ui/backend/services/env_probe.py#L28-L33) (`_PDK_LIB_SUBPATHS`) + [`:61-76`](ui/backend/services/env_probe.py#L61-L76) (`_find_model_lib`) — **PDK fast-path subpaths miss the *tech-prefixed* `…/libs.tech/ngspice/models/` layout the real install uses**, forcing a full-tree `rglob` on every probe. The list has `{tech}/libs.tech/ngspice/{lib}` (no `models/`) and `libs.tech/ngspice/models/{lib}` (no tech prefix), but **not** `{tech}/libs.tech/ngspice/models/{lib}`. The server PDK is `PDK_ROOT=/home/noorizad/local/pdks` with the lib at `ihp-sg13g2/libs.tech/ngspice/models/cornerMOSlv.lib`, so the candidate root + needed subpath is exactly the missing tech-prefixed `models/` combo → falls through to `root.rglob` (walks the whole PDK tree, no caching) on every `/api/env`, `/api/sanity-check`, `/api/optimize/start`, `/api/simulate/once`. Confirmed against the on-disk layout (filesystem read, **no runtime needed**). Fix: add `f"{_PDK_TECH}/libs.tech/ngspice/models/{_PDK_MODEL_LIB}"` to `_PDK_LIB_SUBPATHS`. (Matches bug_report.md **ENV-1**.)
 - [x] **BUG-A16** *(fixed)* · [`checkpoint_reader.py:15`](ui/backend/services/checkpoint_reader.py#L15) (`read_json_checkpoint`, no `limit` param) + [`:104-105`](ui/backend/services/checkpoint_reader.py#L104-L105) (`read_checkpoint` JSON branch drops `limit`, CSV branch forwards it); route at [`checkpoint.py:96-101`](ui/backend/routes/checkpoint.py#L96-L101) (passes `limit`) — **the JSON checkpoint reader ignores the `limit` parameter** that the CSV reader and the route honor, so a large JSON checkpoint is always returned full-resolution. Fix: add `limit` to `read_json_checkpoint` and truncate consistently with the CSV path.
+
+---
+
+## 18. Project encapsulation & run isolation (report.md) — LANDED ✅
+
+The full encapsulation epic from [report.md](report.md) shipped on `feat/pvt` (commits `ae4f9bd` →
+`7a228d8`, P0→P4). Each project is now an encapsulated directory under `WORK_ROOT` (`/work` in Docker,
+`<repo>/work` native) and each optimization **run** is an isolated, self-contained folder. This
+**fixes the Docker checkpoint data-loss bug** (autosave was written CWD-relative to `/app`, inside the
+image layer, gone on `docker compose down`). **None of this code was covered by the §11 or §17 audits**
+— it is the primary target of the §19 third round below.
+
+- [x] **P0 — pin the contract** (`ae4f9bd`): `tests/test_ws_root_contract.py` asserts all three
+  `from_yaml` `ws_root` branches + `~` expansion + the "resolved output/autosave under the project root,
+  `REPO_ROOT not in parents`" guard (the test that would have caught the `yaml_path=""` regression).
+- [x] **P1 — `WORK_ROOT` + deterministic autosave** (`bd255a2`): `app_config.work_root()` /
+  `auto_save_root()` as the single source of truth; `Base_Optimizer.__init__` takes an optional
+  `output_root` kwarg (default unchanged → CLI/example scripts byte-identical); `optimizer_runner`
+  passes the per-run dir; `WORK_ROOT=/work` in compose; `auto_save/` added to `.gitignore`.
+- [x] **P2 — per-run isolation leaf** (`f2335a3`, `cb48b64`, `d8ce8a7`): each run writes
+  `runs/<ts>_<algo>_<runid8>/` with `checkpoints/`, `run.log`, `events.ndjson`, `config_snapshot.yaml`,
+  `run.json`, and `sim/`; `project_service.py` owns all `/work` bookkeeping (registry scan, scaffold,
+  copy-example, per-run dirs, `reconcile_stale_runs()` startup reconciler flipping crashed
+  `running`→`error`); the wrapper's `rmtree` is scoped to this run's `sim/`.
+- [x] **P3 — project registry + UI switcher** (`59cc957`, `bd58fcd`, `d94ec8a`, `c922765`, `97f867f`):
+  `routes/projects.py` (`GET/POST /api/projects`, `from-example`, `{id}/runs`); `resolve_project(project_id,
+  yaml_path)` resolver with `yaml_path` back-compat; ⌘P `ProjectsOverlay` + title-bar switcher;
+  `projectStore` gains `{id, name, projects[], switchProject}`; the Runs rail is rescoped to
+  `GET /api/projects/{id}/runs` (server-persisted, replacing localStorage history); checkpoint catalog +
+  preset checkpoints scoped to the active project.
+- [x] **P4 — lifecycle niceties** (`7a228d8`): `rename_project` (manifest-only), `fork_project`
+  (`copytree`), `soft_delete_project` → `.trash` + `restore_project` + `list_trash`; `rename_run` /
+  `delete_run`. (report.md §10 had deferred these; they shipped early.)
+- [x] **Build/caching** (`4b18284`): Docker layer-caching + build-efficiency improvements.
+
+> **Audit status:** the §19 third round (below) is a static-analysis pass over exactly this new surface
+> (`project_service.py`, `routes/projects.py`, the `optimizer_runner` per-run isolation, `base.py`
+> `output_root`, the rescoped `checkpoint.py`, and the P3/P4 UI) **plus** the NEWCAS-critical core/PVT
+> paths the user called out. The `faef65a` `update_params` change (absolute-SI values + skip undeclared
+> params) touches the NEWCAS sim path and is in scope.
+
+## 19. Bug fixes — functional audit (2026-06, THIRD round / encapsulation + NEWCAS + PVT)
+
+Actionable list from the **third** audit — a multi-agent static-analysis pass on `feat/pvt` at HEAD
+(15 subsystem finders; **every** finding re-checked by an independent adversarial verifier that re-read
+the cited code). Full per-bug location / scenario / fix / verifier note in [bug_report_r3.md](bug_report_r3.md)
+(IDs match). **73 raised → 73 confirmed REAL (deduped to 52 distinct bugs); 17 refuted** (recorded at the end
+of the report so they aren't re-raised). No app/sim was run — items needing a live trial to *see* the
+symptom (B4, B13, B31) are confirmed at the source/data-flow level. **None of this surface was covered by
+§11 or §17.** Reachability: 🟢 shipped cascode/default flow · 🟡 valid user config / non-default toggle ·
+⚪ latent. **Nothing fixed yet** — recommended order is Tier 0 → NEWCAS-core majors → PVT majors → minors,
+each with a regression test.
+
+> Several finder "major"s were **downgraded to minor** by the verifier where the trigger is a non-default
+> opt-in or the shipped example dodges it (e.g. `log_scale` tolerance, duplicate spec names, serial-mode sim
+> abort, replay-without-id hang). Severities below are the verifier-corrected ones.
+
+### Tier 0 — Security & data-integrity (fix first)
+- [ ] **BUG-B1** 🟡 *major (≈critical)* · `viz/plotting.py:54-61` via `checkpoint.py:215,273,289,308` — **`eval()` on a checkpoint's `log_file` → server-side RCE** from `/checkpoint/{id}`,`/envelope`,`/scatter`,`/report` (checkpoints live under the writable `WORK_ROOT` bind-mount). Use `ast.literal_eval`/the non-eval reader.
+- [ ] **BUG-B2** 🟡 *major* · `checkpoint.py:339-342` — **LFI: `GET /checkpoint/{id}/report?yaml_path=/etc/passwd`** reads & zips any file (no suffix/root check). Gate to an allowed root + `.yaml/.yml`.
+- [ ] **BUG-B3** 🟢 *major (irreversible)* · `checkpoint.py:223-264` + `RunsRail.tsx:157` — **unscoped `DELETE /checkpoint/{id}` `unlink`s same-named checkpoints across ALL projects** (stems carry no project id; global-view delete sends no `project_id`). Require/scope by `project_id`.
+- [ ] **BUG-B4** 🟡 *major (med-conf)* · `optimizer_runner.py:601-606` + `projects.py:130,176` + `base.py:428` — **soft-delete/delete-run races a >10 s trial**: bounded `join` ignores liveness, the dir is moved to `.trash`, the still-live worker's `save_checkpoint` re-`mkdir`s the old path → **resurrection outside trash**. Check `is_alive()`/poll stop inside the sim.
+
+### Tier 1 — Major: NEWCAS core library (`examples/OTA/cascode` path)
+- [ ] **BUG-B5** 🟡 · `base.py:178-198` — base `optimize()` empties `optimization_log` on autosave but not `global_best_index` → **IndexError mid-run** (`budget ≥ 2500` default, or any lower cadence; CLI/base path — the UI subclass dodges it). Reset index / track best on the instance.
+- [ ] **BUG-B6** 🟡 · `base.py:130-151` — `denormalize_params` uses `val/range` not `(val−min)/range` → **log-scale params (and non-zero lin-min) map outside `[min_val,max_val]`**. Subtract the lower bound.
+- [ ] **BUG-B7** 🟢 · `domains.py:380-468` — a `target` in `XeY` YAML notation (`200e6`) stays a **`str`** (never `parse_value`'d) → load crash if tolerance omitted; breaks `meets_spec`/`get_simple_penalty`. Parse `target` (and `weight`) in `__post_init__`.
+- [ ] **BUG-B8** 🟡 · `domains.py:319-327,836-848` — all-numeric `dut_param` bounds **skip the `min ≥ max` validation** (only string bounds are checked) → silent reversed/zero-width search range. Always validate.
+- [ ] **BUG-B9** 🟡 · `domains.py:380-468` + `base.py:1007,1075` — **`weight: null`/blank → `np.float64(None)=NaN`** poisons every trial's fitness (preview `score_service` guards; the library scorer doesn't). Coerce `None`→`1.0`.
+- [ ] **BUG-B10** 🟡 · `domains.py:316-321,836-847` — a **frozen `dut_param` with an eng-string `val`/`init` and no min/max crashes `from_yaml`** (`needs_resolution` true → `resolve_min_max` raises). Skip range resolution for frozen params.
+
+### Tier 2 — Major: PVT
+- [ ] **BUG-B11** 🟡 *pvt* · `spicelib.py:369-376` — `apply_corner` strips by **lib-file basename only**, so two `model_includes` sharing one `.lib` (different sections) collapse to the last → **wrong device models, silent**. Key the strip on `(basename, section)`.
+- [ ] **BUG-B12** 🟡 *pvt* · `spicelib.py:383-389` — PVT supply override `set_parameter(node,…)` **silently inserts a dangling `.PARAM`** when `node` isn't a declared `.param` (or names the source instance) → sim at the **wrong default supply**, no error. Verify the param existed; validate `node`.
+
+### Tier 3 — Major: backend & UI (encapsulation / lifecycle)
+- [ ] **BUG-B13** 🟡 · `optimizer_runner.py:372-412` — concurrent runs **cross-contaminate `run.log` + SSE** via unscoped handlers on the shared `spicexplorer` logger (dir isolation was designed for concurrency; logging wasn't). Filter by worker thread / per-run child logger.
+- [ ] **BUG-B14** 🟢 · `xschem.py:124-142` — `_allowed_roots()` omits `WORK_ROOT`, so every **encapsulated project's schematic 403s under Docker** (`/work/...` ∉ `REPO_ROOT`). Add `work_root()`.
+- [ ] **BUG-B15** 🟡 · `yaml_generator.py:36-53,326-339` (+ `WizardDutParam`) — wizard round-trip **drops `dut_param.val`**, so a frozen pinned param falls back to `init`/netlist default → **changes the optimized design**. Carry+emit `val`.
+- [ ] **BUG-B16** 🟢 · `projectStore.ts:73-97` + `runStore.ts` — **project switch mid-run never tears down the EventSource**: the old run keeps streaming/computing and displays under the new project. Stop/guard the run in `switchProject`.
+
+### Tier 4 — Minor (grouped; full detail in the report)
+**Core/scoring:** [ ] **B17** `domains.py:457-462` tolerance fallback = 0 when target==0 · [ ] **B18** *pvt* `domains.py:180-186` `parse_value(None)` AttributeError on blank `temp`/supply value · [ ] **B19** `base.py:967-970,1039-1042` `log_scale` log10's the tolerance width (inverted band; opt-in) · [ ] **B20** `base.py:1048-1052` EXCEED reward `elif` is dead code · [ ] **B21** `utils.py:211-218` log-reward `±inf` when curr==target (opt-in) · [ ] **B22** `utils.py:181-182,202-203` exponential-error overflow → saturated penalty (opt-in) · [ ] **B23** *design* `base.py:943` constraint-first aggregation discards all reward while any spec violated · [ ] **B24** ⚪ `domains.py:345-346` vs `utils.py:294-307` log base-e (RL) vs base-10 (Nevergrad) · [ ] **B25** ⚪ `base.py:164,178-179,189` `global_best_index=trial` wrong under `keep_history=True`.
+
+**Optimizer/lifecycle:** [ ] **B26** ⚪ `base.py:699-707`+`nevergrad.py:209-215` Bode & Constraint optimizers drop `output_root` · [ ] **B27** `optimizer_runner.py:311,435` resume re-runs the **full** budget · [ ] **B28** `base.py:529-531` serial-path no-RAW sim **aborts the whole run** (parallel default is graceful) · [ ] **B29** `base.py:884-888,933-937` duplicate target-spec **names** collide in the perf map (no uniqueness guard) · [ ] **B36** `optimizer_runner.py:570-575`+`optimize.py:64` replay with no `checkpoint_id` → SSE hangs "running" forever (direct-API) · [ ] **B41** `simulate.py:185`/`sanity.py:185`/`sensitivity.py:148` one-off routes leak `./auto_save` in CWD (no `output_root`) · [ ] **B42** ⚪ `optimizer_runner.py:407,474-489` run stuck `running` on hard-kill until next startup reconcile · [ ] **B43** `project_service.py:136-154` `reconcile_stale_runs` skips `.trash` → trashed `running` never repaired.
+
+**Routes/scoping:** [ ] **B35** `checkpoint.py:59-63`+`checkpoint_reader.py:144,194` `tolerance:None` → **500** on envelope/scatter/report for a `target:0` (or blank-tolerance wizard) spec · [ ] **B37** `optimize.py:48-50`+`project.py:167-172` invalid `project_id` → **500** instead of 404/400 · [ ] **B38** `checkpoint.py:66-80` prefix-glob `{id}*`+`[0]` resolves the **wrong** checkpoint (no `project_id`) · [ ] **B39** `checkpoint.py:59-63` envelope/scatter feasibility counts **disabled** specs.
+
+**PVT:** [ ] **B30** *pvt* `spicelib.py:378-381` temp-strip misses combined `.options … temp=` lines (stale/duplicated temp; can drop sibling options) · [ ] **B31** *pvt* `optimizer_runner.py:356-363`+`sanity.py:112-116`+`simulate.py:169-177` unknown `active_corner` handled 3 ways (live-run warning not streamed; sanity silently misreports the fallback) · [ ] **B32** *pvt* `domains.py:161-172` `process:` bundle silently dropped when `model_includes` also present · [ ] **B33** *pvt* `sanity.py:126-141` per-tb sanity rows run `use_editor=False` → **corner NOT applied** to the Health rows · [ ] **B34** *pvt* `domains.py:286-294`+`base.py:501-509` `get_active()` applies an `enabled:false` corner *(verifier dissent: maybe intended)*.
+
+**Frontend:** [ ] **B40** *pvt* `yaml_generator.py:163-213,259-308` wizard drops per-corner PVT `params` overrides · [ ] **B44** `projectStore.ts:109-123` deleting the active project leaves `runStore` EventSource live (phantom running run) · [ ] **B45** `pareto.ts:17-20`+`MetricScatterChart.tsx:43-46` Pareto/feasible-region overlay treats **exact** goal as maximize (closest-to-target rule not applied to overlays) · [ ] **B46** 🟢 `lib/utils.ts:10-19` `formatEng(0)` → `"0.000 p"` (spurious pico prefix) · [ ] **B47** `runStore.ts:142-213` superseding an in-flight run never records it to history · [ ] **B48** `ScoreShapingTab.tsx:53-60,143-150,292-300` eng-string in the target field → NaN slider/marker · [ ] **B49** ⚪ `ExplorerTab.tsx:194-197,509-510` scatter click resolves run by label → routes to B when A/B share a label · [ ] **B50** `simulate.py:184`+`spicelib.py:236-242` concurrent manual sims race the shared `manual_sim/` rmtree · [ ] **B51** `RunsRail.tsx:204-212` run-rename **Escape commits** (via `onBlur`) instead of cancelling · [ ] **B52** `ProjectsOverlay.tsx:71-101` load-example/create failure is a **silent no-op** (no `setError`).
+
+### Cross-cutting root causes (fix once, resolve several)
+- [ ] `tolerance:None` serialization (`checkpoint.py:61`) → B35 + the `target:0` 500s. · [ ] `output_root` not threaded (Bode/Constraint optimizers + the 3 one-off routes) → B26, B41. · [ ] checkpoint stems carry no project/run id → B3, B38. · [ ] `stop_runs_for` bounded join ignores liveness → B4. · [ ] shared `spicexplorer` logger unscoped + corner warning on a non-streamed logger → B13, B31. · [ ] exact-goal "closest-to-target" rule not applied to FE overlays → B45. · [ ] no `projectStore`↔`runStore` teardown on switch/delete → B16, B44.
+
+### Watch / hardening (refuted-but-noted — not confirmed bugs)
+- [ ] `soft_delete_project` trash id is `project_id__{whole-second-ts}` with **no random suffix** (unlike `delete_run`'s uuid suffix) — verifiers judged a same-second re-delete collision not currently reachable; add a suffix defensively.
+- [ ] `restore_project` joins `meta["name"]` into the destination path; `_assert_under_work_root` blocks escape *above* WORK_ROOT but not lateral clobber — harden with name validation.
