@@ -17,10 +17,10 @@ _LOG_LEVEL_NAME = os.environ.get("LOG_LEVEL", "INFO").upper()
 _LOG_LEVEL = getattr(logging, _LOG_LEVEL_NAME, logging.INFO)
 _REPO_ROOT = Path(__file__).parent.parent.parent
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI  # noqa: E402 (imports follow the top-of-file logging.basicConfig by design)
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-from ui.backend.routes import config, project, score, optimize, checkpoint, schematic, sanity, netlist, xschem, env, sensitivity, simulate
+from ui.backend.routes import config, project, score, optimize, checkpoint, schematic, sanity, netlist, xschem, env, sensitivity, simulate, projects  # noqa: E402
 
 
 @asynccontextmanager
@@ -33,6 +33,15 @@ async def lifespan(app: FastAPI):
         parent_folder=_REPO_ROOT,
         console_level=_LOG_LEVEL,
     )
+    # Flip any run left "running" by a crashed backend to "error" so the run list is
+    # honest on restart (report.md §6 reconciler).
+    try:
+        from ui.backend.services import project_service
+        fixed = project_service.reconcile_stale_runs()
+        if fixed:
+            logging.getLogger(__name__).info("reconciled %d stale 'running' run(s) -> error", fixed)
+    except Exception:
+        pass
     yield
 
 
@@ -58,6 +67,7 @@ app.include_router(xschem.router, prefix="/api")
 app.include_router(env.router, prefix="/api")
 app.include_router(sensitivity.router, prefix="/api")
 app.include_router(simulate.router, prefix="/api")
+app.include_router(projects.router, prefix="/api")
 
 
 @app.get("/health")

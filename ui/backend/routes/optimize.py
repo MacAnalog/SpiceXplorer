@@ -9,8 +9,9 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from ui.backend.app_config import default_yaml_path, preset_checkpoint_paths
+from ui.backend.app_config import preset_checkpoint_paths
 from ui.backend.services import optimizer_runner as runner
+from ui.backend.services import project_service
 from ui.backend.services.env_probe import probe_env
 
 router = APIRouter()
@@ -18,6 +19,10 @@ router = APIRouter()
 
 class StartRequest(BaseModel):
     yaml_path: str | None = None
+    # The owning project (report.md P3). When set, the run is resolved + isolated
+    # under WORK_ROOT/projects/<id>/runs/; yaml_path stays as a back-compat fallback.
+    project_id: str | None = None
+    label: str | None = None
     replay: bool = False
     checkpoint_id: str | None = None
     budget: int = 200
@@ -39,7 +44,11 @@ class StartRequest(BaseModel):
 async def start_run(body: StartRequest, request: Request):
     loop = asyncio.get_event_loop()
 
-    yaml_path = body.yaml_path or str(default_yaml_path())
+    # Single resolver: project_id → its project.yaml; else yaml_path; else default.
+    try:
+        yaml_path = str(project_service.resolve_yaml(body.project_id, body.yaml_path))
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
 
     # Live and resume runs need real SPICE: refuse cleanly (409) when the
     # environment can't run it, instead of failing deep in the engine. Replay
@@ -77,6 +86,8 @@ async def start_run(body: StartRequest, request: Request):
 
     run_id = runner.start_run(
         project_path=yaml_path if not body.replay else None,
+        project_id=body.project_id,
+        label=body.label,
         replay=body.replay,
         checkpoint_id=body.checkpoint_id,
         checkpoint_path=checkpoint_path,

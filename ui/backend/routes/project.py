@@ -18,6 +18,7 @@ router = APIRouter()
 class LoadRequest(BaseModel):
     yaml_path: Optional[str] = None
     yaml_content: Optional[str] = None  # apply edited/uploaded YAML that isn't on disk
+    project_id: Optional[str] = None  # load a registered project (report.md P3)
 
 
 class ValidateRequest(BaseModel):
@@ -162,6 +163,19 @@ def _write_content_to_temp(yaml_content: str, base_yaml_path: str | None) -> str
 
 @router.post("/project/load")
 def load_project(body: LoadRequest):
+    # Load a registered project by id (report.md P3) → resolve to its project.yaml.
+    if body.project_id:
+        from ui.backend.services import project_service
+        try:
+            yp = project_service.resolve_yaml(body.project_id, None)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        try:
+            project = Project_Setup.from_yaml(yp)
+            return {"ok": True, "summary": _summarise(project), "yaml_path": str(yp)}
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
     # Apply from raw content (uploaded or edited YAML with no on-disk path). The
     # parsed summary doesn't need the netlist/ws_root paths to exist — those only
     # matter for live SPICE — so a project with relative paths still summarises.
