@@ -9,7 +9,6 @@ These exercise the core library on the `examples/OTA/cascode` path — no ngspic
 - BUG-B10 a frozen dut_param given only an eng-string `val`/`init` (no min/max) loads instead of crashing.
 """
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
