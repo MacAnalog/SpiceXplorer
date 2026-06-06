@@ -9,6 +9,7 @@ import { useUIStore, RUN_ALGORITHMS } from "@/stores/uiStore";
 import { launchLiveRun } from "@/lib/launchRun";
 import { selectCn } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { CornerSelect } from "@/components/pvt/CornerSelect";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,6 +23,7 @@ import { cn } from "@/lib/utils";
 export function RunControl() {
   const router = useRouter();
   const isApplied = useProjectStore((s) => s.isApplied);
+  const pvt = useProjectStore((s) => s.summary?.pvt ?? null);
   const { isRunning, isReplay, currentIter, budget, stopRun } = useRunStore();
   const env = useUIStore((s) => s.env);
   const runConfig = useUIStore((s) => s.runConfig);
@@ -165,6 +167,21 @@ export function RunControl() {
                 />
               </label>
             </div>
+
+            {pvt && pvt.corners.length > 0 && (
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted">
+                  PVT corner
+                </span>
+                <CornerSelect
+                  corners={pvt.corners}
+                  value={runConfig.activeCorner}
+                  defaultCorner={pvt.active_corner}
+                  onChange={(name) => setRunConfig({ activeCorner: name })}
+                  aria-label="PVT corner to optimize against"
+                />
+              </label>
+            )}
 
             <label className="flex flex-col gap-1">
               <span className="text-[10px] font-medium uppercase tracking-wider text-muted">

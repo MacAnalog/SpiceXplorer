@@ -118,7 +118,6 @@ def load_demo_config() -> dict[str, Any]:
             "parallelSim": project.get("parallel_sim", True),
         },
         "technology": project["tech_spec"],
-        "pvtCorners": project["pvt_corners"],
         "dutParams": dut_params,
         "testbenches": testbenches,
         "enabledTestbenches": [tb for tb in testbenches if tb.get("enable", True)],

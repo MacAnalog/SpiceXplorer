@@ -1,11 +1,70 @@
 """Compute sigmoid vs. linear score penalties for a project's target specs."""
 from __future__ import annotations
 
+import logging
 import numpy as np
 from typing import Any
 
-from spicexplorer.core.domains import Project_Setup, OptimizationGoalType
+from spicexplorer.core.domains import Project_Setup, OptimizationGoalType, parse_value
 from spicexplorer.core.utils import compute_relative_absolute_error, compute_relative_sigmoid_error
+
+logger = logging.getLogger(__name__)
+
+
+def apply_spec_overrides(
+    project: Project_Setup,
+    overrides: dict[str, dict] | None,
+) -> None:
+    """Apply ephemeral, request-scoped target-spec edits to the loaded project.
+
+    Score Shaping lets the user tune spec fields (target/tolerance/weight/range/
+    goal/enable) for a *what-if* preview. Because /api/score reloads the project
+    from disk every call (stateless), these edits travel in the request payload and
+    are applied here to the freshly-loaded, in-memory project before scoring. This
+    **never** rewrites the YAML — the edits vanish with the request, exactly the
+    ephemeral semantics the UI promises.
+
+    `overrides` maps spec name → a partial dict of fields to set. Numeric fields
+    accept engineering strings ("250u") via parse_value. Unknown spec names and
+    unknown goal values are ignored (rather than 500-ing a preview).
+    """
+    if not overrides:
+        return
+    by_name = {s.name: s for s in project.optimizer_config.target_specs.targets}
+    for name, patch in overrides.items():
+        spec = by_name.get(name)
+        if spec is None or not isinstance(patch, dict):
+            continue
+        for field in ("target", "tolerance", "weight", "range"):
+            if field in patch and patch[field] is not None and patch[field] != "":
+                try:
+                    setattr(spec, field, float(parse_value(patch[field])))
+                except (ValueError, TypeError):
+                    logger.warning("score override: bad %s for spec '%s': %r",
+                                   field, name, patch[field])
+        if "enable" in patch and patch["enable"] is not None:
+            spec.enable = bool(patch["enable"])
+        if patch.get("goal"):
+            try:
+                spec.goal = OptimizationGoalType(str(patch["goal"]).lower())
+            except ValueError:
+                logger.warning("score override: unknown goal for spec '%s': %r",
+                               name, patch["goal"])
+
+
+def _normalized_penalties(raw: float, rang: float) -> tuple[float, float]:
+    """raw violation → (linear, sigmoid) normalized penalties; (0, 0) when met.
+
+    Single source for the per-spec loop and the penalty-curve loop (previously
+    copy-pasted verbatim).
+    """
+    if raw <= 0.0:
+        return 0.0, 0.0
+    r, zero, rng = np.float64(raw), np.float64(0.0), np.float64(rang)
+    return (
+        float(compute_relative_absolute_error(r, zero, rng)),
+        float(compute_relative_sigmoid_error(r, zero, rng)),
+    )
 
 
 def _raw_directional_error(value: float, target: float, tolerance: float, goal: OptimizationGoalType) -> float:
@@ -40,7 +99,7 @@ def compute_score(
         value = metric_values.get(spec.name)
         target = float(spec.target)
         tolerance = float(spec.tolerance) if spec.tolerance else abs(0.05 * target)
-        weight = float(spec.weight) if spec.weight else 1.0
+        weight = float(spec.weight) if spec.weight is not None else 1.0
         rang = float(spec.range) if spec.range and spec.range > 0 else max(abs(target), 1.0)
 
         if value is None:
@@ -55,12 +114,7 @@ def compute_score(
         passes = raw <= 0.0
 
         # Normalized penalties (always ≥ 0; zero when constraint is met)
-        if raw <= 0.0:
-            linear_p = 0.0
-            sigmoid_p = 0.0
-        else:
-            linear_p = float(compute_relative_absolute_error(np.float64(raw), np.float64(0.0), np.float64(rang)))
-            sigmoid_p = float(compute_relative_sigmoid_error(np.float64(raw), np.float64(0.0), np.float64(rang)))
+        linear_p, sigmoid_p = _normalized_penalties(raw, rang)
 
         per_spec[spec.name] = {
             "linear": linear_p,
@@ -89,17 +143,18 @@ def compute_score(
             linears, sigmoids = [], []
             for x in xs:
                 raw = _raw_directional_error(x, target, tolerance, spec_obj.goal)
-                if raw <= 0.0:
-                    linears.append(0.0)
-                    sigmoids.append(0.0)
-                else:
-                    linears.append(float(compute_relative_absolute_error(np.float64(raw), np.float64(0.0), np.float64(rang))))
-                    sigmoids.append(float(compute_relative_sigmoid_error(np.float64(raw), np.float64(0.0), np.float64(rang))))
+                lin_p, sig_p = _normalized_penalties(raw, rang)
+                linears.append(lin_p)
+                sigmoids.append(sig_p)
             curve = {"values": xs, "linear": linears, "sigmoid": sigmoids,
                      "target": target, "tolerance": tolerance, "goal": spec_obj.goal.value}
 
     return {
         "per_spec": per_spec,
-        "aggregate": {"linear": -total_linear, "sigmoid": -total_sigmoid},
+        # F(x) = Σ wᵢ · P̂ᵢ — the non-negative weighted penalty sum the UI header and the
+        # per-spec columns show. Do NOT negate here: the optimizer's maximize-score
+        # convention lives in the library scorer, not this preview service; negating made
+        # the footer print a negative number under its own "sum of penalties" label.
+        "aggregate": {"linear": total_linear, "sigmoid": total_sigmoid},
         "curve": curve,
     }

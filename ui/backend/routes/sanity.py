@@ -18,6 +18,9 @@ _LOG_TAIL_BYTES = 16 * 1024  # 16 KB cap regardless of line count
 
 class SanityRequest(BaseModel):
     yaml_path: str
+    # Optional PVT corner the trial step runs against (must match a corner in the
+    # project's `pvt:` block). None keeps the YAML's active_corner.
+    active_corner: str | None = None
 
 
 class TestbenchResult(BaseModel):
@@ -52,6 +55,12 @@ class SanityResponse(BaseModel):
     # PDK verdict (cheap probe folded in so a sanity run confirms the static /api/env check).
     pdk_ok: bool | None = None
     pdk_detail: str | None = None
+    # PVT corner the trial step ran at (None when the project has no `pvt:` block).
+    active_corner: str | None = None
+    # Non-fatal advisories surfaced to the user — e.g. a requested corner that the project does
+    # not define (so the default was used), or that per-testbench rows run at the netlist's
+    # hardcoded corner rather than the active PVT corner (BUG-B31/B33).
+    warnings: list[str] = []
 
 
 def _tail_log(path_str: str | Path | None) -> tuple[str | None, int | None]:
@@ -77,7 +86,7 @@ def _tail_log(path_str: str | Path | None) -> tuple[str | None, int | None]:
         return None, None
 
 
-def _run_sanity(yaml_path: str) -> dict[str, Any]:
+def _run_sanity(yaml_path: str, active_corner: str | None = None) -> dict[str, Any]:
     from spicexplorer.core.domains import Project_Setup
     from spicexplorer.spice_engine import NGSpice_Wrapper, Sim_Execution_Type
     from spicexplorer.optimization.stochastic.nevergrad import Nevergrad_Spice_Single_Objective
@@ -101,7 +110,30 @@ def _run_sanity(yaml_path: str) -> dict[str, Any]:
         }
     elapsed_ms_load = (time.perf_counter() - t_load_start) * 1000
 
-    output_folder = Path(project.ws_root) / Path(project.outdir)
+    # Ephemeral PVT corner override for the trial step (same in-memory, never-rewrite
+    # pattern as the live run). The optimizer applies project.pvt.active_corner when
+    # constructed below, so setting it here is all that's needed.
+    active_corner_used: str | None = None
+    warnings: list[str] = []
+    if project.pvt is not None:
+        if active_corner and project.pvt.get(active_corner) is not None:
+            project.pvt.active_corner = active_corner
+        elif active_corner:
+            # Requested a corner the project doesn't define — surface it instead of silently
+            # falling back and reporting the default as if it were honored (BUG-B31).
+            warnings.append(
+                f"Requested corner '{active_corner}' is not defined; using "
+                f"'{project.pvt.active_corner}'.")
+        active_corner_used = project.pvt.active_corner
+        # The per-testbench checks below run the netlist as-is (use_editor=False), so the PVT
+        # corner is applied ONLY to the trial step — make that explicit (BUG-B33).
+        warnings.append(
+            f"Per-testbench checks run the netlist's hardcoded corner; the active PVT corner "
+            f"'{active_corner_used}' is applied only to the trial step.")
+
+    # Own subdir so the per-wrapper rmtree (NGSpice_Wrapper._validate) can't delete a
+    # concurrent live run's outdir/live tree (BUG-A8 / OPT-2).
+    output_folder = Path(project.ws_root) / Path(project.outdir) / "sanity"
     path_to_simulator = Path(project.simulator)
     wrappers: dict[str, NGSpice_Wrapper] = {}
     tb_results: list[dict] = []
@@ -158,6 +190,8 @@ def _run_sanity(yaml_path: str) -> dict[str, Any]:
             "ngspice_path": str(path_to_simulator),
             "pdk_ok": pdk["pdk_ok"],
             "pdk_detail": pdk["pdk_detail"],
+            "active_corner": active_corner_used,
+            "warnings": warnings,
         }
 
     # One trial optimization step to validate the full pipeline
@@ -219,6 +253,8 @@ def _run_sanity(yaml_path: str) -> dict[str, Any]:
             "ngspice_path": str(path_to_simulator),
             "pdk_ok": pdk["pdk_ok"],
             "pdk_detail": pdk["pdk_detail"],
+            "active_corner": active_corner_used,
+            "warnings": warnings,
         }
 
     return {
@@ -232,11 +268,13 @@ def _run_sanity(yaml_path: str) -> dict[str, Any]:
         "ngspice_path": str(path_to_simulator),
         "pdk_ok": pdk["pdk_ok"],
         "pdk_detail": pdk["pdk_detail"],
+        "active_corner": active_corner_used,
+        "warnings": warnings,
     }
 
 
 @router.post("/sanity-check", response_model=SanityResponse)
 async def sanity_check(body: SanityRequest):
     loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(None, _run_sanity, body.yaml_path)
+    result = await loop.run_in_executor(None, _run_sanity, body.yaml_path, body.active_corner)
     return SanityResponse(**result)

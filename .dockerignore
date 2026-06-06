@@ -16,8 +16,7 @@ node_modules/
 logs/
 auto_save/
 work/
-.env
-*.env
+.env*
 
 # Heavy / generated simulation artifacts.
 *.raw

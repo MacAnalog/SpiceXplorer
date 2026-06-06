@@ -60,8 +60,8 @@ The central workflow is: YAML file → `Project_Setup.from_yaml()` → `Circuit_
 
 | Module | Role |
 |---|---|
-| `core/domains.py` | Typed dataclasses for the full YAML DSL (`Project_Setup`, `DUT_Param`, `Target_Spec`, etc.) |
-| `core/utils.py` | Engineering-string parsing (`0.18u`, `50f`), `compute_relative_absolute_error`, `compute_relative_sigmoid_error` |
+| `core/domains.py` | Typed dataclasses for the full YAML DSL (`Project_Setup`, `DUT_Param`, `Target_Spec`, etc.); engineering-string parsing (`parse_value`: `0.18u`, `50f`) |
+| `core/utils.py` | `compute_relative_absolute_error`, `compute_relative_sigmoid_error` (eng-string parsing is `parse_value` in `core/domains.py`) |
 | `spice_engine/` | NGSpice + spicelib wrappers: param injection, subprocess management, raw/log extraction |
 | `optimization/orchestrator.py` | `Circuit_Optimizer_Orchestrator_with_SPICE` — drives the optimization loop, calls testbenches, scores results |
 | `optimization/stochastic/` | Nevergrad backend (`Nevergrad_Spice_Single_Objective` and subclasses) |
@@ -86,11 +86,11 @@ Browser (localhost:4000)
 
 **Backend** (`ui/backend/`): thin adapter — no business logic. Routes mirror the API table in `ui/README.md`. `optimizer_runner.py` runs the optimizer in a background thread and pushes events to an `asyncio.Queue` via `run_coroutine_threadsafe`; the SSE endpoint drains it. Replay mode drip-feeds CSV rows at 50 ms intervals. `services/env_probe.py` cheaply detects ngspice + the IHP PDK (no simulation) so the UI can degrade to replay when the PDK is absent.
 
-**Frontend** (`ui/src/`): the app is a **Studio shell** — a persistent VS Code-style workspace, not a tab bar. `app/page.tsx` redirects to `/setup`; the real views live under the `app/(studio)/` route group, where `(studio)/layout.tsx` renders `StudioShell` (activity bar + left rail + tab strip + right rail + bottom panel + status bar + overlays) and each `<view>/page.tsx` segment renders one center view. Because a layout doesn't remount across sibling segments, the rails, status bar, and the live SSE stream survive navigation between views.
+**Frontend** (`ui/src/`): the app is a **Studio shell** — a persistent VS Code-style workspace, not a tab bar. `app/page.tsx` redirects to `/setup`; the real views live under the `app/(studio)/` route group, where `(studio)/layout.tsx` renders `StudioShell` (activity bar + left rail + center view + right rail + bottom panel + status bar + overlays) and each `<view>/page.tsx` segment renders one center view. Because a layout doesn't remount across sibling segments, the rails, status bar, and the live SSE stream survive navigation between views. The **vertical ActivityBar is the sole top-level nav** (the redundant horizontal top tab strip was removed); each view renders its own in-view sub-tabs via `SubTabStrip` (e.g. Setup's Load/Wizard) — a view with one section renders no bar.
 
 Five Zustand stores hold cross-view state: `projectStore` (loaded/applied project), `runStore` (the active run **and** the SSE `EventSource`, hoisted out of components so a run keeps streaming across views, plus `history` persisted to localStorage), `explorerStore` (compare A/B), `uiStore` (navigation selection: `selectedSpec`/`selectedRunId`, panel toggles, `commandOpen`/`wizardOpen`), and `wizardStore` (the new-project wizard form). `lib/api.ts` is the single typed fetch client; `types/api.ts` mirrors every FastAPI response shape.
 
-`components/shell/` holds the shell pieces and `nav.ts` (the single source of truth for the 7 views — adding/renaming a view happens there only). `components/overlays/` holds `CommandPalette` (⌘K) and `WizardOverlay`. Charts (`components/charts/`) all use `react-plotly.js` via a shared `PlotlyChart.tsx` base with `dynamic(..., { ssr: false })` — same pattern for the Monaco editor. Both must stay SSR-disabled.
+`components/shell/` holds the shell pieces and `nav.ts` (the single source of truth for the 8 views — `PRIMARY_VIEWS` top group, `UTILITY_VIEWS` bottom group = Pipeline + Manual Sim, `SETTINGS_VIEW` = Health gear; adding/renaming a view happens there + a new `(studio)/<view>/page.tsx`). `nav.ts` shortcuts must stay 1..8 unique and `CommandPalette` keys off `ALL_VIEWS` with a `/^[1-8]$/` ⌘-number regex — widen both together if you add a view. `components/overlays/` holds `CommandPalette` (⌘K) and `WizardOverlay`. Charts (`components/charts/`) all use `react-plotly.js` via a shared `PlotlyChart.tsx` base with `dynamic(..., { ssr: false })` — same pattern for the Monaco editor. Both must stay SSR-disabled.
 
 ## Non-Obvious Constraints
 
@@ -108,7 +108,15 @@ Five Zustand stores hold cross-view state: `projectStore` (loaded/applied projec
 
 **PDK-aware degradation**: `GET /api/env` reports `{ngspice_ok, pdk_ok, live_runs_enabled, ...}`. When `pdk_ok` is false the status bar shows the replay-only pill and OptimizeTab disables live Start (steering to Replay). Score Shaping, Compare/Explore on cached checkpoints, the wizard, and the Pipeline view all work without the PDK.
 
-**Run-config overrides are ephemeral**: OptimizeTab's algorithm/budget/seed are sent to `POST /api/optimize/start` and applied in-memory to the loaded `Project_Setup` (`optimizer_runner._apply_overrides`) — the YAML on disk is never rewritten.
+**Where live SPICE actually runs (verification)**: the **native host (this Mac) has ngspice but NOT the IHP PDK** — so native runs and `test_ngspice_sanity_check` fail by design (`pdk_ok: false`). The **Docker backend container HAS both** (the Dockerfile compiles ngspice and vendors the PDK): `pdk_ok: true`, `live_runs_enabled: true`, ngspice at `/opt/ngspice/bin/ngspice`, `PDK_ROOT=/opt/pdk` (`ihp-sg13g2`). So to verify anything needing a real simulation (PVT corners driving the sim, `/api/simulate/once`, sanity, a live run), use the **running container**: its API is on `localhost:8000` when `docker compose up` is running, or `docker compose exec backend <cmd>` (e.g. `pytest -m slow`). **Never bind a Docker-mapped port from the host** (`:8000` backend / `:4000` frontend) — a native uvicorn on `:8000` collides with the container and crash-loops it. The committed image can be stale; `docker compose up --build` to test current-branch code.
+
+**Run-config overrides are ephemeral**: OptimizeTab's algorithm/budget/seed (and the PVT `active_corner`) are sent to `POST /api/optimize/start` and applied in-memory to the loaded `Project_Setup` (`optimizer_runner._apply_overrides`) — the YAML on disk is never rewritten.
+
+**PVT corners (Phase 1) actually drive the sim**: a top-level `pvt:` block (`PVTConfig` → named `Corner`s with `model_includes`/`temp`/`supplies`) makes corners first-class. `Project_Setup.from_yaml()` calls `_normalize_pvt_block` to desugar `process_bundles`, a singular `supply: {node,value}`, and eng-strings **before** dacite. The optimizer applies `pvt.get_active()` **once** in `Spice_Base_Optimizer.__post_init__` via `NGSpice_Wrapper.apply_corner()` — the **only** ngspice-specific corner seam (strips the hardcoded `.lib`, injects the corner's ordered cross-family includes, sets `.options temp=`, overrides supply `.param`s; idempotent). The optimize loop/scorer/`simulate_circuit` are untouched, so a single-corner run is a strict superset of the legacy "netlist hardcodes the corner" behavior (`pvt: None`). The legacy `tech_spec.pvt_map` / flat `pvt_corners` stay **display-only**. Phase 2 (multi-corner `{tb × corner}` aggregation) is deferred — see `PVT_plan.md`. The UI surfaces corners via `CornerSelect` (Run popover, Optimize toolbar, Health check) and the wizard's PVTStep (emits inline `model_includes`, round-tripped through `yaml_generator._pvt_block_to_form`).
+
+**Manual single sim (`POST /api/simulate/once`)**: evaluate ONE chosen design point through the optimizer's `evaluate(params, append_to_log=False)` primitive (same scoring as a real trial). Mode B = explicit param vector; Mode A = a checkpoint point (best by argmax, or a given index). Mode B `params` values may be **engineering strings** (`"250u"`, `"0.18u"`) or numbers — the route parses them **server-side** via `core/domains.parse_value` (the request type is `dict[str, str | float]`; a malformed value returns a per-field error). PDK-gated; isolated output subfolder (`outdir/manual_sim`) so it can't clobber a live run. UI: its **own `/manual` view** (`tabs/ManualSimTab` wrapping `pvt/ManualSimPanel`), in the ActivityBar utility group — no longer embedded in OptimizeTab. Do **not** route this through `parameterize()`/`ask()` (that sims a *random* point — the `sanity.py` gap).
+
+**`dut_param.freeze` defaults to `False`**: an omitted `freeze` key means "optimize this param" — matching the wizard default and the historical sweep-everything behavior. Set `freeze: true` to exclude a param from the search space (`NevergradMixin.parameterize` skips it and injects its `val`/`init`, if given). `Project_Setup.from_yaml()` now also **rejects duplicate `dut_param` names** (they previously collapsed silently to one search dimension). The `freeze_to: <value>` YAML key is still parsed-but-ignored — wiring it up is deferred with the Phase 2 multi-corner work (PVT Phase 1 single-corner has landed; see the PVT note above).
 
 **App-Router typed routes**: `next.config.mjs` sets `typedRoutes: true`, so `router.push("/foo")` needs `"/foo" as Route` (import `type { Route } from "next"`).
 
@@ -120,10 +128,16 @@ Five Zustand stores hold cross-view state: `projectStore` (loaded/applied projec
 | Add a new API endpoint | `ui/backend/routes/` + `ui/src/lib/api.ts` + `ui/src/types/api.ts` |
 | Change scoring math | `src/spicexplorer/core/utils.py` + `ui/backend/services/score_service.py` |
 | Add a new chart | `ui/src/components/charts/` — extend `PlotlyChart.tsx` |
-| Add / rename a Studio view | `ui/src/components/shell/nav.ts` + new `ui/src/app/(studio)/<view>/page.tsx` |
-| Change the shell layout | `ui/src/components/shell/StudioShell.tsx` (+ ActivityBar/TabStrip/RightRail/BottomPanel/StatusBar) |
+| Add / rename a Studio view | `ui/src/components/shell/nav.ts` (`PRIMARY_VIEWS`/`UTILITY_VIEWS`; keep ⌘ shortcuts 1..8 + the `CommandPalette` `/^[1-8]$/` regex in sync) + new `ui/src/app/(studio)/<view>/page.tsx` |
+| Add in-view sub-tabs | `ui/src/components/shell/SubTabStrip.tsx` (generic, local `useState` per view, mounted in the view's own toolbar; e.g. `tabs/SetupTab.tsx`) |
+| Change the shell layout | `ui/src/components/shell/StudioShell.tsx` (+ ActivityBar/RightRail/BottomPanel/StatusBar) |
 | Command palette / ⌘K | `ui/src/components/overlays/CommandPalette.tsx` |
+| Edit target specs (ephemeral) | `ui/src/components/tabs/ScoreShapingTab.tsx` (`SpecEditor`) → `spec_overrides` on `POST /api/score` → `score_service.apply_spec_overrides` (mutates the freshly-loaded project in-memory; never writes YAML, not threaded into live runs) |
 | Live-run SSE / run history | `ui/src/stores/runStore.ts` |
 | Demo preset checkpoints | `ui/app_config.json` (repo-root-relative paths) |
 | Reference optimization run | `examples/OTA/cascode/ihp-sg13g2/sizing/nevergrad_single_obj_opt.py` |
+| PVT corner schema / apply | `src/spicexplorer/core/domains.py` (`PVTConfig` — incl. duplicate-corner-name rejection in `__post_init__` —, `_normalize_pvt_block`) + `spice_engine/spicelib.py` (`apply_corner`) |
+| PVT corner UI | `ui/src/components/pvt/` (`CornerSelect`, `ManualSimPanel`) + `lib/pvt.ts` |
+| Manual single sim | `ui/backend/routes/simulate.py` + `ui/src/app/(studio)/manual/page.tsx` → `ui/src/components/tabs/ManualSimTab.tsx` → `ui/src/components/pvt/ManualSimPanel.tsx` |
+| PVT design + Phase 2 plan | `PVT_plan.md` |
 | Full Studio migration plan | `doc/PLAN_STUDIO_INTEGRATION.md` |

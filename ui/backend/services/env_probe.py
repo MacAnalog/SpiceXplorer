@@ -28,6 +28,7 @@ _PDK_ENV_VARS = ("PDK_ROOT", "PDK", "IHP_PDK_ROOT")
 _PDK_LIB_SUBPATHS = (
     _PDK_MODEL_LIB,
     f"{_PDK_TECH}/libs.tech/ngspice/{_PDK_MODEL_LIB}",
+    f"{_PDK_TECH}/libs.tech/ngspice/models/{_PDK_MODEL_LIB}",  # actual IHP sg13g2 layout (PDK_ROOT parent)
     f"libs.tech/ngspice/{_PDK_MODEL_LIB}",
     f"libs.tech/ngspice/models/{_PDK_MODEL_LIB}",
 )

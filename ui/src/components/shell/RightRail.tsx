@@ -7,7 +7,7 @@ import { useUIStore } from "@/stores/uiStore";
 import { Stat } from "@/components/ui/stat";
 import { Badge } from "@/components/ui/badge";
 import { SpecChip } from "@/components/ui/spec-chip";
-import { formatEng } from "@/lib/utils";
+import { formatEng, goalSymbol, statusForGoal } from "@/lib/utils";
 
 /**
  * Always-on right rail: live run progress + spec status + best params. Hoisted
@@ -23,26 +23,27 @@ export function RightRail() {
 
   const bestScore = useMemo(() => {
     if (!events.length) return "—";
-    const vals = events
-      .map((e) => e.best_score ?? e.score ?? Infinity)
-      .filter((v) => Number.isFinite(v));
-    return vals.length ? formatEng(Math.min(...vals)) : "—";
+    // best_score is a running maximum (higher is better). Use the maximum
+    // (== the final value), not Math.min which returned the first/worst. Reduce
+    // instead of spreading to avoid a stack overflow on long runs.
+    const best = events.reduce((m, e) => {
+      const v = e.best_score ?? e.score;
+      return v != null && Number.isFinite(v) && v > m ? v : m;
+    }, -Infinity);
+    return Number.isFinite(best) ? formatEng(best) : "—";
   }, [events]);
 
   const specStatuses = useMemo(() => {
     if (!summary) return [];
     return summary.target_specs.map((spec) => {
       const val = bestMetrics[spec.name];
-      const pass =
-        val != null &&
-        (spec.goal === "exceed"
-          ? val >= spec.target
-          : spec.goal === "minimize"
-            ? val <= spec.target
-            : Math.abs(val - spec.target) <= (spec.tolerance ?? Infinity));
+      // Shared tolerance-aware verdict (HealthTab/ExplorerTab use the same), so the rail
+      // can't disagree with other surfaces. The old inline check ignored tolerance for
+      // exceed/minimize and defaulted exact's tolerance to Infinity (too lenient).
+      const verdict = statusForGoal(spec.goal, val, spec.target, spec.tolerance ?? undefined);
       const status: "ok" | "fail" | "neutral" =
-        val == null ? "neutral" : pass ? "ok" : "fail";
-      const goalSym = spec.goal === "exceed" ? ">" : spec.goal === "minimize" ? "<" : "≈";
+        verdict === "pass" ? "ok" : verdict === "fail" ? "fail" : "neutral";
+      const goalSym = goalSymbol(spec.goal);
       return { spec, val, status, goalSym };
     });
   }, [summary, bestMetrics]);
@@ -121,12 +122,12 @@ export function RightRail() {
             Best params
           </div>
           <div className="overflow-hidden rounded border border-border">
-            <table className="w-full text-xs">
+            <table className="w-full table-fixed text-xs">
               <tbody>
                 {Object.entries(bestParams).map(([k, v]) => (
                   <tr key={k} className="border-b border-border last:border-0">
-                    <td className="px-2 py-1 font-mono text-muted">{k}</td>
-                    <td className="px-2 py-1 text-right font-mono">{formatEng(v)}</td>
+                    <td className="max-w-0 truncate px-2 py-1 font-mono text-muted" title={k}>{k}</td>
+                    <td className="max-w-0 truncate px-2 py-1 text-right font-mono" title={formatEng(v)}>{formatEng(v)}</td>
                   </tr>
                 ))}
                 {Object.keys(bestParams).length === 0 && (

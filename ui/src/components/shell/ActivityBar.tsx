@@ -3,13 +3,15 @@ import type { Route } from "next";
 import { usePathname, useRouter } from "next/navigation";
 import { useProjectStore } from "@/stores/projectStore";
 import { cn } from "@/lib/utils";
-import { PRIMARY_VIEWS, SETTINGS_VIEW, viewForPath, type StudioView } from "./nav";
+import { PRIMARY_VIEWS, UTILITY_VIEWS, SETTINGS_VIEW, viewForPath, type StudioView } from "./nav";
 
 /**
- * Vertical icon rail (VS Code "activity bar"). Primary views at the top, the
- * Health/diagnostics gear pinned at the bottom. Selecting an icon routes to the
- * view; the active route is highlighted. Disabled icons mirror the project
- * gating (scoring/optimize need an applied project).
+ * Vertical icon rail (VS Code "activity bar") — the sole top-level nav after the
+ * redundant horizontal TabStrip was removed. Primary workflow views at the top, a
+ * utility group (Pipeline, Manual Sim) above the Health/diagnostics gear pinned at
+ * the bottom. Selecting an icon routes to the view; the active route is
+ * highlighted. Disabled icons mirror the project gating (e.g. scoring/optimize
+ * need an applied project).
  */
 export function ActivityBar() {
   const pathname = usePathname();
@@ -59,6 +61,10 @@ export function ActivityBar() {
         ))}
       </div>
       <div className="flex flex-col items-center">
+        <div className="mb-1 w-6 border-t border-border" aria-hidden />
+        {UTILITY_VIEWS.map((v) => (
+          <Item key={v.id} view={v} />
+        ))}
         <Item view={SETTINGS_VIEW} />
       </div>
     </nav>

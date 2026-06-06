@@ -24,11 +24,11 @@ ARG NGSPICE_VERSION=45
 ENV DEBIAN_FRONTEND=noninteractive
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update && apt-get install -y --no-install-recommends \
         build-essential bison flex \
         libreadline-dev libncurses-dev \
-        ca-certificates wget \
-    && rm -rf /var/lib/apt/lists/*
+        ca-certificates wget
 WORKDIR /build
 # v45 matches the ABI the PDK models expect. SourceForge keeps the current
 # release at ng-spice-rework/<v>/ and archives older ones under old-releases/<v>/.
@@ -62,18 +62,19 @@ ARG OPENVAF_COMMIT=2e066436d985b05cf8e6563e936daf9ab875775a
 ENV DEBIAN_FRONTEND=noninteractive
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update && apt-get install -y --no-install-recommends \
         git curl ca-certificates build-essential pkg-config \
         llvm-18 llvm-18-dev clang-18 libclang-common-18-dev libpolly-18-dev lld-18 \
-        zlib1g-dev libzstd-dev \
-    && rm -rf /var/lib/apt/lists/*
+        zlib1g-dev libzstd-dev
 ENV RUSTUP_HOME=/opt/rustup \
     CARGO_HOME=/opt/cargo \
     PATH=/opt/cargo/bin:/usr/lib/llvm-18/bin:$PATH \
     LLVM_SYS_180_PREFIX=/usr/lib/llvm-18
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-RUN --mount=type=cache,target=/root/.cargo/registry \
-    --mount=type=cache,target=/root/.cargo/git \
+RUN --mount=type=cache,target=/opt/cargo/registry \
+    --mount=type=cache,target=/opt/cargo/git \
+    rm -rf /src/openvaf && \
     git clone --filter=blob:none "$OPENVAF_REPO" /src/openvaf \
     && cd /src/openvaf && git checkout "$OPENVAF_COMMIT" \
     && cargo build --release --features llvm18 --bin openvaf-r \
@@ -95,14 +96,14 @@ FROM ubuntu:${UBUNTU_TAG} AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-venv \
         libreadline8t64 libncursesw6 libgomp1 \
-        gosu ca-certificates curl \
-    && rm -rf /var/lib/apt/lists/*
+        gosu ca-certificates curl
 
 # uv (Astral) — used to build the project virtualenv from the locked deps.
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.9.6 /uv /uvx /usr/local/bin/
 
 # ngspice (compiled above), kept at its build prefix so internal lookups
 # (codemodels under lib/, spinit under share/) resolve unchanged.
@@ -114,12 +115,22 @@ COPY docker/pdk/ihp-sg13g2/libs.tech/ngspice/models /opt/pdk/ihp-sg13g2/libs.tec
 COPY docker/pdk/ihp-sg13g2/libs.tech/ngspice/.spiceinit /opt/pdk/ihp-sg13g2/libs.tech/ngspice/.spiceinit
 COPY --from=osdi /osdi /opt/pdk/ihp-sg13g2/libs.tech/ngspice/osdi
 
+# PDK xschem symbol libraries (sg13g2_pr/*.sym) — resolved by the in-browser
+# schematic viewer via _pdk_xschem_dir() → $PDK_ROOT/$PDK/libs.tech/xschem.
+COPY docker/pdk/ihp-sg13g2/libs.tech/xschem /opt/pdk/ihp-sg13g2/libs.tech/xschem
+
+# xschem standard devices library (devices/*.sym) — resolved via XSCHEM_LIBRARY_PATH.
+# No xschem binary is installed; the env var is the hook used by _xschem_share_dirs().
+COPY docker/xschem_library /opt/xschem_library
+
 ENV PATH=/opt/ngspice/bin:/app/.venv/bin:$PATH \
     HOME=/app \
     PDK_ROOT=/opt/pdk \
     PDK=ihp-sg13g2 \
     IHP_PDK_ROOT=/opt/pdk/ihp-sg13g2 \
     SPICE_USERINIT_DIR=/opt/pdk/ihp-sg13g2/libs.tech/ngspice \
+    XSCHEM_LIBRARY_PATH=/opt/xschem_library:/opt/xschem_library/devices \
+    UV_CACHE_DIR=/root/.cache/uv \
     UV_PYTHON=/usr/bin/python3 \
     UV_PYTHON_DOWNLOADS=never \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
@@ -148,13 +159,17 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # 2) Project source + install. (.dockerignore drops ui/node_modules, ui/.next,
 #    .venv, .git, logs/, auto_save/, *.raw, etc.)
 COPY src ./src
-COPY ui ./ui
-COPY examples ./examples
 RUN --mount=type=cache,target=/root/.cache/uv \
     set -eux; \
     EXTRAS="--extra ui"; \
     if [ "$INSTALL_AGENTS" = "true" ]; then EXTRAS="$EXTRAS --extra agents"; fi; \
     uv sync --frozen $EXTRAS
+
+# 3) Runtime-only assets — NOT part of the package build, so copy them last.
+#    Editing FastAPI backend / examples never busts the dependency or project layers.
+COPY ui/backend ./ui/backend
+COPY ui/app_config.json ./ui/app_config.json
+COPY examples ./examples
 
 COPY docker/entrypoint-backend.sh /usr/local/bin/entrypoint-backend.sh
 RUN chmod +x /usr/local/bin/entrypoint-backend.sh
@@ -162,6 +177,10 @@ RUN chmod +x /usr/local/bin/entrypoint-backend.sh
 ENV LOG_LEVEL=INFO \
     BACKEND_PORT=8000
 EXPOSE 8000
+
+# Health check — confirms uvicorn is responsive before frontend routes traffic.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+    CMD curl -fsS http://localhost:${BACKEND_PORT:-8000}/api/env || exit 1
 
 # The entrypoint aligns the runtime user to the host UID/GID (so bind-mount
 # files aren't root-owned) and drops privileges before launching uvicorn.

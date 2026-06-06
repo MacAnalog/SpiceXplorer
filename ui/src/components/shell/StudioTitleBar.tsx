@@ -1,6 +1,7 @@
 "use client";
-import { Command, Plus } from "lucide-react";
+import { Command, Plus, FolderOpen } from "lucide-react";
 import { useUIStore } from "@/stores/uiStore";
+import { useProjectStore } from "@/stores/projectStore";
 import { RunControl } from "./RunControl";
 
 /**
@@ -12,6 +13,8 @@ import { RunControl } from "./RunControl";
 export function StudioTitleBar() {
   const openCommand = useUIStore((s) => s.openCommand);
   const openWizard = useUIStore((s) => s.openWizard);
+  const openProjects = useUIStore((s) => s.openProjects);
+  const projectName = useProjectStore((s) => s.projectName);
   return (
     <header className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-panel px-3">
       <div className="flex items-baseline gap-2">
@@ -31,6 +34,19 @@ export function StudioTitleBar() {
         </span>
         <span className="text-[11px] font-medium text-faint">Studio</span>
       </div>
+
+      {/* Project switcher (⌘P) — the active registered project, or a prompt to pick. */}
+      <button
+        type="button"
+        onClick={openProjects}
+        title="Switch / create / load project (⌘P)"
+        aria-label="Projects"
+        className="flex min-w-0 items-center gap-1.5 rounded-md border border-border bg-hairline px-2 py-1 text-[11px] text-fg transition hover:border-primary/40"
+      >
+        <FolderOpen className="h-3 w-3 shrink-0 text-faint" aria-hidden />
+        <span className="max-w-[180px] truncate">{projectName ?? "Select project"}</span>
+        <span className="font-mono text-[10px] text-faint">⌘P</span>
+      </button>
 
       <div className="flex-1" />
 

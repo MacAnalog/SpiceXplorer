@@ -1,19 +1,21 @@
 "use client";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import type { OnMount } from "@monaco-editor/react";
 import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Stat } from "@/components/ui/stat";
 import { useProjectStore } from "@/stores/projectStore";
 import { useWizardStore } from "@/stores/wizardStore";
 import { api } from "@/lib/api";
-import { formatEng } from "@/lib/utils";
+import { formatEng, goalSymbol } from "@/lib/utils";
+import { cornerSummary, cornerIncludes } from "@/lib/pvt";
 import { EmptyState } from "@/components/ui/empty-state";
 import { selectCn } from "@/components/ui/select";
 import { Thead, Th, Tr, Td } from "@/components/ui/table";
-import { Segmented } from "@/components/ui/segmented";
+import { SubTabStrip } from "@/components/shell/SubTabStrip";
 import { Toolbar, ToolbarSpacer } from "@/components/shell/Toolbar";
-import { Separator } from "@/components/ui/separator";
 import type { AppConfig } from "@/types/api";
 import { WizardShell } from "@/components/wizard/WizardShell";
 
@@ -24,10 +26,6 @@ interface Props {
 }
 
 type SetupMode = "load" | "wizard";
-
-function goalSym(g: string): string {
-  return g === "exceed" ? ">" : g === "minimize" ? "<" : "≈";
-}
 
 export function SetupTab({ appConfig }: Props) {
   const {
@@ -46,8 +44,41 @@ export function SetupTab({ appConfig }: Props) {
   const [mode, setMode] = useState<SetupMode>("load");
   const [hydrateError, setHydrateError] = useState<string | null>(null);
   const [showSummary, setShowSummary] = useState(false);
+  // The on-disk text last loaded — Apply sends the editor buffer (not a stale disk
+  // re-read) whenever it differs from this, so unsaved Monaco edits aren't dropped.
+  const [diskYaml, setDiskYaml] = useState<string>("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { setForm } = useWizardStore();
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
+  const handleEditorMount: OnMount = (editor, monaco) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+  };
+
+  // Surface backend YAML validation errors as Monaco markers (red squiggles +
+  // hover tooltips). The validator returns plain messages (no line/col), so we
+  // anchor at the line named in the message when present, else line 1.
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    const model = editor?.getModel();
+    if (!editor || !monaco || !model) return;
+    const lineCount = model.getLineCount();
+    const markers = validationErrors.map((msg) => {
+      const m = /line\s+(\d+)/i.exec(msg);
+      const line = Math.min(Math.max(1, m ? parseInt(m[1], 10) : 1), lineCount);
+      return {
+        severity: monaco.MarkerSeverity.Error,
+        message: msg,
+        startLineNumber: line,
+        startColumn: 1,
+        endLineNumber: line,
+        endColumn: model.getLineMaxColumn(line),
+      };
+    });
+    monaco.editor.setModelMarkers(model, "spx-yaml", markers);
+  }, [validationErrors]);
 
   const loadDemoYaml = useCallback(
     async (path: string) => {
@@ -59,7 +90,11 @@ export function SetupTab({ appConfig }: Props) {
           const rawRes = await fetch(
             `/api/yaml-text?path=${encodeURIComponent(path)}`,
           );
-          if (rawRes.ok) setYaml(await rawRes.text());
+          if (rawRes.ok) {
+            const text = await rawRes.text();
+            setYaml(text);
+            setDiskYaml(text);
+          }
         }
       } finally {
         setLoading(false);
@@ -102,12 +137,20 @@ export function SetupTab({ appConfig }: Props) {
     if (!yamlPath && !yaml.trim()) return;
     setLoading(true);
     try {
-      // Prefer the on-disk path (keeps relative netlist/ws_root resolution for
-      // live runs); fall back to the editor content for uploaded/edited YAML.
-      const res = yamlPath
-        ? await api.loadProject(yamlPath)
-        : await api.loadProjectContent(yaml);
-      if (res.ok) apply(res.summary, res.yaml_path);
+      // Apply the EDITOR buffer whenever it differs from what we loaded (so unsaved
+      // Monaco edits aren't silently dropped). Pass yamlPath so the backend anchors
+      // relative ws_root/netlist resolution to the original dir. Only when the buffer
+      // is clean (or empty) do we re-read the on-disk path directly.
+      const dirty = yaml.trim() !== "" && yaml !== diskYaml;
+      const res = dirty
+        ? await api.loadProjectContent(yaml, yamlPath || undefined)
+        : yamlPath
+          ? await api.loadProject(yamlPath)
+          : await api.loadProjectContent(yaml);
+      if (res.ok) {
+        apply(res.summary, res.yaml_path);
+        setDiskYaml(yaml); // applied buffer becomes the new clean baseline
+      }
     } finally {
       setLoading(false);
     }
@@ -157,16 +200,16 @@ export function SetupTab({ appConfig }: Props) {
 
   return (
     <>
+      <SubTabStrip<SetupMode>
+        aria-label="Setup mode"
+        value={mode}
+        onChange={setMode}
+        tabs={[
+          { id: "load", label: "Load / Edit YAML" },
+          { id: "wizard", label: "Create Wizard" },
+        ]}
+      />
       <Toolbar>
-        <Segmented
-          value={mode}
-          onChange={(m) => setMode(m as SetupMode)}
-          options={[
-            { value: "load", label: "Load / Edit YAML" },
-            { value: "wizard", label: "Create Wizard" },
-          ]}
-        />
-        <Separator />
         {mode === "load" ? (
           <>
             {appConfig && (
@@ -234,6 +277,15 @@ export function SetupTab({ appConfig }: Props) {
         )}
       </Toolbar>
 
+      {summary && (
+        <div className="grid shrink-0 grid-cols-4 gap-2.5 border-b border-border px-3 py-2.5">
+          <Stat eyebrow="DUT params" value={String(summary.dut_params.length)} unit={`${summary.dut_params.filter((p) => !p.freeze).length} free`} />
+          <Stat eyebrow="testbenches" value={String(summary.testbenches.length)} unit={`${summary.testbenches.filter((t) => t.enable).length} on`} />
+          <Stat eyebrow="target specs" value={String(summary.target_specs.length)} unit={`${summary.target_specs.filter((s) => s.enable).length} on`} />
+          <Stat eyebrow="PVT corners" value={String(summary.pvt?.corners.length ?? 0)} unit={summary.pvt ? summary.pvt.active_corner : undefined} />
+        </div>
+      )}
+
       <div
         className="grid min-h-0 flex-1 gap-3 overflow-auto p-3"
         style={{
@@ -267,6 +319,7 @@ export function SetupTab({ appConfig }: Props) {
                 language="yaml"
                 value={yaml}
                 onChange={handleEditorChange}
+                onMount={handleEditorMount}
                 theme="vs-dark"
                 options={{
                   minimap: { enabled: false },
@@ -300,7 +353,7 @@ export function SetupTab({ appConfig }: Props) {
             )}
           </Panel>
         ) : (
-          <div className="flex min-h-0 min-w-0 flex-col">
+          <div className="flex h-full min-h-0 min-w-0 flex-col">
             <WizardShell onSaved={handleWizardSaved} defaultSavePath={yamlPath} />
           </div>
         )}
@@ -354,9 +407,11 @@ export function SetupTab({ appConfig }: Props) {
                       {summary.dut_params.filter((p) => p.is_integer).length} int ·{" "}
                       {summary.dut_params.filter((p) => p.freeze).length} frozen
                     </dd>
-                    <dt className="text-muted">pvt corners</dt>
+                    <dt className="text-muted">pvt corner</dt>
                     <dd className="m-0 font-mono text-[11px]">
-                      {summary.pvt_corners.length}
+                      {summary.pvt
+                        ? `${summary.pvt.active_corner} · ${summary.pvt.corners.length} defined`
+                        : "none (netlist-hardcoded)"}
                     </dd>
                     <dt className="text-muted">testbenches</dt>
                     <dd className="m-0 font-mono text-[11px]">
@@ -403,7 +458,7 @@ export function SetupTab({ appConfig }: Props) {
                     {summary.target_specs.map((s) => (
                       <Tr key={s.name}>
                         <Td className="font-mono">{s.name}</Td>
-                        <Td className="font-mono">{goalSym(s.goal)}</Td>
+                        <Td className="font-mono">{goalSymbol(s.goal)}</Td>
                         <Td className="font-mono">{formatEng(s.target)}</Td>
                         <Td className="font-mono">
                           {s.tolerance != null ? `±${formatEng(s.tolerance)}` : "—"}
@@ -414,6 +469,59 @@ export function SetupTab({ appConfig }: Props) {
                   </tbody>
                 </table>
               </Panel>
+
+              {summary.pvt && summary.pvt.corners.length > 0 && (
+                <Panel>
+                  <PanelHeader
+                    title="pvt corners"
+                    mute={`· ${summary.pvt.corners.length}`}
+                    right={
+                      <span className="font-mono text-[10px] text-secondary">
+                        active: {summary.pvt.active_corner}
+                      </span>
+                    }
+                  />
+                  <table className="w-full">
+                    <Thead>
+                      <Th>corner</Th>
+                      <Th>env</Th>
+                      <Th>process</Th>
+                      <Th>on</Th>
+                    </Thead>
+                    <tbody>
+                      {summary.pvt.corners.map((c) => {
+                        const isActive = c.name === summary.pvt!.active_corner;
+                        return (
+                          <Tr key={c.name} highlight={isActive}>
+                            <Td className="font-mono">
+                              {c.name}
+                              {isActive && (
+                                <span className="ml-1 text-[9px] uppercase tracking-wider text-secondary">
+                                  active
+                                </span>
+                              )}
+                            </Td>
+                            <Td className="font-mono text-[10px] text-muted">
+                              {cornerSummary(c)}
+                            </Td>
+                            <Td
+                              className="max-w-[160px] truncate font-mono text-[10px] text-faint"
+                              title={cornerIncludes(c)}
+                            >
+                              {cornerIncludes(c) || "—"}
+                            </Td>
+                            <Td>
+                              <Badge variant={c.enabled ? "ok" : "neutral"}>
+                                {c.enabled ? "yes" : "no"}
+                              </Badge>
+                            </Td>
+                          </Tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </Panel>
+              )}
 
               <Panel>
                 <PanelHeader

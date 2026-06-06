@@ -5,23 +5,14 @@ import math
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
-
-# ---------- helpers ----------
-
-def _safe_float(v: Any) -> float | None:
-    try:
-        x = float(v)
-        return x if math.isfinite(x) else None
-    except (TypeError, ValueError):
-        return None
+from ui.backend.services.num import safe_float as _safe_float
 
 
 # ---------- JSON checkpoint reader ----------
 
-def read_json_checkpoint(path: Path) -> dict[str, Any]:
+def read_json_checkpoint(path: Path, limit: int | None = None) -> dict[str, Any]:
     from spicexplorer.viz.plotting import Optimization_Log_Visualizer
 
     vis = Optimization_Log_Visualizer.load_checkpoint(path)
@@ -33,6 +24,8 @@ def read_json_checkpoint(path: Path) -> dict[str, Any]:
     best = -math.inf
 
     for i, entry in enumerate(log):
+        if limit and i >= limit:
+            break  # honor `limit` like the CSV reader's df.head(limit)
         s = _safe_float(entry.get_score())
         if s is not None and s > best:
             best = s
@@ -42,6 +35,10 @@ def read_json_checkpoint(path: Path) -> dict[str, Any]:
 
         fs = entry.fit_summary or {}
         for metric, vals in fs.items():
+            # Some optimizers (e.g. the Bode path) store bare scalars in fit_summary
+            # rather than {"curr_val": ...} dicts — skip those instead of crashing.
+            if not isinstance(vals, dict):
+                continue
             per_metric.setdefault(metric, []).append(_safe_float(vals.get("curr_val")))
 
         for pname, pval in entry.get_params().items():
@@ -106,7 +103,7 @@ def read_csv_checkpoint(path: Path, limit: int | None = None) -> dict[str, Any]:
 
 def read_checkpoint(path: Path, limit: int | None = None) -> dict[str, Any]:
     if path.suffix == ".json":
-        return read_json_checkpoint(path)
+        return read_json_checkpoint(path, limit=limit)
     return read_csv_checkpoint(path, limit=limit)
 
 
@@ -135,6 +132,10 @@ def compute_envelope(
 
         if goal == "minimize":
             best_ever = min(clean)
+        elif goal == "exact" and target is not None:
+            # Closest sample to the target — NOT the max. An exact-goal spec (e.g.
+            # phase margin 60°±10°) would otherwise report a 120° outlier as "best".
+            best_ever = min(clean, key=lambda v: abs(v - target))
         else:
             best_ever = max(clean)
 

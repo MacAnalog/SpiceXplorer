@@ -13,6 +13,8 @@ export interface RunConfig {
   seed: number | null;
   /** Autosave a cumulative checkpoint every N trials (null = end-only). */
   autosaveEvery: number | null;
+  /** PVT corner to optimize against (null = the project's YAML active_corner). */
+  activeCorner: string | null;
 }
 
 export const DEFAULT_RUN_CONFIG: RunConfig = {
@@ -20,10 +22,14 @@ export const DEFAULT_RUN_CONFIG: RunConfig = {
   budget: 200,
   seed: null,
   autosaveEvery: null,
+  activeCorner: null,
 };
 
 /** Selectable Nevergrad algorithms (canonical list for the Run config UI). */
 export const RUN_ALGORITHMS = ["LhsDE", "LHSSearch", "LogBFGSCMAPlus"] as const;
+
+/** Bottom-panel tabs: the structured optimizer summary, and the raw library log. */
+export type BottomTab = "log" | "rawlog";
 
 /**
  * Studio UI store — owns cross-view *navigation/selection* and shared
@@ -40,17 +46,17 @@ interface UIStore {
   // Cross-view selection (deep-link targets — consumed in later phases)
   selectedSpec: string | null;
   selectedRunId: string | null;
-  compareRunA: string | null;
-  compareRunB: string | null;
 
   // Panels (always-on shell surfaces)
   rightOpen: boolean;
   bottomOpen: boolean;
-  bottomTab: "log";
+  bottomTab: BottomTab;
 
   // Overlays
   commandOpen: boolean;
   wizardOpen: boolean;
+  helpOpen: boolean;
+  projectsOpen: boolean;
 
   // Shared live-run overrides (Run popover ⇄ Optimize toolbar)
   runConfig: RunConfig;
@@ -58,17 +64,19 @@ interface UIStore {
   setAppConfig: (cfg: AppConfig | null) => void;
   setEnv: (env: EnvInfo | null) => void;
   setSelectedSpec: (name: string | null) => void;
-  setSelectedRunId: (id: string | null) => void;
   /** Deep-link: focus a run in the history/convergence surfaces. */
   openRun: (id: string) => void;
-  setCompare: (a: string | null, b: string | null) => void;
   toggleRight: () => void;
   toggleBottom: () => void;
-  setBottomTab: (tab: "log") => void;
+  setBottomTab: (tab: BottomTab) => void;
   openCommand: () => void;
   closeCommand: () => void;
   openWizard: () => void;
   closeWizard: () => void;
+  toggleHelp: () => void;
+  closeHelp: () => void;
+  openProjects: () => void;
+  closeProjects: () => void;
   /** Merge a partial into the shared run config (algorithm/budget/seed). */
   setRunConfig: (patch: Partial<RunConfig>) => void;
 }
@@ -78,21 +86,19 @@ export const useUIStore = create<UIStore>((set) => ({
   env: null,
   selectedSpec: null,
   selectedRunId: null,
-  compareRunA: null,
-  compareRunB: null,
   rightOpen: true,
   bottomOpen: false,
   bottomTab: "log",
   commandOpen: false,
   wizardOpen: false,
+  helpOpen: false,
+  projectsOpen: false,
   runConfig: DEFAULT_RUN_CONFIG,
 
   setAppConfig: (appConfig) => set({ appConfig }),
   setEnv: (env) => set({ env }),
   setSelectedSpec: (selectedSpec) => set({ selectedSpec }),
-  setSelectedRunId: (selectedRunId) => set({ selectedRunId }),
   openRun: (id) => set({ selectedRunId: id }),
-  setCompare: (compareRunA, compareRunB) => set({ compareRunA, compareRunB }),
   toggleRight: () => set((s) => ({ rightOpen: !s.rightOpen })),
   toggleBottom: () => set((s) => ({ bottomOpen: !s.bottomOpen })),
   setBottomTab: (bottomTab) => set({ bottomTab }),
@@ -100,5 +106,9 @@ export const useUIStore = create<UIStore>((set) => ({
   closeCommand: () => set({ commandOpen: false }),
   openWizard: () => set({ wizardOpen: true, commandOpen: false }),
   closeWizard: () => set({ wizardOpen: false }),
+  toggleHelp: () => set((s) => ({ helpOpen: !s.helpOpen })),
+  closeHelp: () => set({ helpOpen: false }),
+  openProjects: () => set({ projectsOpen: true, commandOpen: false }),
+  closeProjects: () => set({ projectsOpen: false }),
   setRunConfig: (patch) => set((s) => ({ runConfig: { ...s.runConfig, ...patch } })),
 }));

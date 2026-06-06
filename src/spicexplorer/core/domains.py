@@ -112,6 +112,10 @@ def parse_value(val: Union[str, float, int]) -> np.float64:
     """
     if isinstance(val, (float, int)):
         return np.float64(val)
+    if val is None:
+        # A present-but-empty YAML key (e.g. `temp:` / supply `value:`) reaches here as None;
+        # raise a descriptive error instead of an opaque AttributeError on `None.lower()` (BUG-B18).
+        raise ValueError("parse_value received None (a YAML key was present but had no value)")
     if val.lower() == "inf":
         return np.float64(np.inf)
     
@@ -127,6 +131,70 @@ def resolve_reference(value: Union[str, float, int], constraints: Dict[str, np.f
     if isinstance(value, str) and value in constraints:
         return np.float64(constraints[value])
     return parse_value(value)
+
+def _normalize_pvt_block(proj: dict) -> None:
+    """Desugar the raw `pvt:` YAML block in-place into the canonical `PVTConfig` shape.
+
+    The author-facing YAML allows convenient sugar that does NOT map 1:1 onto the
+    dataclasses; this expands it before dacite ever sees it:
+
+      • `process_bundles:` (reusable named include lists) are inlined into each
+        corner's `model_includes`, then dropped — they are sugar, not a retained field.
+      • a corner's `process: <bundle>` reference is replaced by the bundle's
+        `model_includes` (inline `model_includes:` is kept as-is for one-off corners).
+      • a singular `supply: {node, value}` is widened to `supplies: [...]` so the schema
+        extends to multi-rail designs without breaking.
+      • numeric env fields (`temp`, supply `value`, `params` values) are coerced via
+        `parse_value`, so engineering strings ("1V2" style "1.2", "900m") and ints work.
+
+    No-op if `proj` has no `pvt` key. Raises ValueError on a dangling bundle reference.
+    """
+    pvt = proj.get("pvt")
+    if not isinstance(pvt, dict):
+        return
+
+    bundles: Dict[str, list] = pvt.pop("process_bundles", None) or {}
+
+    def _coerce_includes(raw_list) -> list:
+        out = []
+        for inc in raw_list or []:
+            out.append({"lib_file": str(inc["lib_file"]), "section": str(inc["section"])})
+        return out
+
+    corners = pvt.get("corners") or []
+    for corner in corners:
+        # process bundle reference  →  concrete model_includes
+        bundle_ref = corner.pop("process", None)
+        if bundle_ref is not None and "model_includes" in corner:
+            # Ambiguous: both an inline include list AND a process-bundle reference. Don't silently
+            # drop `process` (BUG-B32) — refuse so the author picks one.
+            raise ValueError(
+                f"PVT corner '{corner.get('name', '?')}' specifies BOTH 'process: {bundle_ref}' and "
+                f"an inline 'model_includes' — use one or the other."
+            )
+        if bundle_ref is not None and "model_includes" not in corner:
+            if bundle_ref not in bundles:
+                raise ValueError(
+                    f"PVT corner '{corner.get('name', '?')}' references unknown process "
+                    f"bundle '{bundle_ref}'. Defined bundles: {sorted(bundles)}."
+                )
+            corner["model_includes"] = _coerce_includes(bundles[bundle_ref])
+        elif "model_includes" in corner:
+            corner["model_includes"] = _coerce_includes(corner["model_includes"])
+
+        # singular `supply` sugar  →  `supplies: [...]`
+        single_supply = corner.pop("supply", None)
+        if single_supply is not None and "supplies" not in corner:
+            corner["supplies"] = [single_supply]
+
+        # numeric coercion (env)
+        if "temp" in corner:
+            corner["temp"] = float(parse_value(corner["temp"]))
+        for s in corner.get("supplies", []) or []:
+            if "value" in s:
+                s["value"] = float(parse_value(s["value"]))
+        if corner.get("params"):
+            corner["params"] = {k: float(parse_value(v)) for k, v in corner["params"].items()}
 
 def safe_from_dict(cls, data: dict, logger: logging.Logger, config: Config = Config(cast=[Enum])):
     try:
@@ -158,11 +226,93 @@ class TechSpec:
                 self.constraints[key] = parse_value(val)
                 logger.debug(f"Parsed constraint '{key}': '{val}' to {self.constraints[key]}")
 
+# ---------- PVT Corner System (Phase 1) ----------
+# These dataclasses make process/voltage/temperature corners first-class so they
+# actually drive the SPICE simulation. They are deliberately PDK-AGNOSTIC: core
+# never interprets `lib_file`/`section` strings — the spice engine emits them verbatim.
+# See PVT_plan.md (Part A) for the full design.
+
 @dataclass
-class PVT:
-    temp:   float
-    corner: str
-    supply: float
+class ModelInclude:
+    """One generic model-library include: an opaque (file, section) pair.
+
+    The spice engine emits this as `.lib <lib_file> <section>` (ngspice); core never
+    enumerates valid files or sections. PDK-specific tokens (e.g. `cornerMOSlv.lib`,
+    `mos_tt`) live only in the YAML, never in core.
+    """
+    lib_file: str
+    section: str
+
+@dataclass
+class SupplyOverride:
+    """A supply-rail override: the `.param` name to set and its value (volts)."""
+    node: str
+    value: float
+
+@dataclass
+class Corner:
+    """A fully-resolved PVT corner: process model includes + environment.
+
+    `model_includes` is always the expanded, ordered include list — a YAML
+    `process: <bundle>` reference is resolved into this list at load time (see
+    `_normalize_pvt_block`), so core only ever sees concrete includes.
+    """
+    name: str
+    model_includes: List[ModelInclude] = field(default_factory=list)
+    temp: float = 27.0
+    supplies: List[SupplyOverride] = field(default_factory=list)
+    params: Dict[str, float] = field(default_factory=dict)
+    enabled: bool = True
+
+@dataclass
+class PVTConfig:
+    """Top-level PVT configuration: a set of named corners + which one is active.
+
+    Phase 1 drives the optimizer against the single `active_corner`. Multi-corner
+    aggregation (running every `enabled_corners()`) is deferred to Phase 2.
+    """
+    active_corner: str
+    corners: List[Corner] = field(default_factory=list)
+    model_lib_root: Optional[str] = None
+
+    def __post_init__(self):
+        # Reject duplicate corner names: `get()`/`get_active()` return the FIRST
+        # match, so a duplicate silently shadows the later corner (and the UI's
+        # corner picker would key React rows on a non-unique name). Fail loudly,
+        # mirroring the dut_param uniqueness check in Project_Setup.__post_init__.
+        names = [c.name for c in self.corners]
+        dupes = sorted({n for n in names if names.count(n) > 1})
+        if dupes:
+            raise ValueError(
+                f"Duplicate PVT corner name(s) {dupes}. "
+                "Each PVT corner must have a unique name."
+            )
+
+    def get(self, name: str) -> Optional["Corner"]:
+        for c in self.corners:
+            if c.name == name:
+                return c
+        return None
+
+    def get_active(self) -> "Corner":
+        corner = self.get(self.active_corner)
+        if corner is None:
+            available = [c.name for c in self.corners]
+            raise ValueError(
+                f"active_corner '{self.active_corner}' not found among defined "
+                f"corners {available}."
+            )
+        if not corner.enabled:
+            # The author explicitly disabled this corner yet left it active — warn rather than
+            # silently simulate against a corner excluded from enabled_corners() (BUG-B34).
+            logger.warning(
+                f"active_corner '{self.active_corner}' is marked enabled: false but is the "
+                f"active corner — it will still drive the simulation."
+            )
+        return corner
+
+    def enabled_corners(self) -> List["Corner"]:
+        return [c for c in self.corners if c.enabled]
 
 @dataclass
 class Param:
@@ -174,7 +324,12 @@ class Param:
     description: Optional[str]
     log_scale: bool = False
     is_integer: bool = False
-    freeze: bool = True
+    # Default False so an omitted `freeze` key means "optimize this param" — this
+    # matches the wizard/parse-to-form default and the historical behavior where
+    # every dut_param was swept. Set `freeze: true` to exclude a param from the
+    # search space (its `val`/`init`, if given, is injected; otherwise the
+    # netlist's own .param default is used).
+    freeze: bool = False
 
     def needs_resolution(self) -> bool:
         return isinstance(self.min_val, str) or isinstance(self.max_val, str) or (self.init is not None and isinstance(self.init, str)) or (self.val is not None and isinstance(self.val, str))
@@ -205,8 +360,11 @@ class Param:
             raise ValueError(f"Param {self.name} min/max not resolved before normalization")
         if self.max_val is None or self.min_val is None:
             raise ValueError(f"No min/max defined for log-normalization of {self.name}")
-        log_min, log_max = np.log(self.min_val), np.log(self.max_val)
-        return np.exp(denorm_val * (log_max - log_min) + log_min)
+        # Use base-10 to match the active Nevergrad denorm path (utils.log_denormalize uses
+        # log10/10**); the prior base-e here meant the RL and Nevergrad backends mapped the same
+        # log-scale param to different physical values (BUG-B24).
+        log_min, log_max = np.log10(self.min_val), np.log10(self.max_val)
+        return np.power(10.0, denorm_val * (log_max - log_min) + log_min)
     
     def get_val(self) -> float:
         return float(self.val)
@@ -214,23 +372,6 @@ class Param:
     def has_val(self) -> bool:
         return self.val is not None
     
-
-@dataclass
-class DutParams:
-    params: List[Param]
-
-    def get_frozen_params(self) -> Dict[str, float]:
-        return {p.name: float(p.init) for p in self.params if p.freeze}
-    
-    def list_frozen_params(self) -> List[Param]:
-        return [p for p in self.params if p.freeze]
-    
-    def list_all_params(self) -> List[Param]:
-        return self.params
-    
-    def list_variable_params(self) -> List[Param]:
-        return [p for p in self.params if not p.freeze]
-
 
 @dataclass
 class TestbenchParams:
@@ -315,8 +456,37 @@ class TargetSpec:
                 )
                 raise ValueError(f"Invalid error_type '{self.error_type}'. Must be one of {valid_errors}.")
         
+        # --- Coerce target (BUG-B7) ---
+        # YAML 1.1 leaves dot-less / unsigned-exponent scientific literals like `200e6`,
+        # `25e-6` as STRINGS, and the list_target_spec_hook path bypasses dacite casting, so
+        # `target` can arrive as a str. Parse it (engineering suffixes + plain floats) before
+        # any arithmetic, else `abs(0.05 * self.target)` and `value - self.target` raise.
+        if isinstance(self.target, str):
+            self.target = parse_value(self.target)
+
+        # --- Coerce weight (BUG-B9) ---
+        # The 1.0 default applies only to an OMITTED key; an explicit `weight:` / `weight: null`
+        # yields None, and `np.float64(None)` is NaN — which poisons every weighted penalty for
+        # the whole run (Nevergrad can't rank NaN). Normalize None / non-finite to 1.0.
+        if isinstance(self.weight, str):
+            self.weight = parse_value(self.weight)
+        if self.weight is None or not np.isfinite(np.float64(self.weight)):
+            self.weight = np.float64(1.0)
+
         # --- Validate / convert range ---
+        if isinstance(self.range, str):
+            self.range = parse_value(self.range)
         self.range = np.float64(self.range)
+        # An omitted/blank range yields np.float64(None) == NaN, which silently
+        # poisons every relative penalty/reward (the `<= 0` guards in utils do not
+        # catch NaN). Fall back to a sane normalizer, matching score_service.
+        if not np.isfinite(self.range) or self.range <= 0:
+            fallback = np.float64(max(abs(float(self.target)), 1.0))
+            logger.warning(
+                f"Target '{self.name}' has no valid 'range' (got {self.range}); "
+                f"falling back to {fallback} for metric normalization."
+            )
+            self.range = fallback
 
         # --- Tolerance fallback ---
         if isinstance(self.tolerance, str):
@@ -324,9 +494,15 @@ class TargetSpec:
 
         if self.tolerance is None or not(self.tolerance > 0):
             self.tolerance = abs(0.05 * self.target)
+            if not (self.tolerance > 0):
+                # target == 0 (or ~0): the 5%-of-target rule degenerates to 0, which would violate
+                # the `tolerance > 0` invariant this block exists to enforce (and leave a zero-width
+                # band). Floor to a small, scale-aware positive derived from the (already-validated,
+                # >0) normalizing `range` (BUG-B17).
+                self.tolerance = np.float64(self.range) * 1e-6
             logger.warning(
                 f"No valid tolerance specified for target '{self.name}'. "
-                f"Using default tolerance of 5%: {self.tolerance}"
+                f"Using default tolerance: {self.tolerance}"
             )
 
         # --- Initialization log ---
@@ -396,6 +572,15 @@ class TargetSpec:
 @dataclass
 class ListTargetSpec:
     targets: List[TargetSpec] = field(default_factory=list)
+
+    def __post_init__(self):
+        # Reject duplicate spec names (mirrors the dut_param and PVT-corner uniqueness checks). The
+        # performance map / fit_summary are keyed by spec name, so two specs sharing a name would
+        # silently overwrite each other and mis-score the run (BUG-B29).
+        seen: set[str] = set()
+        dups = [t.name for t in self.targets if t.name in seen or seen.add(t.name)]
+        if dups:
+            raise ValueError(f"duplicate target_spec name(s): {sorted(set(dups))}")
 
     def add_target(self, target: TargetSpec) -> None:
         logger.info(f"Adding target '{target.name}' to ListTargetSpec")
@@ -604,7 +789,6 @@ class Project_Setup:
 
     # Custom Data types
     tech_spec: TechSpec
-    pvt_corners: List[PVT]
     dut_params: List[Param]
     testbenches: List[TestbenchParams]
     optimizer_config: OptimizerConfig
@@ -614,6 +798,12 @@ class Project_Setup:
     # Optional pointer to the design's xschem schematic, relative to `ws_root`.
     # Consumed by the UI's Schematic viewer to pre-select the main `.sch`.
     schematic: Path | str | None = None
+
+    # PVT corner system (Phase 1). When present, the optimizer applies `pvt.get_active()`
+    # to every enabled testbench's netlist once, before the optimization loop — so the
+    # chosen corner's `.lib`/temp/supply actually drive the simulation. `None` preserves
+    # the legacy behavior (the corner is whatever the testbench `.spice` hardcodes).
+    pvt: Optional[PVTConfig] = None
 
     def __post_init__(self):
         # correct path types
@@ -625,6 +815,16 @@ class Project_Setup:
             self.outdir = Path(self.outdir)
         if isinstance(self.schematic, str):
             self.schematic = Path(self.schematic)
+        # Validate dut_param name uniqueness: a duplicate name silently collapses
+        # to a single search dimension in the optimizer (parameters[name] = ...
+        # overwrites), masking a data error. Fail loudly instead.
+        _dut_names = [p.name for p in self.dut_params]
+        _dupes = sorted({n for n in _dut_names if _dut_names.count(n) > 1})
+        if _dupes:
+            raise ValueError(
+                f"Duplicate dut_param name(s) {_dupes} in project '{self.name}'. "
+                "Each DUT parameter must have a unique name."
+            )
         # Log basic info
         logger.info(f"Project '{self.name}' initialized with simulator '{self.simulator}'")
         logger.info(f"\tWorkspace root: {self.ws_root}")
@@ -660,6 +860,10 @@ class Project_Setup:
             proj['ws_root'] = str(ws.resolve())
             logger.debug(f"Resolved ws_root → {proj['ws_root']}")
 
+            # Desugar the optional `pvt:` block (expand process bundles, widen
+            # singular `supply`, coerce numerics) before dacite maps it to PVTConfig.
+            _normalize_pvt_block(proj)
+
             project = safe_from_dict(cls, proj, logger, config=DECITE_CONFIG)
             
             # Resolve constraints in tech_spec
@@ -686,10 +890,29 @@ class Project_Setup:
         """Resolve all parameter min/max/default values based on tech_spec constraints."""
         logger.info("resolving DUT parameters...")
         for param in self.dut_params:
-            if param.needs_resolution():
-                logger.debug(f"Resolving ranges for param '{param.name}'")
-                param.resolve_min_max(self.tech_spec.constraints)
-                logger.debug(f"Resolved param '{param.name}': min={param.min_val}, max={param.max_val}, default={param.init}")
+            if param.freeze:
+                # Frozen params are INJECTED, not searched, so min/max are optional. Resolve the
+                # injected operating point `val` and the `init` fallback (eng-strings / constraint
+                # refs); validate bounds only when BOTH are present. A frozen eng-string constant
+                # with no min/max must not crash the load (BUG-B10) — `resolve_min_max` would raise
+                # "missing min or max" because a string `val`/`init` makes needs_resolution() true.
+                param.ressolve_val(self.tech_spec.constraints)
+                if param.min_val is not None and param.max_val is not None:
+                    param.resolve_min_max(self.tech_spec.constraints)  # resolves init + checks min<max
+                elif isinstance(param.init, str):
+                    param.init = resolve_reference(param.init, self.tech_spec.constraints)
+                continue
+            # Non-frozen params are search DIMENSIONS: bounds are required, and ALWAYS validated
+            # (incl. the min_val >= max_val check) even when given as plain numbers — previously the
+            # check ran only for string bounds via needs_resolution(), so numeric `min: 5, max: 1`
+            # silently inverted the search range (BUG-B8). `resolve_min_max` also resolves init.
+            logger.debug(f"Resolving ranges for param '{param.name}'")
+            param.resolve_min_max(self.tech_spec.constraints)
+            logger.debug(f"Resolved param '{param.name}': min={param.min_val}, max={param.max_val}, default={param.init}")
+            # Resolve the operating-point `val` too (eng-string / constraint ref), so the Schematic
+            # inspector nominal and the project summary don't fall back to the range midpoint
+            # (SCH-2 / BUG-A4). Mirrors the testbench-param loop below.
+            param.ressolve_val(self.tech_spec.constraints)
 
         logger.info("resolving TESTBENCH parameters...")
         for tb in self.testbenches:
@@ -742,9 +965,16 @@ class Project_Setup:
             logger.info(f"\t({i+1}) {tb.name} @ {tb.netlist}")
             if tb.description:
                 logger.info(f"\t- Description: {tb.description}")
-        logger.info(f"⚙️  PVT corners: {len(self.pvt_corners)} corners")
-        for i, pvt in enumerate(self.pvt_corners):
-            logger.info(f"\t({i+1}) Temp: {pvt.temp}°C, Corner: {pvt.corner}, Supply: {pvt.supply}V")
+        if self.pvt is not None:
+            active = self.pvt.get_active() if self.pvt.get(self.pvt.active_corner) else None
+            logger.info(
+                f"🌡️  PVT (active): '{self.pvt.active_corner}' "
+                f"({len(self.pvt.corners)} defined, {len(self.pvt.enabled_corners())} enabled)"
+            )
+            if active is not None:
+                _libs = ", ".join(f"{m.lib_file}:{m.section}" for m in active.model_includes)
+                _sup = ", ".join(f"{s.node}={s.value}V" for s in active.supplies)
+                logger.info(f"\t→ temp={active.temp}°C  supplies=[{_sup}]  includes=[{_libs}]")
         logger.info(f"🔧 Tech Spec: {len(self.tech_spec.constraints)} constraints")
         for k, v in self.tech_spec.constraints.items():
             logger.info(f"\t• {k}: {v:.2e}")
@@ -810,8 +1040,11 @@ class OptimizationLogEntry:
 
 class OptimizationLog:
     """Acts like a list of OptimizationLogEntry objects."""
-    def __init__(self, initial_logs: List[OptimizationLogEntry] = []):
-        self.log: List[OptimizationLogEntry] = initial_logs
+    def __init__(self, initial_logs: Optional[List[OptimizationLogEntry]] = None):
+        # Copy (and never share the default) so two default-constructed logs do
+        # not alias the same list — the classic mutable-default trap that leaked
+        # trials across runs/sanity-checks in one backend process.
+        self.log: List[OptimizationLogEntry] = list(initial_logs) if initial_logs is not None else []
 
     def __iter__(self) -> Iterator[OptimizationLogEntry]:
         """Allow iteration over log entries."""

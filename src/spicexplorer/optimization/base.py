@@ -5,7 +5,7 @@ import torch
 import numpy        as np
 import plotly.graph_objects as go
 
-from    typing      import Dict, Tuple, Any
+from    typing      import Dict, Tuple, Any, Optional
 from    tqdm        import tqdm
 from    abc         import ABC, abstractmethod
 from    pathlib     import Path
@@ -45,6 +45,22 @@ MAX_REWARD  = np.float64(1e6) # The maximum reward score a spec can achieve.
 CHECKPOINT_SCHEMA_VERSION = "1.0.0"
 EPSILON = np.float64(1e-12)
 
+
+def _log_space_band(curr_val, target_val, tolerance):
+    """Map (value, target, LINEAR tolerance) into log10 space for a ``log_scale`` spec.
+
+    ``tolerance`` is a band HALF-WIDTH, not a point on the axis, so ``log10(tolerance)`` is wrong —
+    it produced an absurd / negative band that inverted pass/fail (BUG-B19). Instead derive the
+    half-width in DECADES from the transformed bounds ``log10(target ± tol)``. Returns
+    ``(log_curr, log_target, log_tol_halfwidth)``."""
+    lc = np.float64(convert_linear_to_log(curr_val))
+    lt = np.float64(convert_linear_to_log(target_val))
+    lo = np.float64(convert_linear_to_log(max(target_val - tolerance, EPSILON)))
+    hi = np.float64(convert_linear_to_log(target_val + tolerance))
+    half = np.float64(max(abs(hi - lt), abs(lt - lo)))
+    return lc, lt, half
+
+
 # ----------------------------
 # --- Class Definitions ---
 # ----------------------------
@@ -54,20 +70,35 @@ EPSILON = np.float64(1e-12)
 # ------------------------------------------------
 class Base_Optimizer(ABC):
     """Base abstract class for all circuit optimizers"""
-    def __init__(self, setup_obj: Project_Setup):
+    def __init__(self, setup_obj: Project_Setup, output_root: Path | None = None):
         self.setup_obj = setup_obj
         self.optimizer_config = setup_obj.optimizer_config
 
         self._TIMESTAMP = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.autosave_checkpoint_freqeucny : int = 2500
-        self.autosave_checkpoint_dir : Path = Path(f"./auto_save/{self.setup_obj.name}_{self.setup_obj.optimizer_config.name}_{self._TIMESTAMP}")
-        self.autosave_checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        logger.critical(f"Autosave checkpoints (frequency : {self.autosave_checkpoint_freqeucny}) will be placed in {self.autosave_checkpoint_dir.absolute()}.")
+        # Autosave dir is CWD-relative `./auto_save/<run-name>` by default (CLI/example
+        # scripts rely on this, byte-identical). When a caller passes `output_root` it is
+        # used AS the exact checkpoint dir (the UI backend passes a per-run
+        # `runs/<id>/checkpoints` under WORK_ROOT) — so a Docker run's checkpoints survive
+        # `docker rm` rather than dying in the ephemeral image layer, and each run's
+        # checkpoints are isolated (report.md P1/P2).
+        if output_root is not None:
+            self.autosave_checkpoint_dir : Path = Path(output_root)
+        else:
+            self.autosave_checkpoint_dir = Path(f"./auto_save/{self.setup_obj.name}_{self.setup_obj.optimizer_config.name}_{self._TIMESTAMP}")
+        # Do NOT mkdir here — `save_checkpoint` creates the dir lazily on the first autosave. The
+        # one-shot routes (/simulate, /sanity, /sensitivity) build an optimizer just to call
+        # evaluate()/one step and never checkpoint, so an eager mkdir leaked an empty CWD-relative
+        # ./auto_save/<...> dir per request (BUG-B41).
+        logger.debug(f"Autosave checkpoints (frequency : {self.autosave_checkpoint_freqeucny}) will be placed in {self.autosave_checkpoint_dir.absolute()}.")
         self.disable_autosave : bool = False
 
         # Instantiated & Typed by the base class
         self.optimization_log : OptimizationLog = OptimizationLog()
-        self.global_best_index: int = 0 # the index of the global best solution
+        self.global_best_index: int = 0 # the best's position within the current in-memory log chunk
+        # The best entry seen across the WHOLE run, tracked on the instance so it survives the
+        # autosave log reset (which empties optimization_log). get_best_params() prefers this.
+        self.global_best_entry: Optional["OptimizationLogEntry"] = None
         self.logger = logger
         self.verbose: bool = True
         # Instantiated & Typed by the children class
@@ -121,8 +152,11 @@ class Base_Optimizer(ABC):
     def denormalize_params(self, parameterization: Dict[str, float | np.floating]) -> Dict[str, np.floating]:
         denorm_params: Dict[str, np.floating] = {}
 
-        log_range = self.setup_obj.optimizer_config.get_log_variable_range()
-        lin_range = self.setup_obj.optimizer_config.get_lin_variable_range()
+        cfg = self.setup_obj.optimizer_config
+        log_bounds = cfg.log_variable_bounds
+        lin_bounds = cfg.lin_variable_bounds
+        log_range = cfg.get_log_variable_range()  # max - min
+        lin_range = cfg.get_lin_variable_range()
 
         for param_name in parameterization:
             val = parameterization[param_name]
@@ -130,14 +164,20 @@ class Base_Optimizer(ABC):
 
             if param_obj is None:
                 raise KeyError(f"Could not find param name {param_name} in {self.setup_obj.list_params()}")
-            
+
             if param_obj.is_integer:
                 denorm_params[param_name] = val
 
             elif param_obj.log_scale:
-                denorm_params[param_name] = log_denormalize(x=val/log_range, pmin=param_obj.min_val, pmax=param_obj.max_val)
+                # nevergrad samples the candidate in [log_bounds.min, log_bounds.max]
+                # (parameterize builds ng.p.Log(lower=min, upper=max)), so the [0,1] coordinate
+                # is (val - min)/range — NOT val/range, which only lands in [0,1] when min==0 and
+                # otherwise pushes the physical value outside [min_val, max_val] (BUG-B6).
+                x = (val - log_bounds.min) / log_range
+                denorm_params[param_name] = log_denormalize(x=x, pmin=param_obj.min_val, pmax=param_obj.max_val)
             else:
-                denorm_params[param_name] = linear_denormalize(x=val/lin_range, pmin=param_obj.min_val, pmax=param_obj.max_val)
+                x = (val - lin_bounds.min) / lin_range
+                denorm_params[param_name] = linear_denormalize(x=x, pmin=param_obj.min_val, pmax=param_obj.max_val)
 
         return denorm_params
     
@@ -153,31 +193,55 @@ class Base_Optimizer(ABC):
         
         # Track the score for plotting
         self.optimization_log = OptimizationLog() if not keep_history else self.optimization_log
-        
+
+        # Track the best across the WHOLE run on the instance, so it survives the autosave log
+        # reset (the in-memory log is emptied on each autosave, but the best entry must not be
+        # lost). Seed from any retained history (keep_history); a fresh run starts with no best.
+        if not self.optimization_log.is_empty():
+            self.global_best_index = int(np.argmax([e.point.score for e in self.optimization_log]))
+            self.global_best_entry = self.optimization_log[self.global_best_index]
+        else:
+            self.global_best_index = 0
+            self.global_best_entry = None
+
         # MAIN OPTIMIZATION LOOP
         try:
             with tqdm(range(self.optimizer_config.budget), desc="Optimizing", unit="trial") as pbar:
                 for trial in pbar:
                     logger.debug("---------------------------------------------------------------------------")
                     logger.debug(f"STARTING trial {trial+1}/{self.optimizer_config.budget}...")
-                    
+
                     # (a) Perform the optimization logic for one step/trial
                     candidate, curr_score, metadata = self.optimization_step()
                     logger.debug(f"Trial {trial+1}/{self.optimizer_config.budget} COMPLETED with score: {curr_score:.4f}")
-                    
-                    # (b) Update the index of the global best solution (lowest score)
-                    if curr_score > self.optimization_log[self.global_best_index].point.score:
-                        self.global_best_index = trial
+
+                    # (b) Update the running best. Compare against the GLOBAL best entry's score
+                    #     (instance-tracked), NOT an index into the log: the log is emptied on each
+                    #     autosave (step c), so indexing it by the absolute `trial` raised IndexError
+                    #     and a fresh chunk could regress the best (BUG-B5). `global_best_index` is
+                    #     kept as the best's position within the CURRENT chunk for back-compat.
+                    last_idx = len(self.optimization_log) - 1
+                    if last_idx >= 0 and (
+                        self.global_best_entry is None
+                        or curr_score > self.global_best_entry.point.score
+                    ):
+                        self.global_best_entry = self.optimization_log[last_idx]
+                        self.global_best_index = last_idx
                         logger.info(f"New fit was found... trial {trial} score {curr_score:.2f}")
-                    
-                    # (c) Autosave checkpoint if flag is not disabled
+
+                    # (c) Autosave checkpoint if flag is not disabled. Resetting the in-memory log
+                    #     also resets the per-chunk index; the best ENTRY survives on the instance.
                     if (not self.disable_autosave) and (self.autosave_checkpoint_freqeucny is not None) and ((trial+1) % self.autosave_checkpoint_freqeucny == 0):
                         self.save_checkpoint(name=self.get_auto_save_name(append_txt=f"trial{trial+1}"))
                         self.optimization_log = OptimizationLog()
-                        logger.critical("Reset the optimization_log")
+                        self.global_best_index = 0
+                        logger.debug("Reset the optimization_log after autosave")
 
-                    # Update the progress bar with current and best scores
-                    current_best = self.optimization_log[self.global_best_index].point.score
+                    # Update the progress bar from the instance-tracked best (valid across resets).
+                    current_best = (
+                        self.global_best_entry.point.score if self.global_best_entry is not None
+                        else curr_score
+                    )
                     pbar.set_postfix(score=f"{curr_score:.4f}", best=f"{current_best:.4f}")
                     logger.debug("---------------------------------------------------------------------------")
 
@@ -201,13 +265,19 @@ class Base_Optimizer(ABC):
         if self.optimizer is None:
             logger.info("Need to set the optimizer by calling self.create_experiment")
             return
-        if len(self.optimization_log) < 1:
-            logger.info("need to run self.optimize")
-            return
-        
-        best_solution : Dict[str, np.floating | float]  = self.optimization_log.get_params(index=self.global_best_index)
-        score : float                                   = float(self.optimization_log.get_score(index=self.global_best_index))
-        metadata : Dict[str, Any] | None                = self.optimization_log.get_metadata(index=self.global_best_index)
+
+        # Prefer the instance-tracked best entry — it survives the autosave log reset, so a run
+        # that ended exactly on a reset boundary (in-memory log empty) still reports its best.
+        entry = getattr(self, "global_best_entry", None)
+        if entry is None:
+            if len(self.optimization_log) < 1:
+                logger.info("need to run self.optimize")
+                return
+            entry = self.optimization_log[self.global_best_index]
+
+        best_solution : Dict[str, np.floating | float]  = entry.get_params()
+        score : float                                   = float(entry.get_score())
+        metadata : Dict[str, Any] | None                = entry.get_metadata()
 
         if verbose:
             logger.info("Optimized x - normalized:", best_solution)
@@ -453,10 +523,11 @@ class Base_Optimizer(ABC):
 # ------------------------------------------------
 class Spice_Base_Optimizer(Base_Optimizer):
     """ Base class for optimizers that use SPICE simulations."""
-    def __init__(self,  
+    def __init__(self,
                 setup_obj: Project_Setup,
-                spicelib_wrappers : Dict[str, NGSpice_Wrapper]):
-        super().__init__(setup_obj = setup_obj)
+                spicelib_wrappers : Dict[str, NGSpice_Wrapper],
+                output_root: Path | None = None):
+        super().__init__(setup_obj = setup_obj, output_root = output_root)
         self.spicelib_wrappers = spicelib_wrappers
         self.__post_init__()
 
@@ -465,6 +536,12 @@ class Spice_Base_Optimizer(Base_Optimizer):
         # Update the tb parameters
         # ----------------------------------------
         for tb in self.setup_obj.testbenches:
+            # Wrappers are built only for ENABLED testbenches (orchestrator /
+            # _build_spicelib_wrappers skip disabled ones), but this list includes
+            # disabled testbenches too — indexing a missing wrapper would raise
+            # KeyError. Skip any testbench without a wrapper.
+            if tb.name not in self.spicelib_wrappers:
+                continue
             tb_params = {param.name : param.get_val() for param in tb.params if param.has_val()}
             if tb_params:
                 logger.info(f"updating the parameters for testbench {tb.name} with the following values:")
@@ -474,7 +551,25 @@ class Spice_Base_Optimizer(Base_Optimizer):
             self.spicelib_wrappers[tb.name].update_params(parameterization=tb_params)
             logger.info(f"parameter update is compeleted for testbench {tb.name}")
         # ----------------------------------------
-    
+        # Apply the active PVT corner (Phase 1) — one-time netlist preparation.
+        # When `pvt` is configured, the chosen corner's `.lib`/temp/supply are applied
+        # to every (enabled) testbench wrapper ONCE here, before the optimization loop;
+        # each subsequent trial inherits it because the SpiceEditor state persists.
+        # When `pvt` is None this is a no-op and the corner is whatever the netlist
+        # hardcodes (legacy behavior). The optimize loop, scorer, and simulate_circuit
+        # are deliberately untouched.
+        # ----------------------------------------
+        pvt = getattr(self.setup_obj, "pvt", None)
+        if pvt is not None:
+            corner = pvt.get_active()
+            logger.info(
+                f"🌡️  Applying PVT corner '{corner.name}' to "
+                f"{len(self.spicelib_wrappers)} testbench(es)"
+            )
+            for tb_name, wrapper in self.spicelib_wrappers.items():
+                wrapper.apply_corner(corner, model_lib_root=pvt.model_lib_root)
+        # ----------------------------------------
+
     # --- Helper Methods (only in child class) ---
     def simulate_circuit(self, parameterization: Dict[str, float]) -> Dict[str, RawRead]:
         logger.debug("Simulating the circuit with the given parameterization")
@@ -493,9 +588,15 @@ class Spice_Base_Optimizer(Base_Optimizer):
                 curr_raw, curr_log, task_name = wrapper.run_and_wait(exe_log=True)
         
                 if curr_raw is None:
-                    logger.critical("Something went wrong during simulation as no RAW file was generated")
-                    raise RuntimeError("Something went wrong during simulation as no RAW file was generated")
-                
+                    # Non-convergence on an extreme candidate is routine in analog sizing; don't
+                    # abort the whole run (losing all in-memory trials). Leave results[tb] unset —
+                    # downstream metric extraction reads the wrapper, yields NaN, and compute_fitness
+                    # scores it as MAX_PENALTY, exactly like the parallel_sim path (BUG-B28).
+                    logger.warning(
+                        f"No RAW generated for testbench '{tb}' (sim failed/diverged); this trial's "
+                        f"'{tb}' metrics will score as failures.")
+                    continue
+
                 results[tb] = curr_raw
 
             else:                
@@ -667,10 +768,13 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
                  spicelib_wrappers : Dict[str, NGSpice_Wrapper],
                  target_tf: Expr,
                  output_node: str = "Vout", # FIXME this needs to go into the spicelib_wrapper
-                 frequency_weight: Frequency_Weight | None = None
+                 frequency_weight: Frequency_Weight | None = None,
+                 output_root: Path | None = None,
                  ):
-        
-        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers)
+
+        # Forward output_root so per-run checkpoint isolation works for Bode runs too (BUG-B26).
+        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers,
+                         output_root = output_root)
 
         self.target_tf = target_tf
         self.output_node = output_node
@@ -819,8 +923,9 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
 class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
     def __init__(self,
                  setup_obj: Project_Setup,
-                 spicelib_wrappers : Dict[str, NGSpice_Wrapper]):
-        """ 
+                 spicelib_wrappers : Dict[str, NGSpice_Wrapper],
+                 output_root: Path | None = None):
+        """
         A Concrete implementation of Spice_Base_Optimizer that evaluates a circuit 
         against a list of TargetSpecs.
         
@@ -829,7 +934,7 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
         2. Extract scalar metrics defined in TargetSpecs.
         3. Calculate a scalar fitness score (Penalty only).
         """
-        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers)
+        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers, output_root = output_root)
         self.target_specs: ListTargetSpec = setup_obj.optimizer_config.target_specs
         logger.info(f"Initialized the Nevergrad_Spice_Multi_Spec_Optimizer with {len(self.target_specs.targets)} target specs")
     
@@ -905,6 +1010,11 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
             else:                   penalty += spec_fitness
         # ------------------------------------------------------------------------------
         
+        # Constraint-FIRST (lexicographic) aggregation BY DESIGN: while ANY spec is violated
+        # (penalty < 0) the score is the penalty sum alone — reward from satisfied specs is only
+        # surfaced once ALL constraints are met. Intended (drive feasibility first, then optimize),
+        # but it does flatten the landscape across the infeasible region (BUG-B23 — a design note,
+        # not a defect). A future blended objective (`penalty + α·reward`) would shape it smoother.
         total_score = reward if penalty > -1*EPSILON else penalty
 
         logger.debug(f"Computed fitness: {total_score} for performance array: {performance_array}")
@@ -930,9 +1040,7 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
         tolerance:  np.float64 = np.float64(target_spec.tolerance)
 
         if target_spec.log_scale:
-            spec_curr_val = np.float64(convert_linear_to_log(curr_val))
-            target_val    = np.float64(convert_linear_to_log(target_val))
-            tolerance     = np.float64(convert_linear_to_log(tolerance))
+            spec_curr_val, target_val, tolerance = _log_space_band(curr_val, target_val, tolerance)
 
         normalizing_coeff = np.float64(target_spec.range)
         # --------------------------
@@ -979,8 +1087,9 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
 class Spice_Single_Objective(Spice_Constraint_Satisfaction):
     def __init__(self,
                 setup_obj: Project_Setup,
-                spicelib_wrappers : Dict[str, NGSpice_Wrapper]):
-        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers)
+                spicelib_wrappers : Dict[str, NGSpice_Wrapper],
+                output_root: Path | None = None):
+        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers, output_root = output_root)
     
     def compute_fitness_for_spec(self, curr_val: np.float64 | float, target_spec: TargetSpec) -> np.float64:
         """Computes the fitness score for current achieved metric given the target spec. Negative values """
@@ -1001,19 +1110,18 @@ class Spice_Single_Objective(Spice_Constraint_Satisfaction):
         tolerance:  np.float64 = np.float64(target_spec.tolerance)
 
         if target_spec.log_scale:
-            spec_curr_val = np.float64(convert_linear_to_log(curr_val))
-            target_val    = np.float64(convert_linear_to_log(target_val))
-            tolerance     = np.float64(convert_linear_to_log(tolerance))
+            spec_curr_val, target_val, tolerance = _log_space_band(curr_val, target_val, tolerance)
 
         normalizing_coeff = np.float64(target_spec.range)
         # --------------------------
         # Case 1: Exceed the Target
         # --------------------------
         if target_spec.goal == OptimizationGoalType.EXCEED:
+            # Reward when the spec exceeds the target; otherwise no reward (the default 0.0).
+            # (The old `elif spec_curr_val > target_val + tolerance` was dead code — that condition
+            # implies the `> EPSILON` branch already fired — and only re-assigned the default; BUG-B20.)
             if (spec_curr_val - target_val) > EPSILON:
                 spec_reward = compute_reward(curr_val=spec_curr_val, target_val=target_val, reward_type=target_spec.reward_type, normalizing_coeff=normalizing_coeff)
-            elif spec_curr_val > target_val + tolerance:
-                spec_reward = np.float64(0.0)
         # --------------------------
         # Case 2: Minimize the Target
         # --------------------------

@@ -5,7 +5,7 @@ import type {
   WizardTestbench,
   WizardTargetSpec,
   ConstraintRow,
-  WizardPVT,
+  WizardPVTConfig,
 } from "@/types/api";
 
 export const WIZARD_STEPS = [
@@ -41,7 +41,7 @@ const defaultForm = (): WizardForm => ({
     outdir: "spice/temp_spice_out",
   },
   tech: { name: "", constraints: [] },
-  pvt_corners: [{ name: "typical_25C", temp: 25, corner: "tt", supply: 1.5 }],
+  pvt: { active_corner: "", corners: [], model_lib_root: "" },
   dut_params: [],
   testbenches: [],
   target_specs: [],
@@ -72,7 +72,7 @@ interface WizardStore {
   updateProject: (patch: Partial<WizardForm["project"]>) => void;
   setTechName: (name: string) => void;
   setConstraints: (rows: ConstraintRow[]) => void;
-  setPvt: (rows: WizardPVT[]) => void;
+  setPvtConfig: (cfg: WizardPVTConfig) => void;
   setDutParams: (rows: WizardDutParam[]) => void;
   setTestbenches: (tbs: WizardTestbench[]) => void;
   setTargetSpecs: (specs: WizardTargetSpec[]) => void;
@@ -92,7 +92,7 @@ export const useWizardStore = create<WizardStore>((set) => ({
   updateProject: (patch) => set((s) => ({ form: { ...s.form, project: { ...s.form.project, ...patch } } })),
   setTechName: (name) => set((s) => ({ form: { ...s.form, tech: { ...s.form.tech, name } } })),
   setConstraints: (rows) => set((s) => ({ form: { ...s.form, tech: { ...s.form.tech, constraints: rows } } })),
-  setPvt: (rows) => set((s) => ({ form: { ...s.form, pvt_corners: rows } })),
+  setPvtConfig: (cfg) => set((s) => ({ form: { ...s.form, pvt: cfg } })),
   setDutParams: (rows) => set((s) => ({ form: { ...s.form, dut_params: rows } })),
   setTestbenches: (tbs) => set((s) => ({ form: { ...s.form, testbenches: tbs } })),
   setTargetSpecs: (specs) => set((s) => ({ form: { ...s.form, target_specs: specs } })),

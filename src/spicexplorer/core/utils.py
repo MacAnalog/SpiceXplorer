@@ -169,8 +169,13 @@ def convert_log_to_linear(val: np.ndarray | float | np.float64) -> np.ndarray | 
     return np.power(10, val)
 
 # ----------------------------
-# Constraints function 
+# Constraints function
 # ----------------------------
+# Numerical guards for the error/reward kernels (opt-in error/reward types — the shipped
+# examples use relative-sigmoid/relative-absolute, but these must not produce inf/nan):
+_EXP_ARG_CAP = np.float64(50.0)       # cap exp() argument so a large error can't overflow to inf
+_LOG_REWARD_EPS = np.float64(1e-12)   # floor for log-reward operands so an exact match isn't -inf
+
 # A - Normalized Error Functions
 def compute_relative_absolute_error(curr_val: np.float64, target_val: np.float64, normalizing_coeff: np.float64) -> np.float64:
     return np.float64(np.abs(curr_val - target_val) / normalizing_coeff)
@@ -179,7 +184,10 @@ def compute_relative_squared_error(curr_val: np.float64, target_val: np.float64,
     return np.float64(((curr_val - target_val) / normalizing_coeff) ** 2)
 # -----------------------------------------------------------------------------------------------------------------------------------------------
 def compute_relative_exponential_error(curr_val: np.float64, target_val: np.float64, normalizing_coeff: np.float64) -> np.float64:
-    return np.float64(np.exp(np.abs(curr_val - target_val) / normalizing_coeff) - 1)
+    # Clamp the exponent so a large (e.g. raw-SI-magnitude) error doesn't overflow to inf
+    # and flatten the optimizer's gradient to a saturated penalty (BUG-B22).
+    arg = np.minimum(np.abs(curr_val - target_val) / normalizing_coeff, _EXP_ARG_CAP)
+    return np.float64(np.exp(arg) - 1)
 # -----------------------------------------------------------------------------------------------------------------------------------------------
 def compute_relative_sigmoid_error(curr_val: np.float64, target_val: np.float64, normalizing_coeff: np.float64) -> np.float64:
     diff = abs(curr_val - target_val) / normalizing_coeff
@@ -200,7 +208,8 @@ def compute_squared_error(curr_val: np.float64, target_val: np.float64) -> np.fl
     return np.float64((curr_val - target_val) ** 2)
 # -----------------------------------------------------------------------------------------------------------------------------------------------
 def compute_exponential_error(curr_val: np.float64, target_val: np.float64) -> np.float64:
-    return np.float64(np.exp(np.abs(curr_val - target_val)) - 1)
+    arg = np.minimum(np.abs(curr_val - target_val), _EXP_ARG_CAP)  # avoid inf overflow (BUG-B22)
+    return np.float64(np.exp(arg) - 1)
 # -----------------------------------------------------------------------------------------------------------------------------------------------
 
 # -----------------------------------------------------------------------------------------------------------------------------------------------
@@ -209,13 +218,18 @@ def compute_relative_absolute_reward(curr_val: np.float64, target_val: np.float6
     return np.float64(np.abs(curr_val - target_val) /  normalizing_coeff)
 # -----------------------------------------------------------------------------------------------------------------------------------------------
 def compute_relative_log_reward(curr_val: np.float64, target_val: np.float64, normalizing_coeff : np.float64) -> np.float64:
-    return np.abs(np.log10(np.abs(curr_val - target_val) / normalizing_coeff))
+    # Floor the difference so an exact match (curr == target) doesn't take log10(0) = -inf (BUG-B21).
+    diff = np.maximum(np.abs(curr_val - target_val), _LOG_REWARD_EPS)
+    return np.abs(np.log10(diff / normalizing_coeff))
 # -----------------------------------------------------------------------------------------------------------------------------------------------
 
 # -----------------------------------------------------------------------------------------------------------------------------------------------
 # D - Unnormalized Reward Functions
 def compute_log_reward(curr_val: np.float64, target_val: np.float64) -> np.float64:
-    return np.abs(np.log10(curr_val / target_val))
+    # Floor both operands so a zero/negative metric or target doesn't yield -inf/nan (BUG-B21).
+    num = np.maximum(np.abs(curr_val), _LOG_REWARD_EPS)
+    den = np.maximum(np.abs(target_val), _LOG_REWARD_EPS)
+    return np.abs(np.log10(num / den))
 # -----------------------------------------------------------------------------------------------------------------------------------------------
 
 
@@ -248,9 +262,9 @@ def compute_error(curr_val: np.float64, target_val: np.float64, error_type: Erro
         error_type = Error_Types(error_type)
 
     if "relative" in error_type.value:
-        if normalizing_coeff is None or normalizing_coeff <= 0:
-            logger.error(f"Normalizing coefficient must be provided and > 0 for relative error types. Got: {normalizing_coeff}")
-            raise ValueError(f"Normalizing coefficient must be provided and > 0 for relative error types. Got: {normalizing_coeff}")
+        if normalizing_coeff is None or not np.isfinite(normalizing_coeff) or normalizing_coeff <= 0:
+            logger.error(f"Normalizing coefficient must be provided, finite and > 0 for relative error types. Got: {normalizing_coeff}")
+            raise ValueError(f"Normalizing coefficient must be provided, finite and > 0 for relative error types. Got: {normalizing_coeff}")
         return ERROR_COMPUTE_FUNCTIONS[error_type](curr_val, target_val, normalizing_coeff)
     return ERROR_COMPUTE_FUNCTIONS[error_type](curr_val, target_val)
 
@@ -264,9 +278,9 @@ def compute_reward(curr_val: np.float64, target_val: np.float64, reward_type: Re
         return np.float64(0)
     
     if "relative" in reward_type.value:
-        if normalizing_coeff is None or normalizing_coeff <= 0:
-            logger.error(f"Normalizing coefficient must be provided and > 0 for relative reward types. Got: {normalizing_coeff}")
-            raise ValueError(f"Normalizing coefficient must be provided and > 0 for relative reward types. Got: {normalizing_coeff}")
+        if normalizing_coeff is None or not np.isfinite(normalizing_coeff) or normalizing_coeff <= 0:
+            logger.error(f"Normalizing coefficient must be provided, finite and > 0 for relative reward types. Got: {normalizing_coeff}")
+            raise ValueError(f"Normalizing coefficient must be provided, finite and > 0 for relative reward types. Got: {normalizing_coeff}")
         return REWARD_COMPUTE_FUNCTIONS[reward_type](curr_val, target_val, normalizing_coeff)
     return REWARD_COMPUTE_FUNCTIONS[reward_type](curr_val, target_val)
 

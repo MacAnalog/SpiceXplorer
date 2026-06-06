@@ -7,9 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Thead, Th, Tr, Td } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Toolbar, ToolbarLabel, ToolbarSpacer } from "@/components/shell/Toolbar";
+import { CornerSelect } from "@/components/pvt/CornerSelect";
 import { useProjectStore } from "@/stores/projectStore";
 import { api } from "@/lib/api";
-import { statusForGoal } from "@/lib/utils";
+import { goalSymbol, statusForGoal } from "@/lib/utils";
 import type { SanityCheckResponse, TargetSpec } from "@/types/api";
 
 function passesSpec(s: TargetSpec, val: number | undefined | null): boolean | null {
@@ -38,8 +39,10 @@ export function HealthTab() {
   const [result, setResult] = useState<SanityCheckResponse | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [corner, setCorner] = useState<string | null>(null);
 
   const enabledSpecs = summary?.target_specs.filter((s) => s.enable) ?? [];
+  const pvt = summary?.pvt ?? null;
 
   const handleRun = async () => {
     if (!yamlPath) return;
@@ -47,7 +50,7 @@ export function HealthTab() {
     setError(null);
     setRunning(true);
     try {
-      const res = await api.sanityCheck(yamlPath);
+      const res = await api.sanityCheck(yamlPath, corner ?? undefined);
       setResult(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Health check failed");
@@ -63,6 +66,21 @@ export function HealthTab() {
         <span className="font-mono text-[11px] text-muted">
           1 SPICE sim per testbench · 1 trial optimizer step
         </span>
+        {pvt && pvt.corners.length > 0 && (
+          <>
+            <ToolbarLabel>corner</ToolbarLabel>
+            <div className="w-[210px]">
+              <CornerSelect
+                corners={pvt.corners}
+                value={corner}
+                defaultCorner={pvt.active_corner}
+                onChange={setCorner}
+                disabled={running}
+                aria-label="PVT corner for the trial step"
+              />
+            </div>
+          </>
+        )}
         <ToolbarSpacer />
         <Button variant="primary" onClick={handleRun} disabled={running || !isApplied}>
           {running ? (
@@ -77,7 +95,10 @@ export function HealthTab() {
         </Button>
       </Toolbar>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3">
+      {/* [&>*]:shrink-0 — Panels (overflow-hidden ⇒ flex auto-min-size 0) would
+          otherwise be crushed to fit and clip their content (trial sim log tails)
+          instead of letting this container scroll. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3 [&>*]:shrink-0">
         {!isApplied && (
           <EmptyState bordered minHeight="min-h-32">
             Apply a project on the Setup tab to enable the health check.
@@ -136,6 +157,9 @@ export function HealthTab() {
                   <Badge variant={result.ok ? "ok" : "fail"} dot>
                     {result.ok ? "all checks passed" : "one or more checks failed"}
                   </Badge>
+                  {result.active_corner && (
+                    <Badge variant="cyan">corner: {result.active_corner}</Badge>
+                  )}
                   {result.elapsed_ms_load != null && (
                     <span className="font-mono text-[10px] text-muted">
                       YAML load {fmtMs(result.elapsed_ms_load)}
@@ -149,6 +173,12 @@ export function HealthTab() {
                   {result.ngspice_path && (
                     <span className="font-mono text-[10px] text-muted">
                       · {result.ngspice_path}
+                    </span>
+                  )}
+                  {result.pdk_ok === false && (
+                    <span className="rounded bg-warn-soft px-1.5 py-0.5 font-mono text-[10px] text-[#b45309]">
+                      PDK missing — replay only
+                      {result.pdk_detail ? ` · ${result.pdk_detail}` : ""}
                     </span>
                   )}
                 </div>
@@ -263,12 +293,7 @@ export function HealthTab() {
                                   <Td className="font-mono">{spec.name}</Td>
                                   <Td className="font-mono">{val.toPrecision(4)}</Td>
                                   <Td className="font-mono text-muted">
-                                    {spec.goal === "exceed"
-                                      ? "≥"
-                                      : spec.goal === "minimize"
-                                        ? "≤"
-                                        : "≈"}{" "}
-                                    {spec.target}
+                                    {goalSymbol(spec.goal)} {spec.target}
                                   </Td>
                                   <Td>
                                     {p === null ? (

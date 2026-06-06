@@ -3,7 +3,7 @@ import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { useProjectStore } from "@/stores/projectStore";
 import { useUIStore } from "@/stores/uiStore";
-import { cn, formatEng } from "@/lib/utils";
+import { cn, formatEng, goalSymbol } from "@/lib/utils";
 import { RailHeading, RailHint } from "./parts";
 
 /**
@@ -32,20 +32,25 @@ export function SpecsRail() {
       <RailHeading>Target specs</RailHeading>
       {specs.map((s) => {
         const active = selectedSpec === s.name;
-        const sym = s.goal === "exceed" ? "≥" : s.goal === "minimize" ? "≤" : "≈";
+        const sym = goalSymbol(s.goal);
         return (
           <button
             key={s.name}
             type="button"
+            disabled={!s.enable}
             onClick={() => {
               setSelectedSpec(s.name);
               router.push("/scoring" as Route);
             }}
-            title={`${s.name} — shape this spec's score`}
+            title={
+              s.enable
+                ? `${s.name} — shape this spec's score`
+                : `${s.name} — disabled (not in the objective)`
+            }
             className={cn(
               "flex w-full items-center justify-between gap-2 rounded px-1.5 py-1 text-left transition",
               active ? "bg-primary-soft text-primary" : "hover:bg-hairline",
-              !s.enable && "opacity-50",
+              !s.enable && "cursor-not-allowed opacity-50",
             )}
           >
             <span className="truncate text-[11px]">{s.name}</span>

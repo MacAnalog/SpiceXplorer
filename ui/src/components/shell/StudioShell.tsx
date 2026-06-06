@@ -6,12 +6,12 @@ import { api } from "@/lib/api";
 import { StudioTitleBar } from "./StudioTitleBar";
 import { ActivityBar } from "./ActivityBar";
 import { StudioLeftRail } from "./StudioLeftRail";
-import { TabStrip } from "./TabStrip";
 import { RightRail } from "./RightRail";
 import { BottomPanel } from "./BottomPanel";
 import { StatusBar } from "./StatusBar";
 import { CommandPalette } from "@/components/overlays/CommandPalette";
 import { WizardOverlay } from "@/components/overlays/WizardOverlay";
+import { ProjectsOverlay } from "@/components/overlays/ProjectsOverlay";
 
 /**
  * Studio shell — composition root rendered by the `(studio)` route-group layout.
@@ -22,8 +22,11 @@ import { WizardOverlay } from "@/components/overlays/WizardOverlay";
  *
  * Layout:
  *   StudioTitleBar
- *   [ ActivityBar | LeftRail | (TabStrip / center children) ]
+ *   [ ActivityBar | LeftRail | center children ]
  *   StatusBar
+ *
+ * The ActivityBar is the sole top-level nav; each center view renders its own
+ * in-view sub-tabs (SubTabStrip), so there is no shared horizontal tab strip.
  */
 export function StudioShell({ children }: { children: React.ReactNode }) {
   const setAppConfig = useUIStore((s) => s.setAppConfig);
@@ -45,7 +48,6 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
         <ActivityBar />
         <StudioLeftRail />
         <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <TabStrip />
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             {children}
           </div>
@@ -56,6 +58,7 @@ export function StudioShell({ children }: { children: React.ReactNode }) {
       <StatusBar />
       <CommandPalette />
       <WizardOverlay />
+      <ProjectsOverlay />
     </div>
   );
 }

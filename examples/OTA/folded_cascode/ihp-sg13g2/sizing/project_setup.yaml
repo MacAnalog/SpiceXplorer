@@ -35,30 +35,54 @@ project:
       # supply voltage
       max_vdd : 1.8
 
-    pvt_map:
-      tt : 
-        - name : tt
-        spice_corner : mos_tt
-        lib_name  : cornerMOSlv.lib
-
-      ss :
-        - name : ss
-        spice_corner : mos_ss
-        lib_name  : cornerMOSlv.lib
-
-      ff :
-        - name : ff
-        spice_corner : mos_ff
-        lib_name  : cornerMOSlv.lib
-
   # ------------------------
-  # PVT Corners: Define the PVT corners for simulations
+  # PVT (Phase 1): named corners that actually drive the simulation.
+  # `active_corner` picks the single corner the optimizer runs against; it can be
+  # overridden ephemerally from the UI. The default `tt_27C_1V8` reproduces this
+  # testbench's hardcoded netlist exactly (.lib cornerMOSlv.lib mos_tt, .param temp=27,
+  # .param VDD=1.8), so enabling PVT changes nothing until you switch corners.
   # ------------------------
-  pvt_corners :
-    - name: typical_25C_1V2
-      temp: 25
-      corner: tt
-      supply: 1.2
+  pvt:
+    active_corner: tt_27C_1V8
+
+    # Reusable process bundles — ordered (file, section) includes across device families.
+    # PDK-specific tokens; core never interprets them.
+    process_bundles:
+      tt:
+        - { lib_file: cornerMOSlv.lib, section: mos_tt }
+        - { lib_file: cornerRES.lib,   section: res_typ }
+        - { lib_file: cornerCAP.lib,   section: cap_typ }
+      ss:
+        - { lib_file: cornerMOSlv.lib, section: mos_ss }
+        - { lib_file: cornerRES.lib,   section: res_wcs }
+        - { lib_file: cornerCAP.lib,   section: cap_wcs }
+      ff:
+        - { lib_file: cornerMOSlv.lib, section: mos_ff }
+        - { lib_file: cornerRES.lib,   section: res_bcs }
+        - { lib_file: cornerCAP.lib,   section: cap_bcs }
+
+    corners:
+      - name: tt_27C_1V8            # typical — matches the netlist's hardcoded corner
+        process: tt
+        temp: 27
+        supply: { node: VDD, value: 1.8 }
+        enabled: true
+
+      - name: ss_125C_1V62          # slow-slow, hot, -10% supply
+        process: ss
+        temp: 125
+        supply: { node: VDD, value: 1.62 }
+        enabled: true
+
+      - name: ff_m40C_1V98          # fast-fast, cold, +10% supply
+        process: ff
+        temp: -40
+        supply: { node: VDD, value: 1.98 }
+        enabled: false
+
+    # Optional directory holding the .lib files, so corners are portable. If null, the
+    # netlist's own `.lib` search path / PDK env is used (current behavior).
+    model_lib_root: null
 
   # ------------------------
   # DUT Parameters: Configure the parameters to be sized/optimized ([optional] freeze : true/false)
@@ -162,7 +186,7 @@ project:
       min_val: 0.1
       max_val: max_vdd
 
-    - name : x_dut_Vb1
+    - name : x_dut_Vb2
       # init : 0.5
       min_val: 0.1
       max_val: max_vdd

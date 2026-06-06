@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
 import { useExplorerStore } from "@/stores/explorerStore";
+import { useProjectStore } from "@/stores/projectStore";
 import type { SSEEvent, CheckpointEvent } from "@/types/api";
 
 /**
@@ -72,22 +73,38 @@ function downsample(values: number[]): number[] {
   return Array.from({ length: SPARK_POINTS }, (_, i) => clean[Math.round(i * step)]);
 }
 
+/** One raw SpiceXplorer-library log line streamed during the active run. */
+export interface RunLogLine {
+  text: string;
+  level: string;
+}
+
 interface RunStore {
   runId: string | null;
   isRunning: boolean;
   isReplay: boolean;
   budget: number;
   events: SSEEvent[];
+  /** Raw library log lines for the ACTIVE run (reset each run; per-run). */
+  logLines: RunLogLine[];
   bestMetrics: Record<string, number>;
   bestParams: Record<string, number>;
   currentIter: number;
   /** Checkpoints autosaved during the active run (live, cumulative). */
   checkpoints: CheckpointEvent[];
+  /** Last error surfaced by the run (mid-stream {error} event or a lost connection). */
+  runError: string | null;
+  /** Wall-clock ms timestamp when the active run started (for the Elapsed KPI). */
+  runStartTs: number | null;
+  /** Frozen elapsed-ms of the last finished run (so the card holds after Stop). */
+  elapsedMs: number;
   history: RunRecord[];
 
   /** Begin a run: reset state, capture meta, open the SSE stream for `id`. */
   startRun: (id: string, replay: boolean, budget: number, meta?: Partial<ActiveMeta>) => void;
   pushEvent: (e: SSEEvent) => void;
+  /** Append a raw library log line for the active run (capped for perf). */
+  pushLog: (text: string, level: string) => void;
   /** Record an autosaved checkpoint + refresh the on-disk checkpoint list. */
   pushCheckpoint: (c: CheckpointEvent) => void;
   /** Stream ended on its own (done/error) — record to history, close locally. */
@@ -108,10 +125,14 @@ const INITIAL = {
   isReplay: false,
   budget: 0,
   events: [] as SSEEvent[],
+  logLines: [] as RunLogLine[],
   bestMetrics: {} as Record<string, number>,
   bestParams: {} as Record<string, number>,
   currentIter: 0,
   checkpoints: [] as CheckpointEvent[],
+  runError: null as string | null,
+  runStartTs: null as number | null,
+  elapsedMs: 0,
 };
 
 export const useRunStore = create<RunStore>((set, get) => ({
@@ -119,6 +140,16 @@ export const useRunStore = create<RunStore>((set, get) => ({
   history: loadHistory(),
 
   startRun: (id, replay, budget, meta) => {
+    // If a prior run is still in flight, tell the backend to stop it so we don't
+    // orphan its optimizer thread/queue when this run supersedes it (e.g. clicking
+    // a history replay mid-run).
+    const prev = get();
+    if (prev.isRunning && prev.runId && prev.runId !== id) {
+      api.stopRun(prev.runId).catch(() => {});
+      // Record the superseded run to history before we reset state — finishRun() is the only
+      // writer of a history record, so without this the prior run's trials vanish (BUG-B47).
+      get().finishRun();
+    }
     closeStream();
     activeMeta = {
       kind: meta?.kind ?? (replay ? "replay" : "live"),
@@ -131,16 +162,27 @@ export const useRunStore = create<RunStore>((set, get) => ({
       isReplay: replay,
       budget,
       events: [],
+      logLines: [],
       bestMetrics: {},
       bestParams: {},
       currentIter: 0,
       checkpoints: [],
+      runError: null,
+      runStartTs: Date.now(),
+      elapsedMs: 0,
     });
 
-    es = new EventSource(api.streamUrl(id));
-    es.onmessage = (ev) => {
+    const source = new EventSource(api.streamUrl(id));
+    es = source;
+    source.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data) as SSEEvent;
+        if (data.error) {
+          // A mid-run failure (ngspice/PDK/parameterize error). Surface it; the
+          // backend follows with a done event that drives finishRun().
+          set({ runError: String(data.error) });
+          return;
+        }
         if (data.done) {
           get().finishRun();
           return;
@@ -150,12 +192,25 @@ export const useRunStore = create<RunStore>((set, get) => ({
           get().pushCheckpoint(data.checkpoint);
           return;
         }
+        if (data.log != null) {
+          get().pushLog(data.log, data.level ?? "INFO");
+          return;
+        }
         get().pushEvent(data);
       } catch {
         /* ignore malformed keepalive lines */
       }
     };
-    es.onerror = () => {
+    source.onerror = () => {
+      // Only a CLOSED connection is fatal. While CONNECTING the browser is
+      // auto-reconnecting; calling finishRun()->closeStream() here would cancel
+      // that reconnect and turn a transient blip into a permanent stop (orphaning
+      // the still-running backend optimizer).
+      if (source.readyState !== EventSource.CLOSED) return;
+      if (es !== source) return; // a newer run already replaced this stream
+      const { runId, isReplay } = get();
+      if (runId && !isReplay) api.stopRun(runId).catch(() => {});
+      set({ runError: "Connection to the run stream was lost." });
       get().finishRun();
     };
   },
@@ -163,11 +218,17 @@ export const useRunStore = create<RunStore>((set, get) => ({
   pushEvent: (e) =>
     set((state) => {
       const events = [...state.events, e];
-      const bestMetrics = e.metrics
+      // Prefer the best trial's metrics (live runs emit `best_metrics`); fall back to
+      // `metrics` for replay (metrics[i] paired with params[i] per row) AND when
+      // best_metrics is an empty {} — e.g. a resume before the first new best — since `??`
+      // would not fall through an (non-nullish) empty object.
+      const metricsSource =
+        e.best_metrics && Object.keys(e.best_metrics).length ? e.best_metrics : e.metrics;
+      const bestMetrics = metricsSource
         ? {
             ...state.bestMetrics,
             ...(Object.fromEntries(
-              Object.entries(e.metrics).filter(([, v]) => v !== null),
+              Object.entries(metricsSource).filter(([, v]) => v !== null),
             ) as Record<string, number>),
           }
         : state.bestMetrics;
@@ -182,20 +243,28 @@ export const useRunStore = create<RunStore>((set, get) => ({
       return { events, bestMetrics, bestParams, currentIter: e.iter ?? state.currentIter };
     }),
 
+  pushLog: (text, level) =>
+    set((state) => {
+      // Cap the buffer so a long run can't grow it unbounded (keep the tail).
+      const next = [...state.logLines, { text, level }];
+      return { logLines: next.length > 2000 ? next.slice(-2000) : next };
+    }),
+
   pushCheckpoint: (c) => {
     set((state) => ({ checkpoints: [...state.checkpoints, c] }));
     // Refresh the on-disk checkpoint list so the new file appears in the rail
-    // (and becomes available to Resume / Explore) while the run is still going.
+    // (and becomes available to Resume / Explore) while the run is still going —
+    // scoped to the active project so it doesn't list other projects' runs.
     api
-      .listCheckpoints()
+      .listCheckpoints(useProjectStore.getState().projectId ?? undefined)
       .then(useExplorerStore.getState().setAvailableCheckpoints)
       .catch(() => {});
   },
 
   finishRun: () => {
     closeStream();
-    const { runId, events, budget, currentIter, history } = get();
-    set({ isRunning: false });
+    const { runId, events, budget, currentIter, history, runStartTs } = get();
+    set({ isRunning: false, elapsedMs: runStartTs ? Date.now() - runStartTs : 0 });
     if (!runId || events.length === 0) return;
 
     // Build a metadata-only history record (no full event arrays persisted).

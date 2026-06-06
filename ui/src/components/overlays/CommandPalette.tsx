@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { useUIStore } from "@/stores/uiStore";
 import { useRunStore } from "@/stores/runStore";
 import { useProjectStore } from "@/stores/projectStore";
-import { PRIMARY_VIEWS, SETTINGS_VIEW } from "@/components/shell/nav";
+import { ALL_VIEWS } from "@/components/shell/nav";
 import { cn } from "@/lib/utils";
 
 interface Command {
@@ -27,14 +27,17 @@ interface Command {
 export function CommandPalette() {
   const router = useRouter();
   const pathname = usePathname();
-  const { commandOpen, openCommand, closeCommand, setSelectedSpec, openRun, openWizard } =
-    useUIStore();
+  const { commandOpen, openCommand, closeCommand, setSelectedSpec, openRun, openWizard,
+    helpOpen, toggleHelp, closeHelp, projectsOpen, openProjects, closeProjects } = useUIStore();
   const { summary, isApplied } = useProjectStore();
-  const { history, isRunning, stopRun } = useRunStore();
+  const { history, isRunning, stopRun, rerun } = useRunStore();
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  // `g`-chord: pressing `g` then a view digit (1..8) navigates without ⌘. Holds the
+  // timestamp of the last `g` so the chord expires after ~1s.
+  const gChordRef = useRef<number>(0);
 
   // Stable navigation helper used by both the command list and the key map.
   const go = useCallback((path: string) => router.push(path as Route), [router]);
@@ -44,7 +47,7 @@ export function CommandPalette() {
     const cmds: Command[] = [];
 
     // Switch view
-    for (const v of [...PRIMARY_VIEWS, SETTINGS_VIEW]) {
+    for (const v of ALL_VIEWS) {
       const locked = !!v.requiresProject && !isApplied;
       cmds.push({
         id: `view:${v.id}`,
@@ -63,7 +66,10 @@ export function CommandPalette() {
           id: `spec:${spec.name}`,
           group: "Jump to spec",
           label: spec.name,
-          hint: "score shaping",
+          // A disabled spec isn't shown in Score Shaping, so deep-linking it
+          // would silently no-op — mark it non-actionable.
+          hint: spec.enable ? "score shaping" : "disabled",
+          disabled: !spec.enable,
           run: () => {
             setSelectedSpec(spec.name);
             go("/scoring");
@@ -72,16 +78,24 @@ export function CommandPalette() {
       }
     }
 
-    // Jump to run (focus a past run)
+    // Jump to run (focus a past run). Replay records can be re-loaded (rerun
+    // re-opens the SSE stream and repopulates the charts); live records have no
+    // reloadable event data, so they only get the rail highlight.
     for (const r of history) {
+      const replayable = r.kind === "replay" && !!r.checkpointId;
       cmds.push({
         id: `run:${r.id}`,
         group: "Jump to run",
         label: r.label,
-        hint: r.bestScore != null ? `best ${r.bestScore.toExponential(2)}` : r.kind,
+        hint: replayable
+          ? r.bestScore != null
+            ? `replay · best ${r.bestScore.toExponential(2)}`
+            : "replay"
+          : "live (view-only)",
         run: () => {
           openRun(r.id);
           go("/optimize");
+          if (replayable) void rerun(r);
         },
       });
     }
@@ -104,7 +118,7 @@ export function CommandPalette() {
     });
 
     return cmds;
-  }, [go, summary, isApplied, history, isRunning, setSelectedSpec, openRun, openWizard, stopRun]);
+  }, [go, summary, isApplied, history, isRunning, setSelectedSpec, openRun, openWizard, stopRun, rerun]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -116,6 +130,15 @@ export function CommandPalette() {
 
   // Global key map — installed once.
   useEffect(() => {
+    const isTyping = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      return tag === "input" || tag === "textarea" || !!target?.isContentEditable;
+    };
+    const navTo = (shortcut: string) => {
+      const view = ALL_VIEWS.find((v) => v.shortcut === shortcut);
+      if (view && !(view.requiresProject && !isApplied)) go(view.path);
+    };
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "k") {
@@ -124,20 +147,42 @@ export function CommandPalette() {
         else openCommand();
         return;
       }
-      if (commandOpen && e.key === "Escape") {
+      // ⌘P → Projects overlay (report.md P3); overrides the browser print dialog.
+      if (mod && e.key.toLowerCase() === "p") {
         e.preventDefault();
-        closeCommand();
+        if (projectsOpen) closeProjects();
+        else openProjects();
         return;
       }
-      // ⌘1..7 switch view — but not while typing in an input/editor.
-      if (mod && /^[1-7]$/.test(e.key)) {
-        const target = e.target as HTMLElement | null;
-        const tag = target?.tagName?.toLowerCase();
-        if (tag === "input" || tag === "textarea" || target?.isContentEditable) return;
-        const view = [...PRIMARY_VIEWS, SETTINGS_VIEW].find((v) => v.shortcut === e.key);
-        if (view && !(view.requiresProject && !isApplied)) {
+      if (e.key === "Escape") {
+        if (commandOpen) { e.preventDefault(); closeCommand(); return; }
+        if (helpOpen) { e.preventDefault(); closeHelp(); return; }
+        if (projectsOpen) { e.preventDefault(); closeProjects(); return; }
+      }
+      // `?` (Shift+/) toggles the keyboard-shortcut help sheet (not while typing).
+      if (e.key === "?" && !mod && !isTyping(e)) {
+        e.preventDefault();
+        toggleHelp();
+        return;
+      }
+      // ⌘1..8 switch view — but not while typing in an input/editor.
+      if (mod && /^[1-8]$/.test(e.key)) {
+        if (isTyping(e)) return;
+        e.preventDefault();
+        navTo(e.key);
+        return;
+      }
+      // `g`-chord: `g` then 1..8 navigates without a modifier.
+      if (!mod && !isTyping(e)) {
+        if (e.key.toLowerCase() === "g") {
+          gChordRef.current = Date.now();
+          return;
+        }
+        if (/^[1-8]$/.test(e.key) && Date.now() - gChordRef.current < 1000) {
+          gChordRef.current = 0;
           e.preventDefault();
-          go(view.path);
+          navTo(e.key);
+          return;
         }
       }
     };
@@ -145,7 +190,7 @@ export function CommandPalette() {
     return () => window.removeEventListener("keydown", onKey);
     // go/router are stable enough for this listener; re-bind on gating change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [commandOpen, isApplied, openCommand, closeCommand]);
+  }, [commandOpen, helpOpen, projectsOpen, isApplied, openCommand, closeCommand, toggleHelp, closeHelp, openProjects, closeProjects]);
 
   // Reset query/cursor + focus on open.
   useEffect(() => {
@@ -162,7 +207,8 @@ export function CommandPalette() {
     setCursor((c) => Math.min(c, Math.max(0, filtered.length - 1)));
   }, [filtered.length]);
 
-  if (!commandOpen) return null;
+  if (!commandOpen && !helpOpen) return null;
+  if (!commandOpen && helpOpen) return <ShortcutHelp onClose={closeHelp} />;
 
   const runAt = (idx: number) => {
     const cmd = filtered[idx];
@@ -254,7 +300,59 @@ export function CommandPalette() {
           <span><span className="font-mono">↑↓</span> navigate</span>
           <span><span className="font-mono">↵</span> run</span>
           <span><span className="font-mono">esc</span> close</span>
+          <span><span className="font-mono">?</span> shortcuts</span>
           <span className="ml-auto font-mono">{pathname}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Keyboard-shortcut help sheet (opened with `?`). */
+function ShortcutHelp({ onClose }: { onClose: () => void }) {
+  const rows: { keys: string; desc: string }[] = [
+    { keys: "⌘K", desc: "Open command palette" },
+    { keys: "⌘P", desc: "Open projects" },
+    { keys: "?", desc: "Toggle this help" },
+    { keys: "esc", desc: "Close overlay" },
+    { keys: "⌘1 … ⌘8", desc: "Switch view" },
+    { keys: "g then 1 … 8", desc: "Switch view (no modifier)" },
+  ];
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/30 pt-[14vh]"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Keyboard shortcuts"
+    >
+      <div
+        className="w-[460px] max-w-[92vw] overflow-hidden rounded-lg border border-border bg-panel shadow-soft"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+          <span className="text-[13px] font-medium text-fg">Keyboard shortcuts</span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded px-1.5 text-muted hover:text-fg"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="px-4 py-2">
+          {rows.map((r) => (
+            <div key={r.keys} className="flex items-center justify-between py-1.5 text-[13px]">
+              <span className="text-fg">{r.desc}</span>
+              <kbd className="rounded border border-border bg-hairline px-1.5 py-0.5 font-mono text-[11px] text-muted">
+                {r.keys}
+              </kbd>
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-border px-4 py-1.5 text-[10px] text-faint">
+          ViewNumbers follow the activity bar order (Setup … Health).
         </div>
       </div>
     </div>

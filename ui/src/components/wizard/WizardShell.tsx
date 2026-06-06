@@ -172,15 +172,44 @@ export function WizardShell({ onSaved, defaultSavePath }: Props) {
           <PanelHeader
             title="live YAML preview"
             right={
-              yamlErrors.length === 0 && yamlText ? (
-                <Badge variant="ok" dot>
-                  valid
-                </Badge>
-              ) : yamlErrors.length > 0 ? (
-                <Badge variant="fail" dot>
-                  invalid
-                </Badge>
-              ) : null
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={!yamlText}
+                  onClick={() => { if (yamlText) navigator.clipboard?.writeText(yamlText); }}
+                  className="rounded px-1.5 py-0.5 text-[10px] text-muted hover:bg-hairline hover:text-fg disabled:opacity-40"
+                  title="Copy YAML to clipboard"
+                >
+                  Copy
+                </button>
+                <button
+                  type="button"
+                  disabled={!yamlText}
+                  onClick={() => {
+                    if (!yamlText) return;
+                    const blob = new Blob([yamlText], { type: "text/yaml;charset=utf-8" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = "project_setup.yaml";
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="rounded px-1.5 py-0.5 text-[10px] text-muted hover:bg-hairline hover:text-fg disabled:opacity-40"
+                  title="Download YAML"
+                >
+                  Download
+                </button>
+                {yamlErrors.length === 0 && yamlText ? (
+                  <Badge variant="ok" dot>
+                    valid
+                  </Badge>
+                ) : yamlErrors.length > 0 ? (
+                  <Badge variant="fail" dot>
+                    invalid
+                  </Badge>
+                ) : null}
+              </div>
             }
           />
           <div className="min-h-0 flex-1">

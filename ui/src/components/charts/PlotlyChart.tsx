@@ -61,7 +61,66 @@ export const STROKE = {
 interface Props extends Omit<PlotParams, "layout"> {
   layout?: Partial<Plotly.Layout>;
   height?: number;
+  /** Override / extend the default Plotly config (merged over the curated default). */
+  config?: Partial<Plotly.Config>;
 }
+
+// FontAwesome "download" glyph (512 viewbox) for the custom CSV modebar button.
+const CSV_ICON = {
+  width: 512,
+  height: 512,
+  path: "M216 0h80c13.3 0 24 10.7 24 24v168h87.7c17.8 0 26.7 21.5 14.1 34.1L269.7 378.3c-7.5 7.5-19.8 7.5-27.3 0L90.1 226.1c-12.6-12.6-3.7-34.1 14.1-34.1H192V24c0-13.3 10.7-24 24-24zm296 376v112c0 13.3-10.7 24-24 24H24c-13.3 0-24-10.7-24-24V376c0-13.3 10.7-24 24-24h146.7l49 49c20.1 20.1 52.5 20.1 72.6 0l49-49H488c13.3 0 24 10.7 24 24z",
+};
+
+/** Serialize the chart's traces (x/y series) to CSV and trigger a download. */
+function downloadTracesAsCsv(gd: { data?: unknown[] } | undefined) {
+  const traces = (gd?.data ?? []) as Array<{
+    x?: unknown[];
+    y?: unknown[];
+    name?: string;
+  }>;
+  if (!traces.length) return;
+  const cols: { header: string; values: unknown[] }[] = [];
+  traces.forEach((t, i) => {
+    const label = (t.name ?? `trace${i}`).replace(/[",\n]/g, " ");
+    if (Array.isArray(t.x)) cols.push({ header: `${label}.x`, values: t.x });
+    if (Array.isArray(t.y)) cols.push({ header: `${label}.y`, values: t.y });
+  });
+  if (!cols.length) return;
+  const rows = Math.max(...cols.map((c) => c.values.length));
+  const esc = (v: unknown) => {
+    const s = v == null ? "" : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [cols.map((c) => esc(c.header)).join(",")];
+  for (let r = 0; r < rows; r++) {
+    lines.push(cols.map((c) => esc(c.values[r])).join(","));
+  }
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "chart-data.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+const DEFAULT_CONFIG: Partial<Plotly.Config> = {
+  // Curated modebar: zoom/pan/autoscale/PNG + a custom CSV export; no lasso/select,
+  // no Plotly logo. Shown on hover so it never crowds the small panels.
+  displayModeBar: "hover",
+  displaylogo: false,
+  responsive: true,
+  modeBarButtonsToRemove: ["lasso2d", "select2d"],
+  modeBarButtonsToAdd: [
+    {
+      name: "Download CSV",
+      title: "Download data as CSV",
+      icon: CSV_ICON,
+      click: (gd: unknown) => downloadTracesAsCsv(gd as { data?: unknown[] }),
+    },
+  ] as unknown as Plotly.Config["modeBarButtonsToAdd"],
+};
 
 function mergeAxis(
   base: Partial<Plotly.LayoutAxis>,
@@ -80,7 +139,7 @@ function mergeAxis(
   };
 }
 
-export function PlotlyChart({ layout, height = 240, ...rest }: Props) {
+export function PlotlyChart({ layout, height = 240, config, ...rest }: Props) {
   const merged: Partial<Plotly.Layout> = {
     ...LAYOUT_BASE,
     ...layout,
@@ -92,7 +151,7 @@ export function PlotlyChart({ layout, height = 240, ...rest }: Props) {
     <Plot
       {...rest}
       layout={merged}
-      config={{ displayModeBar: false, responsive: true }}
+      config={{ ...DEFAULT_CONFIG, ...config }}
       style={{ width: "100%" }}
       useResizeHandler
     />

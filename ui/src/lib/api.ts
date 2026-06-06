@@ -11,14 +11,39 @@ import type {
   EnvelopeEntry,
   ScatterPoint,
   SanityCheckResponse,
+  SimulateOnceResponse,
   NetlistParseResponse,
+  SpecLibraryResponse,
   GenerateProjectResponse,
   ParseProjectResponse,
   WizardForm,
   SensitivityResponse,
+  ProjectMeta,
+  ProjectDetail,
+  ProjectRun,
+  ExampleMeta,
+  TrashItem,
 } from "@/types/api";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+// SSE must NOT go through the Next.js rewrite proxy: that proxy buffers
+// `text/event-stream` responses (ignoring the backend's `X-Accel-Buffering: no`),
+// so per-trial events arrive in one delayed burst instead of live — making a
+// running optimization look frozen. Regular fetches stay same-origin (proxied) for
+// portability, but the EventSource connects DIRECTLY to the backend origin.
+//
+//  • Explicit NEXT_PUBLIC_API_URL set → use it (already a direct backend origin).
+//  • Same-origin mode (empty BASE) → derive the backend origin from the current
+//    page host + the backend port, so it works wherever the browser runs
+//    (localhost, a LAN IP, an SSH-forwarded host). CORS allows any localhost:<port>.
+const BACKEND_PORT = process.env.NEXT_PUBLIC_BACKEND_PORT ?? "8000";
+
+function streamBase(): string {
+  if (BASE) return BASE;
+  if (typeof window === "undefined") return "";
+  return `${window.location.protocol}//${window.location.hostname}:${BACKEND_PORT}`;
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, init);
@@ -48,12 +73,14 @@ export const api = {
       body: JSON.stringify({ yaml_path }),
     }),
 
-  // Apply edited/uploaded YAML that has no on-disk path (returns yaml_path: "").
-  loadProjectContent: (yaml_content: string) =>
+  // Apply edited/uploaded YAML. Pass yaml_path when the content was edited from a
+  // loaded file so the backend anchors relative ws_root/netlist resolution to the
+  // original directory (the applied YAML is persisted to a temp file).
+  loadProjectContent: (yaml_content: string, yaml_path?: string) =>
     req<LoadProjectResponse>("/api/project/load", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ yaml_content }),
+      body: JSON.stringify({ yaml_content, yaml_path }),
     }),
 
   validateYaml: (yaml_content: string) =>
@@ -67,24 +94,39 @@ export const api = {
   computeScore: (
     yaml_path: string,
     metric_values: Record<string, number>,
-    selected_spec?: string,
-    n_curve_points = 200,
+    opts: {
+      selectedSpec?: string;
+      nCurvePoints?: number;
+      /** Ephemeral per-spec edits (what-if); never written to YAML. */
+      specOverrides?: Record<string, Record<string, string | number | boolean>>;
+    } = {},
   ) =>
     req<ScoreResponse>("/api/score", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ yaml_path, metric_values, selected_spec, n_curve_points }),
+      body: JSON.stringify({
+        yaml_path,
+        metric_values,
+        selected_spec: opts.selectedSpec,
+        n_curve_points: opts.nCurvePoints ?? 200,
+        spec_overrides: opts.specOverrides,
+      }),
     }),
 
   // Optimization run
   startRun: (body: {
     yaml_path?: string;
+    /** Owning project — the run is isolated under its runs/ dir (report.md P3). */
+    project_id?: string;
+    label?: string;
     replay?: boolean;
     checkpoint_id?: string;
     budget?: number;
     /** Ephemeral live-run overrides (ignored for replay). */
     algorithm?: string;
     seed?: number;
+    /** PVT corner to optimize against (must match a corner in the project's `pvt:`). */
+    active_corner?: string;
     /** Autosave a cumulative checkpoint every N trials (live only). */
     autosave_every?: number;
     /** Resume a live run from a saved checkpoint (load + keep_history). */
@@ -99,21 +141,32 @@ export const api = {
   stopRun: (run_id: string) =>
     req<{ ok: boolean }>(`/api/optimize/stop/${run_id}`, { method: "POST" }),
 
-  streamUrl: (run_id: string) => `${BASE}/api/optimize/stream/${run_id}`,
+  streamUrl: (run_id: string) => `${streamBase()}/api/optimize/stream/${run_id}`,
 
   // Checkpoints
-  listCheckpoints: () =>
-    req<{ checkpoints: CheckpointMeta[] }>("/api/checkpoint").then(
-      (r) => r.checkpoints,
-    ),
+  // Pass projectId to scope per-run checkpoints to the active project (presets +
+  // unscoped runs are always included); omit it for the global view.
+  listCheckpoints: (projectId?: string) =>
+    req<{ checkpoints: CheckpointMeta[] }>(
+      `/api/checkpoint${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`,
+    ).then((r) => r.checkpoints),
 
   loadCheckpoint: (id: string, limit = 0) =>
     req<CheckpointData>(`/api/checkpoint/${id}?limit=${limit}`),
 
-  deleteCheckpoint: (id: string) =>
-    req<{ ok: boolean; deleted: string[] }>(`/api/checkpoint/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    }),
+  // Pass projectId to scope the delete to that project's own runs. `path` targets the EXACT
+  // file behind a (deduped) catalog row so the delete can't fan out to a same-named checkpoint
+  // in another run/project — checkpoint stems carry no project/run id (BUG-B3).
+  deleteCheckpoint: (id: string, projectId?: string, path?: string) => {
+    const q = new URLSearchParams();
+    if (projectId) q.set("project_id", projectId);
+    if (path) q.set("path", path);
+    const qs = q.toString();
+    return req<{ ok: boolean; deleted: string[] }>(
+      `/api/checkpoint/${encodeURIComponent(id)}${qs ? `?${qs}` : ""}`,
+      { method: "DELETE" },
+    );
+  },
 
   envelope: (id: string, yaml_path?: string) =>
     req<{ envelope: EnvelopeEntry[] }>(
@@ -127,11 +180,36 @@ export const api = {
 
   schematicUrl: () => `${BASE}/api/schematic`,
 
-  sanityCheck: (yaml_path: string) =>
+  // URL for the downloadable run-report zip (checkpoint + YAML + summary.md).
+  reportUrl: (checkpointId: string, yamlPath?: string) => {
+    const q = new URLSearchParams();
+    if (yamlPath) q.set("yaml_path", yamlPath);
+    const qs = q.toString();
+    return `${BASE}/api/checkpoint/${encodeURIComponent(checkpointId)}/report${qs ? `?${qs}` : ""}`;
+  },
+
+  sanityCheck: (yaml_path: string, active_corner?: string) =>
     req<SanityCheckResponse>("/api/sanity-check", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ yaml_path }),
+      body: JSON.stringify({ yaml_path, active_corner }),
+    }),
+
+  // Manual single simulation — evaluate ONE chosen design point (live SPICE — needs PDK).
+  // Mode B: pass `params` (engineering-real). Mode A: pass `checkpoint_id` (+ optional
+  // `point`; omitted → best). `active_corner` optionally overrides the PVT corner.
+  simulateOnce: (body: {
+    yaml_path: string;
+    // Values may be eng-strings ("250u") or numbers; parsed server-side.
+    params?: Record<string, string | number>;
+    checkpoint_id?: string;
+    point?: number;
+    active_corner?: string;
+  }) =>
+    req<SimulateOnceResponse>("/api/simulate/once", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     }),
 
   // Finite-difference sensitivity of one spec to DUT params (live SPICE — needs PDK).
@@ -170,6 +248,69 @@ export const api = {
     }
     return res.json();
   },
+
+  // Shipped analog-spec templates for the wizard's one-click "Spec library".
+  specLibrary: () => req<SpecLibraryResponse>("/api/spec-library"),
+
+  // Projects (report.md P3) — the registry IS WORK_ROOT/projects/.
+  listProjects: () => req<{ projects: ProjectMeta[] }>("/api/projects"),
+  listExamples: () => req<{ examples: ExampleMeta[] }>("/api/examples"),
+  createProject: (name: string, yaml_content?: string) =>
+    req<{ id: string }>("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, yaml_content }),
+    }),
+  fromExample: (example_key: string, name?: string) =>
+    req<{ id: string }>("/api/projects/from-example", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ example_key, name }),
+    }),
+  getProject: (id: string) => req<ProjectDetail>(`/api/projects/${encodeURIComponent(id)}`),
+  getProjectRuns: (id: string) =>
+    req<{ runs: ProjectRun[] }>(`/api/projects/${encodeURIComponent(id)}/runs`),
+
+  // Lifecycle (report.md P4) — rename keeps the stable dir id; delete is a recoverable
+  // MOVE to WORK_ROOT/.trash; fork copies everything except run history.
+  renameProject: (id: string, name: string) =>
+    req<{ id: string; manifest: Record<string, unknown> }>(
+      `/api/projects/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      },
+    ),
+  forkProject: (id: string, name?: string) =>
+    req<{ id: string }>(`/api/projects/${encodeURIComponent(id)}/fork`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
+  deleteProject: (id: string) =>
+    req<{ ok: boolean; trash_id: string }>(`/api/projects/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  listTrash: () => req<{ trash: TrashItem[] }>("/api/trash"),
+  restoreTrash: (trashId: string) =>
+    req<{ id: string }>(`/api/trash/${encodeURIComponent(trashId)}/restore`, {
+      method: "POST",
+    }),
+  renameRun: (projectId: string, runId: string, label: string) =>
+    req<{ run: ProjectRun }>(
+      `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label }),
+      },
+    ),
+  deleteRun: (projectId: string, runId: string) =>
+    req<{ ok: boolean; trash_id: string }>(
+      `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`,
+      { method: "DELETE" },
+    ),
 
   generateProject: (form: WizardForm, save_path?: string) =>
     req<GenerateProjectResponse>("/api/project/generate", {

@@ -4,6 +4,9 @@ export interface DutParam {
   name: string;
   min_val: number | null;
   max_val: number | null;
+  /** Explicit operating-point value (matches the backend sensitivity nominal). */
+  val?: number | null;
+  init?: number | null;
   is_integer: boolean;
   log_scale: boolean;
   freeze: boolean;
@@ -23,10 +26,31 @@ export interface Testbench {
   params: TbParam[];
 }
 
-export interface PVTCorner {
+// PVT corner system (Phase 1) — the simulator-driving config (`pvt:` block).
+
+export interface ModelInclude {
+  lib_file: string;
+  section: string;
+}
+
+export interface SupplyOverride {
+  node: string;
+  value: number;
+}
+
+export interface PVTCornerDef {
+  name: string;
+  enabled: boolean;
   temp: number;
-  corner: string;
-  supply: number;
+  supplies: SupplyOverride[];
+  model_includes: ModelInclude[];
+  params: Record<string, number>;
+}
+
+export interface PVTConfig {
+  active_corner: string;
+  model_lib_root: string | null;
+  corners: PVTCornerDef[];
 }
 
 export interface TargetSpec {
@@ -84,7 +108,8 @@ export interface ProjectSummary {
   /** Optional pointer to the design's .sch (relative to `ws_root`). */
   schematic?: string | null;
   tech: { name: string; constraints: Record<string, number> };
-  pvt_corners: PVTCorner[];
+  /** PVT corner system (Phase 1). `null` when the project has no `pvt:` block. */
+  pvt: PVTConfig | null;
   dut_params: DutParam[];
   testbenches: Testbench[];
   optimizer: {
@@ -141,6 +166,8 @@ export interface RunStartResponse {
   run_id: string;
   replay: boolean;
   resumed?: boolean;
+  /** Row count of the replayed checkpoint, so progress shows iter/length. */
+  n_iters?: number | null;
 }
 
 /** Emitted when a live run autosaves a (cumulative) checkpoint. */
@@ -156,10 +183,16 @@ export interface SSEEvent {
   best_score?: number | null;
   metrics?: Record<string, number | null>;
   best_params?: Record<string, number | null>;
+  /** Snapshot of the BEST trial's metrics (live runs) — distinct from `metrics`, the
+   *  latest trial. The right-rail / Pipeline key their pass-fail off this. */
+  best_metrics?: Record<string, number | null>;
   checkpoint?: CheckpointEvent;
   done?: boolean;
   error?: string;
   heartbeat?: boolean;
+  /** A raw SpiceXplorer-library log line (per-run), with its level for coloring. */
+  log?: string;
+  level?: string;
 }
 
 // Checkpoints
@@ -239,6 +272,35 @@ export interface SanityCheckResponse {
   pdk_ok: boolean | null;
   /** Human-readable PDK verdict for the diagnostics panel. */
   pdk_detail: string | null;
+  /** PVT corner the trial ran at (null when the project has no `pvt:` block). */
+  active_corner: string | null;
+}
+
+// Manual single simulation — evaluate ONE chosen design point (POST /api/simulate/once)
+
+export interface SimulateSpecMetric {
+  curr_val: number | null;
+  score: number | null;
+}
+
+export interface SimulateOnceResponse {
+  ok: boolean;
+  score: number | null;
+  /** Per-spec measured value + per-spec score, keyed by spec name. */
+  metrics: Record<string, SimulateSpecMetric>;
+  /** The engineering-real param vector actually injected. */
+  params_used: Record<string, number>;
+  /** PVT corner the point was evaluated at (null if the project has no `pvt:`). */
+  active_corner: string | null;
+  /** Non-fatal advisories (out-of-range value, unknown param, unknown corner, …). */
+  warnings: string[];
+  log_files: Record<string, string>;
+  log_tails: Record<string, string>;
+  error: string | null;
+  elapsed_ms: number | null;
+  elapsed_ms_load: number | null;
+  pdk_ok: boolean | null;
+  pdk_detail: string | null;
 }
 
 // Environment probe — simulator + PDK availability (GET /api/env)
@@ -269,10 +331,73 @@ export interface NetlistParam {
   default_val: string;
 }
 
+export interface MeasCandidate {
+  name: string;
+  sim_type: string;
+}
+
 export interface NetlistParseResponse {
   ok: boolean;
   filename: string;
   params: NetlistParam[];
+  /** `.meas` result names discovered in the netlist (Target-Specs auto-discovery). */
+  meas_candidates?: MeasCandidate[];
+}
+
+/** A shipped analog-spec template (examples/spec_library.yaml) for one-click adds. */
+export type SpecLibraryEntry = Partial<WizardTargetSpec> & { name: string };
+
+export interface SpecLibraryResponse {
+  specs: SpecLibraryEntry[];
+}
+
+// ---- Projects (report.md P3) ----
+export interface ProjectMeta {
+  id: string;
+  name: string;
+  updated: string | null;
+  run_count: number;
+  best_score: number | null;
+  source: string;
+}
+
+export interface ProjectDetail {
+  id: string;
+  yaml_path: string;
+  summary: ProjectSummary;
+  manifest: Record<string, unknown>;
+}
+
+export interface ProjectRun {
+  run_id: string;
+  project_id: string | null;
+  label: string | null;
+  kind: string;
+  algorithm: string | null;
+  seed: number | null;
+  budget: number | null;
+  active_corner: string | null;
+  status: string;
+  best_score: number | null;
+  started: string | null;
+  ended: string | null;
+  resume_from: string | null;
+}
+
+export interface ExampleMeta {
+  key: string;
+  name: string;
+  yaml_path: string;
+}
+
+// Soft-delete bin (report.md P4) — a deleted project/run MOVED to WORK_ROOT/.trash.
+export interface TrashItem {
+  trash_id: string;
+  kind: "project" | "run";
+  project_id: string;
+  run_id?: string;
+  name: string;
+  deleted: string;
 }
 
 export interface GenerateProjectResponse {
@@ -306,11 +431,30 @@ export interface WizardTech {
   constraints: ConstraintRow[];
 }
 
-export interface WizardPVT {
+// New PVT corner system (Phase 1) — wizard editing shapes. Corners are emitted
+// with inline `model_includes` (no process_bundles) to keep the wizard flat.
+export interface WizardModelInclude {
+  lib_file: string;
+  section: string;
+}
+
+export interface WizardPVTCorner {
   name: string;
-  temp: string | number;
-  corner: string;
-  supply: string | number;
+  temp: string;
+  supply_node: string;
+  supply_value: string;
+  /** Rails 2..N, carried losslessly through the wizard (the form edits only the primary
+   *  rail; multi-rail corners are authored/edited in the raw YAML). */
+  extra_supplies?: { node: string; value: string }[];
+  enabled: boolean;
+  includes: WizardModelInclude[];
+}
+
+export interface WizardPVTConfig {
+  active_corner: string;
+  corners: WizardPVTCorner[];
+  /** Optional root prepended to each corner include's lib_file at sim time. */
+  model_lib_root?: string;
 }
 
 export interface WizardDutParam {
@@ -319,6 +463,7 @@ export interface WizardDutParam {
   min_val: string;
   max_val: string;
   init?: string;
+  val?: string; // frozen operating point (pins a freeze:true param); round-tripped (BUG-B15)
   is_integer: boolean;
   log_scale: boolean;
   freeze: boolean;
@@ -373,7 +518,8 @@ export interface WizardOptimizer {
 export interface WizardForm {
   project: WizardProjectInfo;
   tech: WizardTech;
-  pvt_corners: WizardPVT[];
+  /** PVT corner system (Phase 1) — the simulator-driving config. */
+  pvt: WizardPVTConfig;
   dut_params: WizardDutParam[];
   testbenches: WizardTestbench[];
   target_specs: WizardTargetSpec[];

@@ -33,16 +33,6 @@ project:
       min_pfet_l : 0.18u
 
   # ------------------------
-  # PVT Corners: Define the PVT corners for simulations
-  # ------------------------
-  pvt_corners :
-    - name: typical_25C_1V2
-      temp: 25
-      corner: tt
-      supply: 1.5
-  
-
-  # ------------------------
   # DUT Parameters: Configure the parameters to be sized/optimized ([optional] freeze : true/false)
   # ------------------------
   dut_params :

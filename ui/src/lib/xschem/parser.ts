@@ -150,8 +150,12 @@ export function parseAttrs(text: string): Record<string, string> {
     const keyStart = i;
     while (i < n && text[i] !== "=" && !/\s/.test(text[i])) i++;
     const key = text.slice(keyStart, i);
+    // Skip optional whitespace between the key and '=' (e.g. `dash = 4`).
+    while (i < n && /\s/.test(text[i])) i++;
     if (i < n && text[i] === "=") {
       i++; // consume =
+      // Skip optional whitespace between '=' and the value.
+      while (i < n && /\s/.test(text[i])) i++;
       let value = "";
       if (text[i] === '"') {
         i++;

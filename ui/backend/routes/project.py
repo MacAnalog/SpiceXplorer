@@ -18,6 +18,7 @@ router = APIRouter()
 class LoadRequest(BaseModel):
     yaml_path: Optional[str] = None
     yaml_content: Optional[str] = None  # apply edited/uploaded YAML that isn't on disk
+    project_id: Optional[str] = None  # load a registered project (report.md P3)
 
 
 class ValidateRequest(BaseModel):
@@ -44,7 +45,7 @@ def _summarise(project: Project_Setup) -> dict[str, Any]:
             "target": float(s.target),
             "tolerance": float(s.tolerance) if s.tolerance else None,
             "range": float(s.range) if s.range else None,
-            "weight": float(s.weight) if s.weight else 1.0,
+            "weight": float(s.weight) if s.weight is not None else 1.0,
             "error_type": s.error_type.value if hasattr(s.error_type, "value") else str(s.error_type),
             "reward_type": s.reward_type.value if hasattr(s.reward_type, "value") else str(s.reward_type),
             "enable": s.enable,
@@ -57,6 +58,11 @@ def _summarise(project: Project_Setup) -> dict[str, Any]:
             "name": p.name,
             "min_val": float(p.min_val) if p.min_val is not None else None,
             "max_val": float(p.max_val) if p.max_val is not None else None,
+            # Resolved operating-point value (if the YAML set val/init), so the
+            # Schematic inspector seeds its slider from the same nominal the
+            # sensitivity backend uses. Non-numeric (unresolved) -> None.
+            "val": float(p.val) if isinstance(p.val, (int, float)) else None,
+            "init": float(p.init) if isinstance(p.init, (int, float)) else None,
             "is_integer": p.is_integer,
             "log_scale": p.log_scale,
             "freeze": p.freeze,
@@ -75,9 +81,27 @@ def _summarise(project: Project_Setup) -> dict[str, Any]:
             ],
         })
 
-    pvt = []
-    for corner in project.pvt_corners:
-        pvt.append({"temp": corner.temp, "corner": corner.corner, "supply": corner.supply})
+    # PVT corner system (Phase 1) — the simulator-driving config. `None` when the
+    # project has no `pvt:` block (legacy / netlist-hardcoded corner).
+    pvt_config: dict[str, Any] | None = None
+    if project.pvt is not None:
+        pvt_config = {
+            "active_corner": project.pvt.active_corner,
+            "model_lib_root": project.pvt.model_lib_root,
+            "corners": [
+                {
+                    "name": c.name,
+                    "enabled": c.enabled,
+                    "temp": float(c.temp),
+                    "supplies": [{"node": s.node, "value": float(s.value)} for s in c.supplies],
+                    "model_includes": [
+                        {"lib_file": m.lib_file, "section": m.section} for m in c.model_includes
+                    ],
+                    "params": {k: float(v) for k, v in c.params.items()},
+                }
+                for c in project.pvt.corners
+            ],
+        }
 
     return {
         "name": project.name,
@@ -90,7 +114,7 @@ def _summarise(project: Project_Setup) -> dict[str, Any]:
             "name": project.tech_spec.name,
             "constraints": {k: float(v) for k, v in project.tech_spec.constraints.items()},
         },
-        "pvt_corners": pvt,
+        "pvt": pvt_config,
         "dut_params": dut_params,
         "testbenches": testbenches,
         "optimizer": {
@@ -103,24 +127,74 @@ def _summarise(project: Project_Setup) -> dict[str, Any]:
     }
 
 
+def _write_content_to_temp(yaml_content: str, base_yaml_path: str | None) -> str:
+    """Persist edited/uploaded YAML to a real temp path and return it.
+
+    When `base_yaml_path` is given (the user edited a loaded example in Monaco and
+    hit Apply), a relative/empty ``ws_root`` is rewritten to an ABSOLUTE path
+    anchored at the ORIGINAL YAML's directory before writing — so netlist/ws_root
+    resolution is identical to applying the on-disk file, even though the temp lives
+    elsewhere. Without this, the committed examples (``ws_root: ..``) would resolve
+    against the temp dir and break live runs.
+    """
+    import tempfile
+    text = yaml_content
+    if base_yaml_path:
+        try:
+            data = yaml.safe_load(yaml_content)
+            proj = data.get("project") if isinstance(data, dict) else None
+            if isinstance(proj, dict):
+                base = Path(base_yaml_path).expanduser().resolve().parent
+                wsr = proj.get("ws_root")
+                wsr_s = "" if wsr is None else str(wsr).strip()
+                if not wsr_s:
+                    proj["ws_root"] = str(base)
+                elif not wsr_s.startswith("~") and not Path(wsr_s).is_absolute():
+                    proj["ws_root"] = str((base / wsr_s).resolve())
+                text = yaml.safe_dump(data, sort_keys=False)
+        except yaml.YAMLError:
+            text = yaml_content  # let from_yaml surface the real parse error below
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".yaml", delete=False, prefix="spx_uploaded_"
+    ) as tmp:
+        tmp.write(text)
+        return tmp.name
+
+
 @router.post("/project/load")
 def load_project(body: LoadRequest):
+    # Load a registered project by id (report.md P3) → resolve to its project.yaml.
+    if body.project_id:
+        from ui.backend.services import project_service
+        try:
+            yp = project_service.resolve_yaml(body.project_id, None)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except ValueError as e:
+            # malformed project_id (path separators / '..') → 400, not an opaque 500 (BUG-B37)
+            raise HTTPException(status_code=400, detail=str(e))
+        try:
+            project = Project_Setup.from_yaml(yp)
+            return {"ok": True, "summary": _summarise(project), "yaml_path": str(yp)}
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
     # Apply from raw content (uploaded or edited YAML with no on-disk path). The
     # parsed summary doesn't need the netlist/ws_root paths to exist — those only
     # matter for live SPICE — so a project with relative paths still summarises.
     if body.yaml_content:
         import os
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
-            tmp.write(body.yaml_content)
-            tmp_path = tmp.name
+        # Persist the uploaded/edited YAML to a real path and RETURN that path, so
+        # every path-keyed endpoint (optimize/score/sanity/sensitivity) resolves to
+        # THIS project. Previously this returned yaml_path="", which made a live run
+        # silently optimize the default cascode example instead of the applied YAML.
+        tmp_path = _write_content_to_temp(body.yaml_content, body.yaml_path)
         try:
             project = Project_Setup.from_yaml(tmp_path)
-            return {"ok": True, "summary": _summarise(project), "yaml_path": ""}
+            return {"ok": True, "summary": _summarise(project), "yaml_path": tmp_path}
         except Exception as e:
-            raise HTTPException(status_code=422, detail=str(e))
-        finally:
             os.unlink(tmp_path)
+            raise HTTPException(status_code=422, detail=str(e))
 
     if not body.yaml_path:
         raise HTTPException(status_code=400, detail="Provide yaml_path or yaml_content")
@@ -139,14 +213,22 @@ def yaml_text(path: str = Query(..., description="Absolute path of a project YAM
     """Return the raw text of a project YAML for the Setup editor.
 
     The Setup view populates Monaco from this after /project/load fills the
-    rails. Gated to existing .yaml/.yml files (the same files /project/load
-    already reads), served as plain text (the client reads ``response.text()``).
+    rails. Served as plain text (the client reads ``response.text()``).
+
+    Gated through the shared path validator (BUG-B2 sibling): the path must be a .yaml/.yml
+    file resolving under an allowed root (examples / WORK_ROOT / an ``spx_uploaded_*`` temp),
+    so this can't be turned into an arbitrary-file read of any YAML on the host.
     """
-    resolved = Path(path).expanduser()
-    if not resolved.exists() or not resolved.is_file():
+    from ui.backend.routes.checkpoint import _validated_yaml_path
+
+    resolved = _validated_yaml_path(path)
+    if resolved is None:
+        raise HTTPException(
+            status_code=400,
+            detail="path must be a .yaml/.yml file under the repo examples or workspace",
+        )
+    if not resolved.is_file():
         raise HTTPException(status_code=404, detail=f"YAML file not found: {resolved}")
-    if resolved.suffix.lower() not in {".yaml", ".yml"}:
-        raise HTTPException(status_code=400, detail=f"Not a YAML file: {resolved}")
     return resolved.read_text()
 
 
@@ -162,7 +244,8 @@ def validate_yaml(body: ValidateRequest):
         return {"ok": False, "errors": [f"YAML parse error: {e}"]}
 
     # Write to a temp file and try full parse
-    import tempfile, os
+    import tempfile
+    import os
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
         tmp.write(body.yaml_content)
         tmp_path = tmp.name
@@ -206,7 +289,8 @@ def generate_project(body: GenerateRequest):
 
     # Best-effort validation; surface errors but still return the rendered YAML
     errors: list[str] = []
-    import tempfile, os
+    import tempfile
+    import os
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
         tmp.write(yaml_text)
         tmp_path = tmp.name

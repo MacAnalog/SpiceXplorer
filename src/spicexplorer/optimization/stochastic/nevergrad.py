@@ -3,6 +3,7 @@ import logging
 import numpy        as np
 import nevergrad    as ng
 
+from    pathlib     import Path
 from    typing      import Dict, Tuple, Any, Optional
 
 # Symxplorer Specific Imports
@@ -124,10 +125,20 @@ def create_optimizer(
 class NevergradMixin(Base_Optimizer):
     """Reusable mixin for all Nevergrad-based optimizers."""
     # --- Overwriting Some Abstract Methods ---
-    def parameterize(self) -> ng.p.Dict:        
+    def parameterize(self) -> ng.p.Dict:
         parameters: Dict[str, ng.p.Scalar] = {}
+        # Frozen params are excluded from the search space and injected at their
+        # fixed value (val/init) during evaluation; if neither is given the
+        # netlist's own .param default is used. (Default freeze is False, so this
+        # is a no-op unless a param explicitly sets `freeze: true`.)
+        self._frozen_params: Dict[str, float] = {}
 
         for param in self.setup_obj.dut_params:
+            if getattr(param, "freeze", False):
+                fixed = param.val if param.val is not None else param.init
+                if fixed is not None:
+                    self._frozen_params[param.name] = float(fixed)
+                continue
             if param.is_integer:
                 p_obj = ng.p.Scalar(
                     lower=param.min_val,
@@ -178,6 +189,9 @@ class NevergradMixin(Base_Optimizer):
         candidate : ng.p.Parameter = self.optimizer.ask()
         # Evaluate function
         denorm_params: Dict[str, float] = self.denormalize_params(parameterization=candidate.value)
+        # Re-inject any frozen params (excluded from the search space) at their fixed value.
+        if getattr(self, "_frozen_params", None):
+            denorm_params.update(self._frozen_params)
         curr_score, metadata = self.evaluate(parameterization=denorm_params)
         # Provide feedback to optimizer (The negative of the fitness score is used because the optimizer is set to minimize this value... this way the optimizer will maximize the fitness score.
         self.optimizer.tell(candidate, -1 * curr_score)
@@ -195,8 +209,12 @@ class Nevergrad_Spice_Bode_Optimizer(NevergradMixin, Spice_Bode_Optimizer):
 class Nevergrad_Spice_Constraint_Satisfaction(NevergradMixin, Spice_Constraint_Satisfaction):
     def __init__(self,
                  setup_obj: Project_Setup,
-                 spicelib_wrappers : Dict[TestbenchParams, NGSpice_Wrapper]):
-        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers)
+                 spicelib_wrappers : Dict[TestbenchParams, NGSpice_Wrapper],
+                 output_root: Path | None = None):
+        # Accept + forward output_root so per-run checkpoint isolation works for this endpoint too,
+        # matching Nevergrad_Spice_Single_Objective (BUG-B26).
+        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers,
+                         output_root = output_root)
         self.parametrization: ng.p.Dict | None = None
         logger.info(f"started the {__class__} optimizer class")
 # ------------------------------------------------
@@ -205,7 +223,8 @@ class Nevergrad_Spice_Constraint_Satisfaction(NevergradMixin, Spice_Constraint_S
 class Nevergrad_Spice_Single_Objective(NevergradMixin, Spice_Single_Objective):
     def __init__(self,
                  setup_obj: Project_Setup,
-                 spicelib_wrappers : Dict[TestbenchParams, NGSpice_Wrapper]):
-        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers)
+                 spicelib_wrappers : Dict[TestbenchParams, NGSpice_Wrapper],
+                 output_root: Path | None = None):
+        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers, output_root = output_root)
         self.parametrization: ng.p.Dict | None = None
         logger.info(f"started the {__class__} optimizer class")

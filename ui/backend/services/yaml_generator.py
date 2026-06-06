@@ -43,10 +43,18 @@ def _build_dut_param(row: Dict[str, Any]) -> Dict[str, Any]:
         out["is_integer"] = True
     if row.get("log_scale"):
         out["log_scale"] = True
-    if row.get("freeze") is False:
-        out["freeze"] = False
+    if row.get("freeze"):
+        # Only `freeze: true` must be serialized (False is the dataclass default).
+        # The prior `is False` check inverted this and silently dropped frozen params,
+        # so a frozen DUT param was emitted without `freeze` and then swept as a free var.
+        out["freeze"] = True
     if row.get("init") not in (None, ""):
         out["init"] = _coerce_number(row.get("init"))
+    # `val` is the FROZEN operating point a param is pinned at (parameterize injects
+    # param.val ?? param.init). Dropping it on round-trip un-pins a frozen param to its
+    # init/netlist default — silently changing the optimized design (BUG-B15).
+    if row.get("val") not in (None, ""):
+        out["val"] = _coerce_number(row.get("val"))
     return _drop_empty(out)
 
 
@@ -157,18 +165,62 @@ def _build_tech_spec(form: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _build_pvt(form: Dict[str, Any]) -> List[Dict[str, Any]]:
-    out = []
-    for row in form.get("pvt_corners", []):
-        if not row.get("name"):
+def _build_pvt_block(form: Dict[str, Any]) -> Dict[str, Any] | None:
+    """Emit the new `pvt:` block (Phase 1) from the wizard's pvt config.
+
+    Corners are written with inline `model_includes` (the wizard skips the
+    `process_bundles` sugar). Returns None when no corner is defined, so no `pvt:`
+    block is emitted and the netlist's own hardcoded corner stays in effect.
+    """
+    pvt = form.get("pvt") or {}
+    corners_out: List[Dict[str, Any]] = []
+    for c in pvt.get("corners") or []:
+        name = (c.get("name") or "").strip()
+        if not name:
             continue
-        out.append({
-            "name": row["name"],
-            "temp": _coerce_number(row.get("temp")),
-            "corner": row.get("corner", "tt"),
-            "supply": _coerce_number(row.get("supply")),
-        })
-    return out
+        corner: Dict[str, Any] = {"name": name}
+        includes = [
+            {"lib_file": (inc.get("lib_file") or "").strip(), "section": (inc.get("section") or "").strip()}
+            for inc in (c.get("includes") or [])
+            if (inc.get("lib_file") or "").strip() and (inc.get("section") or "").strip()
+        ]
+        if includes:
+            corner["model_includes"] = includes
+        if c.get("temp") not in (None, ""):
+            corner["temp"] = _coerce_number(c.get("temp"))
+        node = (c.get("supply_node") or "").strip()
+        rails: List[Dict[str, Any]] = []
+        if node and c.get("supply_value") not in (None, ""):
+            rails.append({"node": node, "value": _coerce_number(c.get("supply_value"))})
+        # Re-emit any carried rails 2..N so a multi-rail corner survives the round-trip
+        # instead of being silently collapsed to its first rail (BUG-A6 / WIZ-4).
+        for s in (c.get("extra_supplies") or []):
+            n = (s.get("node") or "").strip()
+            if n and s.get("value") not in (None, ""):
+                rails.append({"node": n, "value": _coerce_number(s.get("value"))})
+        if len(rails) == 1:
+            corner["supply"] = rails[0]
+        elif len(rails) > 1:
+            corner["supplies"] = rails
+        # Carry per-corner extra `.param` overrides so they survive the round-trip instead of
+        # reverting to the netlist defaults after a wizard Save (BUG-B40).
+        params = c.get("params") or {}
+        if isinstance(params, dict) and params:
+            corner["params"] = {k: _coerce_number(v) for k, v in params.items()}
+        corner["enabled"] = bool(c.get("enabled", True))
+        corners_out.append(corner)
+
+    if not corners_out:
+        return None
+    active = (pvt.get("active_corner") or "").strip() or corners_out[0]["name"]
+    block: Dict[str, Any] = {"active_corner": active, "corners": corners_out}
+    # model_lib_root is load-bearing — apply_corner() prepends it to each include's
+    # lib_file — so it must survive the wizard round-trip instead of being dropped.
+    raw_root = pvt.get("model_lib_root")
+    root = raw_root.strip() if isinstance(raw_root, str) else raw_root
+    if root:
+        block["model_lib_root"] = root
+    return block
 
 
 def build_project_dict(form: Dict[str, Any]) -> Dict[str, Any]:
@@ -185,7 +237,7 @@ def build_project_dict(form: Dict[str, Any]) -> Dict[str, Any]:
         "outdir": project.get("outdir", "spice/temp_spice_out"),
         **({"schematic": project["schematic"]} if project.get("schematic") else {}),
         "tech_spec": _build_tech_spec(form),
-        "pvt_corners": _build_pvt(form),
+        **({"pvt": _pvt_block} if (_pvt_block := _build_pvt_block(form)) else {}),
         "dut_params": [_build_dut_param(p) for p in form.get("dut_params", []) if p.get("name")],
         "testbenches": [_build_testbench(tb) for tb in form.get("testbenches", []) if tb.get("name")],
         "optimizer_config": _build_optimizer(form),
@@ -214,6 +266,60 @@ def _bool(v: Any, default: bool = False) -> bool:
     return bool(v)
 
 
+def _pvt_block_to_form(raw_pvt: Any) -> Dict[str, Any]:
+    """Convert a raw `pvt:` block (yaml.safe_load shape) into the wizard's pvt form.
+
+    Reuses the canonical desugaring (`_normalize_pvt_block`) so a YAML using
+    `process_bundles` / `process:` refs / singular `supply` flattens to the inline
+    shape the wizard edits. The wizard models a single supply rail, so only the
+    first supply is carried (multi-rail YAML is fully editable in the raw editor).
+    """
+    empty = {"active_corner": "", "corners": [], "model_lib_root": ""}
+    if not isinstance(raw_pvt, dict):
+        return empty
+
+    import copy
+    from spicexplorer.core.domains import _normalize_pvt_block
+
+    holder = {"pvt": copy.deepcopy(raw_pvt)}
+    try:
+        _normalize_pvt_block(holder)
+    except Exception:
+        return empty
+    block = holder["pvt"]
+
+    corners_out: List[Dict[str, Any]] = []
+    for c in (block.get("corners") or []):
+        supplies = c.get("supplies") or []
+        first = supplies[0] if supplies else {}
+        corners_out.append({
+            "name": _str_or_blank(c.get("name")),
+            "temp": _str_or_blank(c.get("temp")) or "27",
+            "supply_node": _str_or_blank(first.get("node")) or "VDD",
+            "supply_value": _str_or_blank(first.get("value")),
+            # Carry rails 2..N losslessly (the wizard edits only the primary rail) so a
+            # round-trip Save doesn't drop a multi-rail corner (BUG-A6 / WIZ-4).
+            "extra_supplies": [
+                {"node": _str_or_blank(s.get("node")), "value": _str_or_blank(s.get("value"))}
+                for s in supplies[1:]
+            ],
+            "enabled": _bool(c.get("enabled"), True),
+            "includes": [
+                {"lib_file": _str_or_blank(m.get("lib_file")), "section": _str_or_blank(m.get("section"))}
+                for m in (c.get("model_includes") or [])
+            ],
+            # Carry per-corner `.param` overrides so they round-trip (BUG-B40).
+            "params": dict(c.get("params") or {}),
+        })
+    return {
+        "active_corner": _str_or_blank(block.get("active_corner")),
+        "corners": corners_out,
+        # Carry model_lib_root through the round-trip (it survives _normalize_pvt_block
+        # untouched); the wizard re-emits it via _build_pvt_block.
+        "model_lib_root": _str_or_blank(block.get("model_lib_root")),
+    }
+
+
 def project_dict_to_form(data: Dict[str, Any]) -> Dict[str, Any]:
     """Convert a `yaml.safe_load`-style project dict into the wizard's form shape.
 
@@ -227,14 +333,7 @@ def project_dict_to_form(data: Dict[str, Any]) -> Dict[str, Any]:
     constraints_dict: Dict[str, Any] = tech.get("constraints") or {}
     constraints = [{"key": k, "value": _str_or_blank(v)} for k, v in constraints_dict.items()]
 
-    pvt_rows = []
-    for c in (p.get("pvt_corners") or []):
-        pvt_rows.append({
-            "name": _str_or_blank(c.get("name")),
-            "temp": _str_or_blank(c.get("temp")),
-            "corner": _str_or_blank(c.get("corner")) or "tt",
-            "supply": _str_or_blank(c.get("supply")),
-        })
+    pvt_form = _pvt_block_to_form(p.get("pvt"))
 
     dut_rows = []
     for d in (p.get("dut_params") or []):
@@ -243,6 +342,7 @@ def project_dict_to_form(data: Dict[str, Any]) -> Dict[str, Any]:
             "min_val": _str_or_blank(d.get("min_val")),
             "max_val": _str_or_blank(d.get("max_val")),
             "init": _str_or_blank(d.get("init")),
+            "val": _str_or_blank(d.get("val")),  # frozen operating point — must round-trip (BUG-B15)
             "is_integer": _bool(d.get("is_integer"), False),
             "log_scale": _bool(d.get("log_scale"), False),
             # Project_Setup default: freeze=True if not specified — but wizard default is "tracked".
@@ -323,7 +423,7 @@ def project_dict_to_form(data: Dict[str, Any]) -> Dict[str, Any]:
             "name": _str_or_blank(tech.get("name")),
             "constraints": constraints,
         },
-        "pvt_corners": pvt_rows,
+        "pvt": pvt_form,
         "dut_params": dut_rows,
         "testbenches": tb_rows,
         "target_specs": spec_rows,

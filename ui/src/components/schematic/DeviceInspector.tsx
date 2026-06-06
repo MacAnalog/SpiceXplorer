@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useUIStore } from "@/stores/uiStore";
 import { api } from "@/lib/api";
-import { formatEng } from "@/lib/utils";
+import { formatEng, goalSymbol } from "@/lib/utils";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
@@ -14,8 +14,11 @@ import type { DutParam, SensitivityResponse } from "@/types/api";
 
 type Scope = "device" | "all";
 
-/** Range centre used as the default operating point (matches the backend nominal). */
+/** Default operating point, matching the backend `_nominal`: prefer an explicit
+ *  val/init, else the range centre. */
 function midpoint(p: DutParam): number {
+  if (p.val != null && Number.isFinite(p.val)) return p.val;
+  if (p.init != null && Number.isFinite(p.init)) return p.init;
   const lo = p.min_val ?? 0;
   const hi = p.max_val ?? 1;
   if (p.is_integer) return Math.round((lo + hi) / 2);
@@ -122,8 +125,7 @@ export function DeviceInspector() {
     );
   }
 
-  const goalSym =
-    result?.goal === "exceed" ? "≥" : result?.goal === "minimize" ? "≤" : "≈";
+  const goalSym = goalSymbol(result?.goal ?? "");
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto p-3 text-xs">

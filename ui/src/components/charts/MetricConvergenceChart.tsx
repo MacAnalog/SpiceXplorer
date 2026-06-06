@@ -16,8 +16,13 @@ interface Props {
   height?: number;
 }
 
-function bestSoFar(values: (number | null)[], goal: string): (number | null)[] {
+function bestSoFar(
+  values: (number | null)[],
+  goal: string,
+  target?: number | null,
+): (number | null)[] {
   let best: number | null = null;
+  const hasTarget = goal === "exact" && target !== null && target !== undefined;
   return values.map((v) => {
     if (v === null) return best;
     if (best === null) {
@@ -25,6 +30,9 @@ function bestSoFar(values: (number | null)[], goal: string): (number | null)[] {
       return best;
     }
     if (goal === "minimize") best = Math.min(best, v);
+    // For an exact target, "best so far" is the sample closest to the target — not a
+    // monotonic running max that climbs straight past the target band.
+    else if (hasTarget) best = Math.abs(v - target) < Math.abs(best - target) ? v : best;
     else best = Math.max(best, v);
     return best;
   });
@@ -41,7 +49,7 @@ export function MetricConvergenceChart({
   const traces: Plotly.Data[] = [];
 
   for (const run of runs) {
-    const bsf = bestSoFar(run.values, goal);
+    const bsf = bestSoFar(run.values, goal, target);
     const x = run.values.map((_, i) => i);
     traces.push({
       x,

@@ -6,7 +6,8 @@ import { useProjectStore } from "@/stores/projectStore";
 import { useRunStore } from "@/stores/runStore";
 import { useUIStore } from "@/stores/uiStore";
 import { EmptyState } from "@/components/ui/empty-state";
-import { cn, formatEng } from "@/lib/utils";
+import { cn, formatEng, goalSymbol, statusForGoal } from "@/lib/utils";
+import { cornerSummary, cornerIncludes } from "@/lib/pvt";
 
 /**
  * Read-only pipeline DAG of the optimization problem, derived entirely from
@@ -18,10 +19,6 @@ import { cn, formatEng } from "@/lib/utils";
  * an SVG underlay isn't needed because the left→right ordering reads as flow;
  * connections are implied by the column headers and the testbench grouping.
  */
-function goalSym(goal: string): string {
-  return goal === "exceed" ? "≥" : goal === "minimize" ? "≤" : "≈";
-}
-
 function Column({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   return (
     <div className="flex min-w-[180px] flex-1 flex-col">
@@ -101,11 +98,13 @@ export function PipelineView() {
   const freeCount = allParams.filter((p) => !p.freeze).length;
   const enabledTbs = summary.testbenches.filter((t) => t.enable);
 
-  const specPass = (specName: string, goal: string, target: number, tol: number | null) => {
-    const v = bestMetrics[specName];
-    if (v == null) return null;
-    return goal === "exceed" ? v >= target : goal === "minimize" ? v <= target : Math.abs(v - target) <= (tol ?? Infinity);
-  };
+  const pvt = summary.pvt;
+  const activeCorner = pvt?.corners.find((c) => c.name === pvt.active_corner) ?? null;
+
+  // Tolerance-aware verdict via the shared helper, so the DAG tint can't disagree
+  // with the RightRail / HealthTab (the old inline check ignored tolerance).
+  const specVerdict = (specName: string, goal: string, target: number, tol: number | null) =>
+    statusForGoal(goal, bestMetrics[specName], target, tol ?? undefined);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto p-4">
@@ -114,6 +113,24 @@ export function PipelineView() {
         the optimizer perturbs the free DUT parameters, each enabled testbench simulates, and the
         target specs score the result. Click a spec to shape its penalty.
       </div>
+
+      {/* PVT corner — a global condition applied to every testbench's netlist before
+          simulation. Shown as a banner because it feeds all testbenches at once. */}
+      {pvt && activeCorner && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-secondary/40 bg-secondary-soft px-3 py-2 text-[11px]">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-secondary">
+            PVT corner
+          </span>
+          <span className="font-mono text-[12px] text-fg">{activeCorner.name}</span>
+          <span className="font-mono text-muted">{cornerSummary(activeCorner)}</span>
+          <span className="font-mono text-[10px] text-faint" title={cornerIncludes(activeCorner)}>
+            {cornerIncludes(activeCorner)}
+          </span>
+          <span className="ml-auto font-mono text-[10px] text-faint">
+            {pvt.corners.length} corner(s) defined · applied to all {enabledTbs.length} testbench(es)
+          </span>
+        </div>
+      )}
 
       <div className="flex items-stretch gap-3">
         {/* Optimizer */}
@@ -169,19 +186,23 @@ export function PipelineView() {
         {/* Specs */}
         <Column title="Target specs" count={summary.target_specs.length}>
           {summary.target_specs.map((s) => {
-            const pass = specPass(s.name, s.goal, s.target, s.tolerance);
+            const verdict = specVerdict(s.name, s.goal, s.target, s.tolerance);
             const v = bestMetrics[s.name];
             return (
               <Node
                 key={s.name}
                 title={s.name}
-                subtitle={`${goalSym(s.goal)} ${formatEng(s.target)}${v != null ? ` · now ${formatEng(v)}` : ""}`}
-                tone={pass == null ? "default" : pass ? "ok" : "fail"}
-                title2="Open in Score Shaping"
-                onClick={() => {
-                  setSelectedSpec(s.name);
-                  router.push("/scoring" as Route);
-                }}
+                subtitle={`${goalSymbol(s.goal)} ${formatEng(s.target)}${s.enable ? (v != null ? ` · now ${formatEng(v)}` : "") : " · disabled"}`}
+                tone={verdict === "unknown" ? "default" : verdict === "pass" ? "ok" : "fail"}
+                title2={s.enable ? "Open in Score Shaping" : "Disabled — not in the objective"}
+                onClick={
+                  s.enable
+                    ? () => {
+                        setSelectedSpec(s.name);
+                        router.push("/scoring" as Route);
+                      }
+                    : undefined
+                }
               />
             );
           })}

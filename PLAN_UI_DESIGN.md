@@ -1,12 +1,21 @@
 # SpiceXplorer UI Design Plan
 
 > **STATUS — the original 4-tab demo plan has been superseded by the Studio shell.**
-> The UI shipped a full IDE-style **Studio workspace** (7 views, activity bar, rails,
+> The UI shipped a full IDE-style **Studio workspace** (8 views, activity bar, rails,
 > right rail, bottom panel, status bar, ⌘K palette, wizard overlay) on branch `dev/ui`.
 > This document is now the *design intent + as-built map*. The canonical, always-current
 > references are [CLAUDE.md](CLAUDE.md) (architecture + non-obvious constraints), `ui/README.md`
 > (API table + run instructions), and [doc/PLAN_STUDIO_INTEGRATION.md](doc/PLAN_STUDIO_INTEGRATION.md)
 > (the historical phased migration). Remaining work lives in [TODO.md](TODO.md).
+>
+> **2026-06 nav restructure:** the redundant horizontal top tab strip was removed — the **vertical
+> ActivityBar is the sole top-level nav** (primary group + a utility group of Pipeline + **Manual Sim**
+> above the Health gear). In-view sub-tabs now use a generic **`SubTabStrip`** (underline tabs, mounted
+> in each view's toolbar; single-section views render none — only Setup's Load/Wizard uses it). Manual
+> Sim is its own `/manual` view. The Optimize algorithm dropdown was removed (set in setup/wizard).
+> **Score Shaping is now editable**: a `SpecEditor` tunes the selected spec's target/tolerance/range/
+> weight/goal/enable for a what-if preview — **ephemeral** (sent as `spec_overrides` to `/api/score`,
+> never written to YAML, not used by live runs).
 
 ## Goals
 

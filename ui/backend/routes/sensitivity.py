@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from ui.backend.app_config import default_yaml_path
+from ui.backend.services.num import safe_float as _safe_float
 
 router = APIRouter()
 
@@ -60,14 +61,6 @@ class SensitivityResponse(BaseModel):
     params: list[ParamSensitivity] = []
     error: str | None = None
     elapsed_ms: float | None = None
-
-
-def _safe_float(v: Any) -> float | None:
-    try:
-        x = float(v)
-        return x if math.isfinite(x) else None
-    except (TypeError, ValueError):
-        return None
 
 
 def _parse_device_kind(param_name: str) -> tuple[str, str]:
@@ -149,7 +142,9 @@ def _run_sensitivity(
         bp = by_name[name]
         baseline[name] = min(max(v, float(bp.min_val)), float(bp.max_val))
 
-    wrappers = _build_spicelib_wrappers(project)
+    # Own output subdir so building these wrappers (which rmtree their output_folder) can't
+    # wipe a concurrent live run's outdir/live tree (BUG-A8 / OPT-2 — same hole as manual sim).
+    wrappers = _build_spicelib_wrappers(project, output_subdir="sensitivity")
     opt = Nevergrad_Spice_Single_Objective(setup_obj=project, spicelib_wrappers=wrappers)
 
     n_sims = 0

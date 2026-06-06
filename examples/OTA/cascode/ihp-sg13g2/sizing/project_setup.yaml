@@ -35,14 +35,47 @@ project:
       min_pfet_l : 0.18u
 
   # ------------------------
-  # PVT Corners: Define the PVT corners for simulations
+  # PVT (Phase 1): named corners that actually drive the simulation.
+  # `active_corner` is the single corner the optimizer runs against (overridable from
+  # the UI). The default `tt_27C_1V5` reproduces these testbenches' hardcoded netlists
+  # exactly (.lib cornerMOSlv.lib mos_tt, .lib cornerRES.lib res_typ, temp 27, VDD 1.5),
+  # so enabling PVT changes nothing until you switch corners. Cascode uses MOS + RES
+  # models only (no CAP corner).
   # ------------------------
-  pvt_corners :
-    - name: typical_25C_1V2
-      temp: 25
-      corner: tt
-      supply: 1.5
-  
+  pvt:
+    active_corner: tt_27C_1V5
+
+    process_bundles:
+      tt:
+        - { lib_file: cornerMOSlv.lib, section: mos_tt }
+        - { lib_file: cornerRES.lib,   section: res_typ }
+      ss:
+        - { lib_file: cornerMOSlv.lib, section: mos_ss }
+        - { lib_file: cornerRES.lib,   section: res_wcs }
+      ff:
+        - { lib_file: cornerMOSlv.lib, section: mos_ff }
+        - { lib_file: cornerRES.lib,   section: res_bcs }
+
+    corners:
+      - name: tt_27C_1V5            # typical — matches the netlist's hardcoded corner
+        process: tt
+        temp: 27
+        supply: { node: VDD, value: 1.5 }
+        enabled: true
+
+      - name: ss_125C_1V35          # slow-slow, hot, -10% supply
+        process: ss
+        temp: 125
+        supply: { node: VDD, value: 1.35 }
+        enabled: true
+
+      - name: ff_m40C_1V65          # fast-fast, cold, +10% supply
+        process: ff
+        temp: -40
+        supply: { node: VDD, value: 1.65 }
+        enabled: false
+
+    model_lib_root: null
 
   # ------------------------
   # DUT Parameters: Configure the parameters to be sized/optimized ([optional] freeze : true/false)

@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useProjectStore } from "@/stores/projectStore";
 import { useRunStore } from "@/stores/runStore";
-import { useUIStore, RUN_ALGORITHMS } from "@/stores/uiStore";
+import { useUIStore } from "@/stores/uiStore";
 import { api } from "@/lib/api";
 import { launchLiveRun } from "@/lib/launchRun";
 import { COLORS } from "@/components/charts/PlotlyChart";
@@ -10,18 +10,18 @@ import { ScoreConvergenceChart } from "@/components/charts/ScoreConvergenceChart
 import { MetricConvergenceChart } from "@/components/charts/MetricConvergenceChart";
 import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
+import { Stat } from "@/components/ui/stat";
 import { Toolbar, ToolbarLabel, ToolbarSpacer } from "@/components/shell/Toolbar";
 import { Separator } from "@/components/ui/separator";
-import { Segmented } from "@/components/ui/segmented";
 import { selectCn } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/empty-state";
+import { CornerSelect } from "@/components/pvt/CornerSelect";
+import { formatEng, formatDuration, statusForGoal } from "@/lib/utils";
 import type { AppConfig } from "@/types/api";
 
 interface Props {
   appConfig: AppConfig | null;
 }
-
-type ScoreFn = "sigmoid" | "linear";
 
 /**
  * Optimize view — run configuration + convergence charts. Phase 2 moved the
@@ -34,15 +34,27 @@ type ScoreFn = "sigmoid" | "linear";
  */
 export function OptimizeTab({ appConfig }: Props) {
   const { summary, isApplied } = useProjectStore();
-  const { isReplay, isRunning, events, startRun, stopRun } = useRunStore();
+  const { isReplay, isRunning, events, startRun, stopRun, runError } = useRunStore();
+  const bestMetrics = useRunStore((s) => s.bestMetrics);
+  const currentIter = useRunStore((s) => s.currentIter);
+  const budget = useRunStore((s) => s.budget);
+  const runStartTs = useRunStore((s) => s.runStartTs);
+  const storedElapsedMs = useRunStore((s) => s.elapsedMs);
   const env = useUIStore((s) => s.env);
   const runConfig = useUIStore((s) => s.runConfig);
   const setRunConfig = useUIStore((s) => s.setRunConfig);
 
-  const [scoreFn, setScoreFn] = useState<ScoreFn>("sigmoid");
   const [replayCheckpoint, setReplayCheckpoint] = useState<string>("");
   const [selectedMetric, setSelectedMetric] = useState<string>("");
   const [startError, setStartError] = useState<string | null>(null);
+  // Tick every second while running so the Elapsed / Est. remaining KPIs advance.
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (!isRunning) return;
+    setNowTick(Date.now());
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [isRunning]);
 
   const enabledSpecs = useMemo(
     () => summary?.target_specs.filter((s) => s.enable) ?? [],
@@ -67,7 +79,8 @@ export function OptimizeTab({ appConfig }: Props) {
       try {
         const res = await api.startRun({ replay: true, checkpoint_id: replayCheckpoint });
         const ckptLabel = appConfig?.preset_checkpoints.find((c) => c.id === replayCheckpoint)?.label;
-        startRun(res.run_id, res.replay, runConfig.budget, {
+        // Use the checkpoint length as the progress denominator, not the live budget.
+        startRun(res.run_id, res.replay, res.n_iters ?? runConfig.budget, {
           kind: "replay",
           label: `Replay · ${ckptLabel ?? replayCheckpoint}`,
           checkpointId: replayCheckpoint,
@@ -93,6 +106,29 @@ export function OptimizeTab({ appConfig }: Props) {
     [events, isReplay],
   );
 
+  // KPI row values. Best-score mirrors the RightRail (running max over best_score).
+  const kpis = useMemo(() => {
+    const best = events.reduce((m, e) => {
+      const v = e.best_score ?? e.score;
+      return v != null && Number.isFinite(v) && v > m ? v : m;
+    }, -Infinity);
+    const passing = enabledSpecs.filter(
+      (s) => statusForGoal(s.goal, bestMetrics[s.name], s.target, s.tolerance ?? undefined) === "pass",
+    ).length;
+    return {
+      bestScore: Number.isFinite(best) ? best : null,
+      passing,
+      total: enabledSpecs.length,
+    };
+  }, [events, enabledSpecs, bestMetrics]);
+
+  const elapsedMs = isRunning && runStartTs ? Math.max(0, nowTick - runStartTs) : storedElapsedMs;
+  const estRemainingMs =
+    isRunning && currentIter > 0 && budget > currentIter
+      ? (elapsedMs / currentIter) * (budget - currentIter)
+      : null;
+  const hasRun = events.length > 0 || isRunning;
+
   const selectedSpec = enabledSpecs.find((s) => s.name === selectedMetric);
   const metricRuns = useMemo(
     () =>
@@ -111,21 +147,6 @@ export function OptimizeTab({ appConfig }: Props) {
   return (
     <>
       <Toolbar>
-        <ToolbarLabel>algorithm</ToolbarLabel>
-        <select
-          aria-label="Optimization algorithm"
-          value={runConfig.algorithm}
-          onChange={(e) => setRunConfig({ algorithm: e.target.value })}
-          disabled={isRunning}
-          className={selectCn("sm")}
-        >
-          {RUN_ALGORITHMS.map((a) => (
-            <option key={a} value={a}>
-              {a}
-            </option>
-          ))}
-        </select>
-
         <ToolbarLabel>budget</ToolbarLabel>
         <input
           aria-label="Run budget (iterations)"
@@ -138,15 +159,21 @@ export function OptimizeTab({ appConfig }: Props) {
           className={selectCn("sm") + " w-[72px]"}
         />
 
-        <ToolbarLabel>score</ToolbarLabel>
-        <Segmented<ScoreFn>
-          value={scoreFn}
-          onChange={setScoreFn}
-          options={[
-            { value: "sigmoid", label: "sigmoid" },
-            { value: "linear", label: "linear" },
-          ]}
-        />
+        {summary?.pvt && summary.pvt.corners.length > 0 && (
+          <>
+            <ToolbarLabel>corner</ToolbarLabel>
+            <div className="w-[210px]">
+              <CornerSelect
+                corners={summary.pvt.corners}
+                value={runConfig.activeCorner}
+                defaultCorner={summary.pvt.active_corner}
+                onChange={(name) => setRunConfig({ activeCorner: name })}
+                disabled={isRunning}
+                aria-label="PVT corner to optimize against"
+              />
+            </div>
+          </>
+        )}
 
         <Separator />
 
@@ -194,13 +221,16 @@ export function OptimizeTab({ appConfig }: Props) {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3">
-        {startError && (
+      {/* [&>*]:shrink-0 — children are Panels (overflow-hidden ⇒ flex auto-min-size 0),
+          so without this the flex column crushes them to fit and clips their content
+          (the Manual Sim result + log tails) instead of letting this container scroll. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3 [&>*]:shrink-0">
+        {(startError || runError) && (
           <div
             role="alert"
             className="rounded-md border border-danger bg-danger-soft px-3 py-2 text-xs text-danger"
           >
-            {startError}
+            {startError ?? runError}
           </div>
         )}
 
@@ -208,6 +238,24 @@ export function OptimizeTab({ appConfig }: Props) {
           <EmptyState bordered minHeight="min-h-32">
             Apply a project or select a preset checkpoint to enable a run.
           </EmptyState>
+        )}
+
+        {hasRun && (
+          <div className="grid grid-cols-5 gap-2.5">
+            <Stat eyebrow="best score" value={kpis.bestScore != null ? formatEng(kpis.bestScore) : "—"} />
+            <Stat
+              eyebrow="iterations"
+              value={currentIter > 0 ? String(currentIter) : "—"}
+              unit={budget > 0 ? `/ ${budget}` : undefined}
+            />
+            <Stat
+              eyebrow="specs passing"
+              value={`${kpis.passing}/${kpis.total}`}
+              tone={kpis.total > 0 && kpis.passing === kpis.total ? "ok" : kpis.passing === 0 ? "danger" : "warn"}
+            />
+            <Stat eyebrow="elapsed" value={formatDuration(elapsedMs)} />
+            <Stat eyebrow="est. remaining" value={estRemainingMs != null ? formatDuration(estRemainingMs) : "—"} />
+          </div>
         )}
 
         <div className="grid grid-cols-2 gap-2.5">
@@ -267,6 +315,7 @@ export function OptimizeTab({ appConfig }: Props) {
             </PanelBody>
           </Panel>
         </div>
+
       </div>
     </>
   );

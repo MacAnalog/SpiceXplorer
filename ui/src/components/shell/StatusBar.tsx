@@ -42,11 +42,11 @@ export function StatusBar() {
   }
 
   return (
-    <footer className="flex h-6 shrink-0 items-center gap-3 border-t border-border bg-panel px-3 text-[11px] text-muted">
-      <span className="font-medium text-fg">{view?.label ?? "Studio"}</span>
+    <footer className="flex h-6 shrink-0 items-center gap-3 overflow-hidden border-t border-border bg-panel px-3 text-[11px] text-muted">
+      <span className="shrink-0 font-medium text-fg">{view?.label ?? "Studio"}</span>
 
-      <span className="text-faint">·</span>
-      <span className="truncate">
+      <span className="shrink-0 text-faint">·</span>
+      <span className="min-w-0 truncate">
         {summary?.name ?? "no project"}
         <span className="ml-1 font-mono text-faint">{isApplied ? "active" : "draft"}</span>
       </span>

@@ -18,12 +18,13 @@ import pytest
 from conftest import EXAMPLE_YAML, REPO_ROOT, requires_ngspice, slow
 
 
-# Example projects whose YAML parses today. folded_cascode is intentionally
-# excluded: its `pvt_map` block is work-in-progress for multi-PVT runs and does
-# not parse yet (unrelated to path handling).
+# Example projects whose YAML parses today. folded_cascode now parses cleanly:
+# its first-class `pvt:` block (Phase 1) drives the simulator, while the legacy
+# `pvt_map` / `pvt_corners` are display-only and silently ignored (see PVT_plan.md).
 PORTABLE_EXAMPLE_YAMLS = [
     "examples/OTA/cascode/ihp-sg13g2/sizing/project_setup.yaml",
     "examples/OTA/5t-ota/ihp-sg13g2/sizing/project_setup.yaml",
+    "examples/OTA/folded_cascode/ihp-sg13g2/sizing/project_setup.yaml",
 ]
 
 
@@ -217,6 +218,9 @@ def test_one_optimization_step():
     )
     optimizer = orchestrator.get_optimizer()
     optimizer.parameterize()
+    # optimization_step() calls self.optimizer.ask(); build that object first — the same
+    # contract the optimize() loop, sanity.py, and optimizer_runner all follow.
+    assert optimizer._create_optimizer_obj(), "optimizer object failed to build"
 
     params, score, metadata = optimizer.optimization_step()
 
