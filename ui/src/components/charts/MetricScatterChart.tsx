@@ -1,5 +1,6 @@
 "use client";
 import { PlotlyChart, COLORS } from "./PlotlyChart";
+import { paretoFront } from "@/lib/pareto";
 import type { ScatterPoint } from "@/types/api";
 
 interface RunScatter {
@@ -16,6 +17,10 @@ interface Props {
   goalX?: string;
   goalY?: string;
   height?: number;
+  /** Overlay the non-dominated (Pareto) frontier over feasible points. */
+  showPareto?: boolean;
+  /** Click a point → inspect it (params/metrics at its iteration). */
+  onPointClick?: (point: ScatterPoint, runLabel: string) => void;
 }
 
 function feasibleRect(
@@ -63,6 +68,8 @@ export function MetricScatterChart({
   goalX = "exceed",
   goalY = "minimize",
   height = 240,
+  showPareto = true,
+  onPointClick,
 }: Props) {
   const traces: Plotly.Data[] = [];
   const feasibleColors = [COLORS.primary, COLORS.secondary];
@@ -76,6 +83,7 @@ export function MetricScatterChart({
       traces.push({
         x: infeasible.map((p) => p.x),
         y: infeasible.map((p) => p.y),
+        customdata: infeasible as unknown as Plotly.Datum[],
         type: "scatter",
         mode: "markers",
         name: `${run.label} (infeasible)`,
@@ -86,6 +94,7 @@ export function MetricScatterChart({
       traces.push({
         x: feasible.map((p) => p.x),
         y: feasible.map((p) => p.y),
+        customdata: feasible as unknown as Plotly.Datum[],
         type: "scatter",
         mode: "markers",
         name: `${run.label}`,
@@ -93,6 +102,24 @@ export function MetricScatterChart({
       });
     }
   });
+
+  // Pareto frontier over the union of feasible points (non-dominated trade-offs).
+  if (showPareto) {
+    const feasibleAll = runs.flatMap((r) => r.points).filter((p) => p.feasible);
+    const front = paretoFront(feasibleAll, goalX, goalY);
+    if (front.length > 1) {
+      traces.push({
+        x: front.map((p) => p.x),
+        y: front.map((p) => p.y),
+        type: "scatter",
+        mode: "lines+markers",
+        name: "Pareto front",
+        line: { color: COLORS.tertiary, width: 1.4 },
+        marker: { color: COLORS.tertiary, size: 6, symbol: "diamond" },
+        hoverinfo: "skip",
+      });
+    }
+  }
 
   const allPoints = runs.flatMap((r) => r.points);
   const shapes: Partial<Plotly.Shape>[] = [];
@@ -128,6 +155,17 @@ export function MetricScatterChart({
     <PlotlyChart
       data={traces}
       height={height}
+      onClick={
+        onPointClick
+          ? (e) => {
+              const pt = e.points?.[0];
+              const sp = pt?.customdata as unknown as ScatterPoint | undefined;
+              if (sp && typeof sp.iter === "number") {
+                onPointClick(sp, String(pt?.data?.name ?? ""));
+              }
+            }
+          : undefined
+      }
       layout={{
         xaxis: { title: { text: metricX } },
         yaxis: { title: { text: metricY } },
