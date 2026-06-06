@@ -435,6 +435,23 @@ class TargetSpec:
                 )
                 raise ValueError(f"Invalid error_type '{self.error_type}'. Must be one of {valid_errors}.")
         
+        # --- Coerce target (BUG-B7) ---
+        # YAML 1.1 leaves dot-less / unsigned-exponent scientific literals like `200e6`,
+        # `25e-6` as STRINGS, and the list_target_spec_hook path bypasses dacite casting, so
+        # `target` can arrive as a str. Parse it (engineering suffixes + plain floats) before
+        # any arithmetic, else `abs(0.05 * self.target)` and `value - self.target` raise.
+        if isinstance(self.target, str):
+            self.target = parse_value(self.target)
+
+        # --- Coerce weight (BUG-B9) ---
+        # The 1.0 default applies only to an OMITTED key; an explicit `weight:` / `weight: null`
+        # yields None, and `np.float64(None)` is NaN — which poisons every weighted penalty for
+        # the whole run (Nevergrad can't rank NaN). Normalize None / non-finite to 1.0.
+        if isinstance(self.weight, str):
+            self.weight = parse_value(self.weight)
+        if self.weight is None or not np.isfinite(np.float64(self.weight)):
+            self.weight = np.float64(1.0)
+
         # --- Validate / convert range ---
         if isinstance(self.range, str):
             self.range = parse_value(self.range)
@@ -837,13 +854,28 @@ class Project_Setup:
         """Resolve all parameter min/max/default values based on tech_spec constraints."""
         logger.info("resolving DUT parameters...")
         for param in self.dut_params:
-            if param.needs_resolution():
-                logger.debug(f"Resolving ranges for param '{param.name}'")
-                param.resolve_min_max(self.tech_spec.constraints)
-                logger.debug(f"Resolved param '{param.name}': min={param.min_val}, max={param.max_val}, default={param.init}")
-            # Resolve a dut_param's operating-point `val` too (eng-string / constraint ref),
-            # so the Schematic inspector nominal and the project summary don't fall back to
-            # the range midpoint. Mirrors the testbench-param loop below. (SCH-2 / BUG-A4)
+            if param.freeze:
+                # Frozen params are INJECTED, not searched, so min/max are optional. Resolve the
+                # injected operating point `val` and the `init` fallback (eng-strings / constraint
+                # refs); validate bounds only when BOTH are present. A frozen eng-string constant
+                # with no min/max must not crash the load (BUG-B10) — `resolve_min_max` would raise
+                # "missing min or max" because a string `val`/`init` makes needs_resolution() true.
+                param.ressolve_val(self.tech_spec.constraints)
+                if param.min_val is not None and param.max_val is not None:
+                    param.resolve_min_max(self.tech_spec.constraints)  # resolves init + checks min<max
+                elif isinstance(param.init, str):
+                    param.init = resolve_reference(param.init, self.tech_spec.constraints)
+                continue
+            # Non-frozen params are search DIMENSIONS: bounds are required, and ALWAYS validated
+            # (incl. the min_val >= max_val check) even when given as plain numbers — previously the
+            # check ran only for string bounds via needs_resolution(), so numeric `min: 5, max: 1`
+            # silently inverted the search range (BUG-B8). `resolve_min_max` also resolves init.
+            logger.debug(f"Resolving ranges for param '{param.name}'")
+            param.resolve_min_max(self.tech_spec.constraints)
+            logger.debug(f"Resolved param '{param.name}': min={param.min_val}, max={param.max_val}, default={param.init}")
+            # Resolve the operating-point `val` too (eng-string / constraint ref), so the Schematic
+            # inspector nominal and the project summary don't fall back to the range midpoint
+            # (SCH-2 / BUG-A4). Mirrors the testbench-param loop below.
             param.ressolve_val(self.tech_spec.constraints)
 
         logger.info("resolving TESTBENCH parameters...")

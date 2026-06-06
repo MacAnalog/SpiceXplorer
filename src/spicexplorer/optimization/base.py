@@ -5,7 +5,7 @@ import torch
 import numpy        as np
 import plotly.graph_objects as go
 
-from    typing      import Dict, Tuple, Any
+from    typing      import Dict, Tuple, Any, Optional
 from    tqdm        import tqdm
 from    abc         import ABC, abstractmethod
 from    pathlib     import Path
@@ -76,7 +76,10 @@ class Base_Optimizer(ABC):
 
         # Instantiated & Typed by the base class
         self.optimization_log : OptimizationLog = OptimizationLog()
-        self.global_best_index: int = 0 # the index of the global best solution
+        self.global_best_index: int = 0 # the best's position within the current in-memory log chunk
+        # The best entry seen across the WHOLE run, tracked on the instance so it survives the
+        # autosave log reset (which empties optimization_log). get_best_params() prefers this.
+        self.global_best_entry: Optional["OptimizationLogEntry"] = None
         self.logger = logger
         self.verbose: bool = True
         # Instantiated & Typed by the children class
@@ -130,8 +133,11 @@ class Base_Optimizer(ABC):
     def denormalize_params(self, parameterization: Dict[str, float | np.floating]) -> Dict[str, np.floating]:
         denorm_params: Dict[str, np.floating] = {}
 
-        log_range = self.setup_obj.optimizer_config.get_log_variable_range()
-        lin_range = self.setup_obj.optimizer_config.get_lin_variable_range()
+        cfg = self.setup_obj.optimizer_config
+        log_bounds = cfg.log_variable_bounds
+        lin_bounds = cfg.lin_variable_bounds
+        log_range = cfg.get_log_variable_range()  # max - min
+        lin_range = cfg.get_lin_variable_range()
 
         for param_name in parameterization:
             val = parameterization[param_name]
@@ -139,14 +145,20 @@ class Base_Optimizer(ABC):
 
             if param_obj is None:
                 raise KeyError(f"Could not find param name {param_name} in {self.setup_obj.list_params()}")
-            
+
             if param_obj.is_integer:
                 denorm_params[param_name] = val
 
             elif param_obj.log_scale:
-                denorm_params[param_name] = log_denormalize(x=val/log_range, pmin=param_obj.min_val, pmax=param_obj.max_val)
+                # nevergrad samples the candidate in [log_bounds.min, log_bounds.max]
+                # (parameterize builds ng.p.Log(lower=min, upper=max)), so the [0,1] coordinate
+                # is (val - min)/range — NOT val/range, which only lands in [0,1] when min==0 and
+                # otherwise pushes the physical value outside [min_val, max_val] (BUG-B6).
+                x = (val - log_bounds.min) / log_range
+                denorm_params[param_name] = log_denormalize(x=x, pmin=param_obj.min_val, pmax=param_obj.max_val)
             else:
-                denorm_params[param_name] = linear_denormalize(x=val/lin_range, pmin=param_obj.min_val, pmax=param_obj.max_val)
+                x = (val - lin_bounds.min) / lin_range
+                denorm_params[param_name] = linear_denormalize(x=x, pmin=param_obj.min_val, pmax=param_obj.max_val)
 
         return denorm_params
     
@@ -162,31 +174,55 @@ class Base_Optimizer(ABC):
         
         # Track the score for plotting
         self.optimization_log = OptimizationLog() if not keep_history else self.optimization_log
-        
+
+        # Track the best across the WHOLE run on the instance, so it survives the autosave log
+        # reset (the in-memory log is emptied on each autosave, but the best entry must not be
+        # lost). Seed from any retained history (keep_history); a fresh run starts with no best.
+        if not self.optimization_log.is_empty():
+            self.global_best_index = int(np.argmax([e.point.score for e in self.optimization_log]))
+            self.global_best_entry = self.optimization_log[self.global_best_index]
+        else:
+            self.global_best_index = 0
+            self.global_best_entry = None
+
         # MAIN OPTIMIZATION LOOP
         try:
             with tqdm(range(self.optimizer_config.budget), desc="Optimizing", unit="trial") as pbar:
                 for trial in pbar:
                     logger.debug("---------------------------------------------------------------------------")
                     logger.debug(f"STARTING trial {trial+1}/{self.optimizer_config.budget}...")
-                    
+
                     # (a) Perform the optimization logic for one step/trial
                     candidate, curr_score, metadata = self.optimization_step()
                     logger.debug(f"Trial {trial+1}/{self.optimizer_config.budget} COMPLETED with score: {curr_score:.4f}")
-                    
-                    # (b) Update the index of the global best solution (lowest score)
-                    if curr_score > self.optimization_log[self.global_best_index].point.score:
-                        self.global_best_index = trial
+
+                    # (b) Update the running best. Compare against the GLOBAL best entry's score
+                    #     (instance-tracked), NOT an index into the log: the log is emptied on each
+                    #     autosave (step c), so indexing it by the absolute `trial` raised IndexError
+                    #     and a fresh chunk could regress the best (BUG-B5). `global_best_index` is
+                    #     kept as the best's position within the CURRENT chunk for back-compat.
+                    last_idx = len(self.optimization_log) - 1
+                    if last_idx >= 0 and (
+                        self.global_best_entry is None
+                        or curr_score > self.global_best_entry.point.score
+                    ):
+                        self.global_best_entry = self.optimization_log[last_idx]
+                        self.global_best_index = last_idx
                         logger.info(f"New fit was found... trial {trial} score {curr_score:.2f}")
-                    
-                    # (c) Autosave checkpoint if flag is not disabled
+
+                    # (c) Autosave checkpoint if flag is not disabled. Resetting the in-memory log
+                    #     also resets the per-chunk index; the best ENTRY survives on the instance.
                     if (not self.disable_autosave) and (self.autosave_checkpoint_freqeucny is not None) and ((trial+1) % self.autosave_checkpoint_freqeucny == 0):
                         self.save_checkpoint(name=self.get_auto_save_name(append_txt=f"trial{trial+1}"))
                         self.optimization_log = OptimizationLog()
-                        logger.critical("Reset the optimization_log")
+                        self.global_best_index = 0
+                        logger.debug("Reset the optimization_log after autosave")
 
-                    # Update the progress bar with current and best scores
-                    current_best = self.optimization_log[self.global_best_index].point.score
+                    # Update the progress bar from the instance-tracked best (valid across resets).
+                    current_best = (
+                        self.global_best_entry.point.score if self.global_best_entry is not None
+                        else curr_score
+                    )
                     pbar.set_postfix(score=f"{curr_score:.4f}", best=f"{current_best:.4f}")
                     logger.debug("---------------------------------------------------------------------------")
 
@@ -210,13 +246,19 @@ class Base_Optimizer(ABC):
         if self.optimizer is None:
             logger.info("Need to set the optimizer by calling self.create_experiment")
             return
-        if len(self.optimization_log) < 1:
-            logger.info("need to run self.optimize")
-            return
-        
-        best_solution : Dict[str, np.floating | float]  = self.optimization_log.get_params(index=self.global_best_index)
-        score : float                                   = float(self.optimization_log.get_score(index=self.global_best_index))
-        metadata : Dict[str, Any] | None                = self.optimization_log.get_metadata(index=self.global_best_index)
+
+        # Prefer the instance-tracked best entry — it survives the autosave log reset, so a run
+        # that ended exactly on a reset boundary (in-memory log empty) still reports its best.
+        entry = getattr(self, "global_best_entry", None)
+        if entry is None:
+            if len(self.optimization_log) < 1:
+                logger.info("need to run self.optimize")
+                return
+            entry = self.optimization_log[self.global_best_index]
+
+        best_solution : Dict[str, np.floating | float]  = entry.get_params()
+        score : float                                   = float(entry.get_score())
+        metadata : Dict[str, Any] | None                = entry.get_metadata()
 
         if verbose:
             logger.info("Optimized x - normalized:", best_solution)

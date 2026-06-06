@@ -71,6 +71,10 @@ claims to prevent) — incomplete soft-delete + later `dst.exists()` 409 on rest
 
 ## Tier 1 — Major: NEWCAS core library (on the `examples/OTA/cascode` path)
 
+> **✅ STATUS: all six (B5–B10) FIXED 2026-06-06** (uncommitted in the worktree; see TODO §19 Tier 1).
+> Verified by `pytest` (137 pass) + 14 regression tests; loader fixes reproduced live on the cascode
+> example. B5's fix also closes the deferred `keep_history` mislabel (B25).
+
 ### BUG-B5 — Base `optimize()` autosave empties the log but not `global_best_index` → IndexError mid-run  🟡 major
 `base.py:178-198`: on autosave `self.optimization_log = OptimizationLog()` (empty), then the same iteration
 reads `self.optimization_log[self.global_best_index]` (`:189`) → **IndexError**, escaping the loop's
