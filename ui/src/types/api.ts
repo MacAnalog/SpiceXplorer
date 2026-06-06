@@ -463,6 +463,7 @@ export interface WizardDutParam {
   min_val: string;
   max_val: string;
   init?: string;
+  val?: string; // frozen operating point (pins a freeze:true param); round-tripped (BUG-B15)
   is_integer: boolean;
   log_scale: boolean;
   freeze: boolean;

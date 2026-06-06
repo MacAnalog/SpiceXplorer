@@ -154,6 +154,11 @@ not validated against actual sources. PVT supply variation is a core purpose of 
 
 ## Tier 3 — Major: backend & UI (encapsulation / lifecycle)
 
+> **✅ STATUS: all four (B13–B16) FIXED 2026-06-06** (uncommitted in the worktree; see TODO §19 Tier 3),
+> plus B44 (delete-active-project runStore teardown) closed alongside B16. Verified by `pytest` (151
+> pass) + 9 regression tests, `tsc`, `eslint`; B13's thread-scoping confirmed against real ngspice in
+> the container (all 503 `spicexplorer` records in a parallel-sim run were on the worker thread).
+
 ### BUG-B13 — Concurrent runs cross-contaminate `run.log` + SSE log via the shared `spicexplorer` logger  🟡 major
 `optimizer_runner.py:372-412`: each `_run_live` attaches its `_QueueLogHandler` **and** a per-run
 `FileHandler` to the process-global `logging.getLogger("spicexplorer")` with **no run-scoping filter**

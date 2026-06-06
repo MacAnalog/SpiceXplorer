@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ui.backend.app_config import REPO_ROOT
+from ui.backend.app_config import REPO_ROOT, work_root
 
 router = APIRouter()
 
@@ -123,7 +123,10 @@ def _search_roots(base_dir: Path | None) -> list[Path]:
 
 def _allowed_roots() -> list[Path]:
     """Whitelist for absolute-path access. Anything outside these is rejected."""
-    roots: list[Path] = [REPO_ROOT]
+    # Include WORK_ROOT: encapsulated projects (and their copied `xschem/` subtrees) live under
+    # work_root() (= /work under Docker), which is OUTSIDE REPO_ROOT — without it, every
+    # encapsulated project's schematic 403s under the documented Docker artifact (BUG-B14).
+    roots: list[Path] = [REPO_ROOT, work_root()]
     pdk = _pdk_xschem_dir()
     if pdk is not None:
         roots.append(pdk)

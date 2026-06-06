@@ -20,6 +20,25 @@ from ui.backend.services.num import safe_float as _safe_float
 logger = logging.getLogger(__name__)
 
 
+class _RunThreadFilter(logging.Filter):
+    """Pass only log records emitted from a specific run's worker thread.
+
+    Each live run attaches its own ``_QueueLogHandler`` + per-run ``FileHandler`` to the process-
+    global ``spicexplorer`` logger. Without scoping, two CONCURRENT runs each receive the other's
+    library records — cross-contaminating both runs' ``run.log`` and SSE log tabs (BUG-B13). Every
+    ``spicexplorer`` record is emitted on the ``_run_live`` worker thread (run_and_pass dispatch +
+    result extraction run there; spicelib's parallel ``RunTask`` threads log to the separate
+    ``spicelib.*`` tree, not captured here), so filtering on the worker thread id isolates each run.
+    """
+
+    def __init__(self, thread_id: int):
+        super().__init__()
+        self._thread_id = thread_id
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.thread == self._thread_id
+
+
 class _QueueLogHandler(logging.Handler):
     """Stream the SpiceXplorer library's own log records to a run's SSE queue.
 
@@ -372,7 +391,11 @@ def _run_live(state: RunState, project_path: str) -> None:
     lib_logger = logging.getLogger("spicexplorer")
     if lib_logger.level == logging.NOTSET or lib_logger.level > logging.INFO:
         lib_logger.setLevel(logging.INFO)
+    # Scope this run's handlers to its own worker thread so concurrent runs don't see each
+    # other's records on the shared logger (BUG-B13). _run_live runs on the worker thread.
+    run_thread_filter = _RunThreadFilter(threading.get_ident())
     log_handler = _QueueLogHandler(state)
+    log_handler.addFilter(run_thread_filter)
     lib_logger.addHandler(log_handler)
     started = datetime.now().isoformat(timespec="seconds")
     final_status = "done"
@@ -409,6 +432,7 @@ def _run_live(state: RunState, project_path: str) -> None:
         file_log_handler.setLevel(logging.DEBUG)
         file_log_handler.setFormatter(
             logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        file_log_handler.addFilter(run_thread_filter)  # this run's thread only (BUG-B13)
         lib_logger.addHandler(file_log_handler)
         logger.info("[run %s] isolated run dir: %s", state.run_id[:8], rdir)
 

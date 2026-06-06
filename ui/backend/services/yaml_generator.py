@@ -50,6 +50,11 @@ def _build_dut_param(row: Dict[str, Any]) -> Dict[str, Any]:
         out["freeze"] = True
     if row.get("init") not in (None, ""):
         out["init"] = _coerce_number(row.get("init"))
+    # `val` is the FROZEN operating point a param is pinned at (parameterize injects
+    # param.val ?? param.init). Dropping it on round-trip un-pins a frozen param to its
+    # init/netlist default — silently changing the optimized design (BUG-B15).
+    if row.get("val") not in (None, ""):
+        out["val"] = _coerce_number(row.get("val"))
     return _drop_empty(out)
 
 
@@ -330,6 +335,7 @@ def project_dict_to_form(data: Dict[str, Any]) -> Dict[str, Any]:
             "min_val": _str_or_blank(d.get("min_val")),
             "max_val": _str_or_blank(d.get("max_val")),
             "init": _str_or_blank(d.get("init")),
+            "val": _str_or_blank(d.get("val")),  # frozen operating point — must round-trip (BUG-B15)
             "is_integer": _bool(d.get("is_integer"), False),
             "log_scale": _bool(d.get("log_scale"), False),
             # Project_Setup default: freeze=True if not specified — but wizard default is "tracked".

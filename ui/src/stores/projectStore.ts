@@ -71,6 +71,16 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     }
   },
   switchProject: async (id) => {
+    // A live run belongs to the project we're leaving; tear it down BEFORE rebinding so its SSE
+    // events don't stream into the new project's UI and the EventSource isn't orphaned (BUG-B16).
+    // stopRun() stops it server-side and records it to history — its run dir/checkpoints survive,
+    // so it stays resumable. (Lazy import: runStore imports projectStore, so avoid a static cycle.)
+    try {
+      const { useRunStore } = await import("@/stores/runStore");
+      if (useRunStore.getState().isRunning) useRunStore.getState().stopRun();
+    } catch {
+      /* best-effort teardown */
+    }
     try {
       const d = await api.getProject(id);
       let yaml = "";
@@ -115,6 +125,15 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       // so a subsequent Start would POST that dead path (unscoped) instead of being blocked.
       if (get().projectId === id) {
         get().reset();
+        // The backend already stopped the run (delete_project → stop_runs_for); also close the
+        // orphaned client EventSource + clear the run UI so it doesn't show a phantom "running"
+        // run for a project that no longer exists (BUG-B44).
+        try {
+          const { useRunStore } = await import("@/stores/runStore");
+          useRunStore.getState().reset();
+        } catch {
+          /* best-effort teardown */
+        }
       }
       return true;
     } catch {
