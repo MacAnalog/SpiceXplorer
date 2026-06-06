@@ -39,7 +39,7 @@ accurate `file:line` anchors verified against `HEAD`. Where the landed code diff
 the original sketch, the difference is called out. A new
 [Known gaps in the landed Phase 1 / manual sim](#known-gaps-in-the-landed-phase-1--manual-sim)
 subsection folds in this round's freshly-found PVT/manual-sim bugs (cross-referenced to
-[bug_report.md](bug_report.md)).
+[bug_report.md](doc/archive/bug_report.md)).
 
 **Scope.** Make process/voltage/temperature (PVT) corners first-class so they actually
 drive SPICE simulation, superseding the dead `tech_spec.pvt_map` and the display-only flat
@@ -389,7 +389,7 @@ fixed before Phase 2 builds on this surface.
 ### Known gaps in the landed Phase 1 / manual sim
 
 These are real, code-level defects in the **landed** implementation (verified statically at
-`HEAD`), folded in from [bug_report.md](bug_report.md):
+`HEAD`), folded in from [bug_report.md](doc/archive/bug_report.md):
 
 - **WIZ-2 / BUG-A3 — `pvt.model_lib_root` dropped on the YAML→form→YAML wizard round-trip
   (major).** `_build_pvt_block` never emits `model_lib_root`
@@ -587,7 +587,7 @@ Score Shaping.
   (manual vector). It deliberately avoids the random `ask()` point that was the `sanity.py` gap.
 - **Multi-corner aggregation is the genuine research item** — deferred to Phase 2 (strategy
   table above; commit to none).
-- **Known gaps in the landed work (see [bug_report.md](bug_report.md)):** WIZ-2 (`model_lib_root`
+- **Known gaps in the landed work (see [bug_report.md](doc/archive/bug_report.md)):** WIZ-2 (`model_lib_root`
   dropped in the wizard round-trip), WIZ-4 (multi-rail supplies dropped), SCH-2 (`dut_param`
   string `val` never resolved — undercuts Mode B pre-fill), OPT-2 (one-directional output
   isolation between live run and manual sim).

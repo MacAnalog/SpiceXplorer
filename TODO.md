@@ -196,7 +196,7 @@ Things get crowded once a project has 10+ params and 6+ specs. Reduce clutter wi
 
 ## 11. Bug fixes — functional audit (2026-06, FIRST round)
 
-Actionable list from the **first** audit. Full per-bug location / root cause / fix direction in [bug_report.md](bug_report.md) (IDs match). 39 confirmed (17 major, 22 minor); the two pre-flagged regressions lead.
+Actionable list from the **first** audit. Full per-bug location / root cause / fix direction in [bug_report.md](doc/archive/bug_report.md) (IDs match). 39 confirmed (17 major, 22 minor); the two pre-flagged regressions lead.
 
 > **Status (2026-06): 37 of 39 fixed in this branch** — verified by `pytest` (+7 new regression tests), `ruff`, `tsc`, `eslint` (0 warnings) and `next build`. Exceptions: **BUG-01** had only the graceful-degradation half (a "symbols unavailable" banner) — see §17 BUG-A1 for the now-actionable remainder on the **server** (the PDK IS present here). **BUG-35** keeps its `pvt_map`/`pvt_corners` parsing **deferred** (its `freeze`/default half is done).
 
@@ -299,7 +299,7 @@ Make corners first-class and actually drive the sim against **one** active corne
 
 ## 15. UI layout fixes (CSS / overflow / scroll)
 
-From the layout audit — full per-tab findings + global root causes in [ui_layout_report.md](ui_layout_report.md).
+From the layout audit — full per-tab findings + global root causes in [ui_layout_report.md](doc/archive/ui_layout_report.md).
 
 ### Landed ✅
 - [x] **RC-1 / RC-2 (largely subsumed)**: added `w-full min-w-0` to `inputCn` + `min-w-0` to `Field` (`wizard-controls.tsx`) and `min-w-0` to `selectCn` (`select.tsx`). Deliberately kept `selectCn` off `w-full` so toolbar selects don't stretch. Fixes the reported PVT Supply-column overflow and the input-heavy steps.
@@ -319,7 +319,7 @@ From the layout audit — full per-tab findings + global root causes in [ui_layo
 
 ## 16. Redundancy cleanup (low-risk first)
 
-From the redundancy survey — full list + risk ratings in [project_redundancy.md](project_redundancy.md).
+From the redundancy survey — full list + risk ratings in [project_redundancy.md](doc/archive/project_redundancy.md).
 
 ### Landed ✅
 - [x] Deleted unused `formatNumber` (`lib/utils.ts`); removed dead `uiStore` fields (`compareRunA`/`compareRunB`/`setCompare`/`setSelectedRunId`); removed the dead `DutParams` class (`domains.py`, BUG-38). *(The one-tab `bottomTab` collapse is deferred — purely cosmetic.)*
@@ -382,7 +382,7 @@ Actionable list from the **second** audit (static analysis on the server — **n
 
 ## 18. Project encapsulation & run isolation (report.md) — LANDED ✅
 
-The full encapsulation epic from [report.md](report.md) shipped on `feat/pvt` (commits `ae4f9bd` →
+The full encapsulation epic from [report.md](doc/archive/report.md) shipped on `feat/pvt` (commits `ae4f9bd` →
 `7a228d8`, P0→P4). Each project is now an encapsulated directory under `WORK_ROOT` (`/work` in Docker,
 `<repo>/work` native) and each optimization **run** is an isolated, self-contained folder. This
 **fixes the Docker checkpoint data-loss bug** (autosave was written CWD-relative to `/app`, inside the
@@ -422,7 +422,7 @@ image layer, gone on `docker compose down`). **None of this code was covered by 
 
 Actionable list from the **third** audit — a multi-agent static-analysis pass on `feat/pvt` at HEAD
 (15 subsystem finders; **every** finding re-checked by an independent adversarial verifier that re-read
-the cited code). Full per-bug location / scenario / fix / verifier note in [bug_report_r3.md](bug_report_r3.md)
+the cited code). Full per-bug location / scenario / fix / verifier note in [bug_report_r3.md](doc/archive/bug_report_r3.md)
 (IDs match). **73 raised → 73 confirmed REAL (deduped to 52 distinct bugs); 17 refuted** (recorded at the end
 of the report so they aren't re-raised). No app/sim was run — items needing a live trial to *see* the
 symptom (B4, B13, B31) are confirmed at the source/data-flow level. **None of this surface was covered by

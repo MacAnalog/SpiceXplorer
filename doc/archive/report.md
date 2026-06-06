@@ -35,26 +35,26 @@ git tree; nothing is lost when the container is recreated.
 
 Three concrete defects make this work load-bearing rather than cosmetic:
 
-1. **Run checkpoints are silently destroyed in Docker.** [base.py:63](src/spicexplorer/optimization/base.py#L63)
+1. **Run checkpoints are silently destroyed in Docker.** [base.py:63](../../src/spicexplorer/optimization/base.py#L63)
    sets `autosave_checkpoint_dir = Path("./auto_save/…")` — **relative to the process CWD**. The
-   backend's CWD in the container is `/app` ([Dockerfile.backend:138](docker/Dockerfile.backend#L138)),
-   and the entrypoint even pre-creates `/app/auto_save` ([entrypoint-backend.sh:30-31](docker/entrypoint-backend.sh#L30-L31)).
+   backend's CWD in the container is `/app` ([Dockerfile.backend:138](../../docker/Dockerfile.backend#L138)),
+   and the entrypoint even pre-creates `/app/auto_save` ([entrypoint-backend.sh:30-31](../../docker/entrypoint-backend.sh#L30-L31)).
    So every live-run checkpoint is written **inside the image layer, not the `/work` bind-mount**,
    and is **gone on `docker compose down` / `docker rm`**. This is data loss, today.
 
 2. **The CWD-coupling forces a fragile dual-root search.** Because the write path is non-deterministic,
-   [checkpoint.py:60-68](ui/backend/routes/checkpoint.py#L60-L68) has to scan **both**
+   [checkpoint.py:60-68](../../ui/backend/routes/checkpoint.py#L60-L68) has to scan **both**
    `REPO_ROOT/auto_save` and `Path.cwd()/auto_save`, and the native launcher
-   [run_newcas_ui.sh:74](scripts/run_newcas_ui.sh#L74) does a forced `cd "${ROOT_DIR}"` *just* to make
-   the two coincide (its own comment at [:72](scripts/run_newcas_ui.sh#L72) admits this). That is the
+   [run_newcas_ui.sh:74](../../scripts/run_newcas_ui.sh#L74) does a forced `cd "${ROOT_DIR}"` *just* to make
+   the two coincide (its own comment at [:72](../../scripts/run_newcas_ui.sh#L72) admits this). That is the
    live evidence the path is broken.
 
 3. **There is no "project" — only a loose YAML path, and runs all pool together.** `POST /api/project/load`
-   ([project.py:129-162](ui/backend/routes/project.py#L129-L162)) takes an arbitrary `yaml_path` or
+   ([project.py:129-162](../../ui/backend/routes/project.py#L129-L162)) takes an arbitrary `yaml_path` or
    raw `yaml_content` (written to a `/tmp` temp file). There is no per-project home, so every
    project's autosaves pile into one flat `auto_save/` keyed only by `name_timestamp`. Multiple
    projects bleed into each other; a run is a 25-item `localStorage` blob, not an inspectable unit.
-   And `auto_save/` is **not in `.gitignore`** (only `work/` is, [.gitignore:31](.gitignore#L31)), so
+   And `auto_save/` is **not in `.gitignore`** (only `work/` is, [.gitignore:31](../../.gitignore#L31)), so
    the repo-root pile is git-visible and committable.
 
 **Isolation is the real win.** Fixing (1)–(3) makes runs durable, deterministic, per-project, and
@@ -120,14 +120,14 @@ WORK_ROOT =
    → .expanduser().resolve();  mkdir(parents=True, exist_ok=True) on first use
 ```
 
-- Add `work_root()` to [app_config.py](ui/backend/app_config.py) as the single source of truth.
+- Add `work_root()` to [app_config.py](../../ui/backend/app_config.py) as the single source of truth.
   `resolve()` stays `REPO_ROOT`-relative **for read-only assets** (examples, presets, schematic SVG);
   `work_root()` is the base for **all mutable state**.
-- [compose.yaml](compose.yaml) backend `environment:` adds `WORK_ROOT: /work`; the bind-mount
+- [compose.yaml](../../compose.yaml) backend `environment:` adds `WORK_ROOT: /work`; the bind-mount
   `${WORKDIR:-./work}:/work` stays. (Optionally rename the host var `WORKDIR → WORK_ROOT` for
   symmetry, keeping `WORKDIR` as a deprecated alias.)
 - Native `run_newcas_ui.sh` needs **no** `WORK_ROOT` → falls back to `<repo>/work`. The forced
-  `cd "${ROOT_DIR}"` at [:74](scripts/run_newcas_ui.sh#L74) is then **no longer needed to place
+  `cd "${ROOT_DIR}"` at [:74](../../scripts/run_newcas_ui.sh#L74) is then **no longer needed to place
   autosave** — but audit for other CWD dependencies before removing it.
 - **Document a real out-of-repo path** (`WORKDIR=~/spicex-work`) in `.env.example` to literally honor
   "separate from the git repo"; keep `./work` only as the zero-config fallback. Keep the **bind mount,
@@ -142,15 +142,15 @@ The backend stays a **thin adapter**; the optimizer library and its scorer stay 
 new business logic is filesystem bookkeeping.
 
 **(a) The load-bearing fix — de-CWD the autosave root (additive, default unchanged).** Give
-`Base_Optimizer.__init__` ([base.py:60-66](src/spicexplorer/optimization/base.py#L60-L66)) an
+`Base_Optimizer.__init__` ([base.py:60-66](../../src/spicexplorer/optimization/base.py#L60-L66)) an
 **optional** kwarg (`output_root: Path | None = None`); when present,
 `autosave_checkpoint_dir = output_root / "checkpoints"`, else keep today's `Path("./auto_save/…")`.
-Then [optimizer_runner.py](ui/backend/services/optimizer_runner.py) passes the per-run dir at
+Then [optimizer_runner.py](../../ui/backend/services/optimizer_runner.py) passes the per-run dir at
 construction.
 
 > **Why a constructor kwarg, not a post-construction attribute set.** Setting `opt.autosave_checkpoint_dir`
 > *after* `__init__` is tempting (it's public mutable state) but `__init__` already `mkdir`s the
-> default at [base.py:64](src/spicexplorer/optimization/base.py#L64), leaving a stray `/app/auto_save/…`
+> default at [base.py:64](../../src/spicexplorer/optimization/base.py#L64), leaving a stray `/app/auto_save/…`
 > dir every run. The kwarg avoids that and **preserves the CLI/example scripts** (they omit it → byte-identical
 > behavior), which is essential — `examples/.../sizing/*.py` run the optimizer directly.
 
@@ -182,10 +182,10 @@ DELETE /api/projects/{id}            → soft-delete (deferred — see §10)
 POST   /api/projects/{id}/fork       → cp -r           (deferred — see §10)
 ```
 
-**(e) Checkpoint discovery follows the runs.** Extend [checkpoint.py](ui/backend/routes/checkpoint.py)
+**(e) Checkpoint discovery follows the runs.** Extend [checkpoint.py](../../ui/backend/routes/checkpoint.py)
 `_autosave_roots()` to include per-project `runs/*/checkpoints/`, **keeping** the legacy
 `REPO_ROOT/auto_save` + `cwd/auto_save` roots (so old runs aren't orphaned) and the repo-relative
-preset catalog ([app_config.py](ui/backend/app_config.py) `preset_checkpoint_paths()`) as a separate
+preset catalog ([app_config.py](../../ui/backend/app_config.py) `preset_checkpoint_paths()`) as a separate
 read-only source. Scope by `project_id` where the caller knows it, to avoid an O(projects×runs)
 `rglob` on every list.
 
@@ -198,7 +198,7 @@ read-only source. Scope by `project_id` where the caller knows it, to avoid an O
 
 | Artifact | Purpose | Today |
 |---|---|---|
-| `config_snapshot.yaml` | the **exact** `Project_Setup` it ran, with ephemeral algo/budget/seed/corner overrides baked in | overrides are in-memory only ([_apply_overrides](ui/backend/services/optimizer_runner.py)) — **no durable record of what actually ran** |
+| `config_snapshot.yaml` | the **exact** `Project_Setup` it ran, with ephemeral algo/budget/seed/corner overrides baked in | overrides are in-memory only ([_apply_overrides](../../ui/backend/services/optimizer_runner.py)) — **no durable record of what actually ran** |
 | `run.json` | label, status, best score, timing, `parent_run_id`, the override diff | a `localStorage` blob, not per-run |
 | `checkpoints/*.json` | the optimizer's autosaves | pooled globally in `./auto_save`, CWD-dependent |
 | `run.log` | full DEBUG library log | SSE-ephemeral, lost on disconnect |
@@ -225,13 +225,13 @@ read its log inline (BottomPanel "Run log" tab), and delete it (trash its folder
 
 1. **Title-bar Project switcher + ⌘P Projects overlay.** The active project name shows in the title
    bar; click or ⌘P opens a `ProjectsOverlay` (same `dynamic(... ssr:false)` pattern as
-   [CommandPalette](ui/src/components/overlays/CommandPalette.tsx)): search, rows
+   [CommandPalette](../../ui/src/components/overlays/CommandPalette.tsx)): search, rows
    (name · last run · best score · origin badge), and footer actions **+ New** (existing
    `WizardOverlay`) and **Load example…** (copy-on-load). This **retires** `SetupTab`'s raw-path /
    "Load example" `<select>` affordances — Setup becomes pure edit/apply.
 
 2. **Per-project Runs panel** — rescope the existing
-   [RunsRail](ui/src/components/shell/rails/RunsRail.tsx) to `GET /api/projects/{id}/runs`: status
+   [RunsRail](../../ui/src/components/shell/rails/RunsRail.tsx) to `GET /api/projects/{id}/runs`: status
    pills (running/done/stopped/error), best score, algo·iter, sparkline; row actions Open-in-Explore,
    Resume, Delete, **Open log → BottomPanel**. Checkpoints become children of their owning run, not a
    global flat list.
@@ -252,7 +252,7 @@ manifest-only edit so paths never break; delete = `mv` to `.trash`).
 ## 8. Migration & Backward-Compat
 
 **The single biggest hazard is the `ws_root` portability contract — do not touch it.**
-[from_yaml](src/spicexplorer/core/domains.py#L802-L808) has three battle-tested branches:
+[from_yaml](../../src/spicexplorer/core/domains.py#L802-L808) has three battle-tested branches:
 absolute→as-is, relative→YAML-dir, omitted→YAML-dir, with `~` expansion. The committed examples ship
 `ws_root: ..` and bundle netlists in-repo so a fresh clone runs unedited. **Encapsulation is purely
 additive:** a *new* project's copied `project.yaml` simply uses `ws_root: .` (resolves to the project
@@ -266,7 +266,7 @@ the user wrote, not a global mode switch.
 
 **The proven failure mode to guard against:** `project.py` once returned `yaml_path=""` and live runs
 silently optimized the *default cascode example* instead of the applied YAML (the fix is documented at
-[project.py:134-151](ui/backend/routes/project.py#L134-L151)). A registry that resolves "current
+[project.py:134-151](../../ui/backend/routes/project.py#L134-L151)). A registry that resolves "current
 project" by anything other than the exact path threaded through every endpoint can resurrect this —
 now *harder to notice* because it "looks encapsulated." Hence `project_id → resolve_yaml` must be the
 single resolver, and a regression test must pin it.
@@ -287,7 +287,7 @@ Each phase ships and is testable on its own; ordered load-bearing-first, gold-pl
 SPICE): assert all three `from_yaml` branches + `~` expansion, **plus** a guard that for an
 absolute-`ws_root` project the resolved `output_folder` and autosave root are **under that root and
 `REPO_ROOT not in resolved.parents`**. *This is the test that would have caught the `yaml_path=""`
-bug.* Wire it beside the existing [test_ui_restructure_2026_06.py](tests/test_ui_restructure_2026_06.py).
+bug.* Wire it beside the existing [test_ui_restructure_2026_06.py](../../tests/test_ui_restructure_2026_06.py).
 **Proof: green against today's code.**
 
 **Phase 1 — `WORK_ROOT` + deterministic autosave (backend-only, default unchanged).** Add
@@ -366,7 +366,7 @@ These are genuine forks where your call changes the design. My recommendation is
 Synthesized from five grounded expert analyses (filesystem, backend/API, lifecycle-UX, Docker/ops,
 migration/risk) plus direct verification at `HEAD`. The three headline facts —
 `/app/auto_save` ephemerality in Docker, `auto_save/` absent from `.gitignore`, and the forced native
-`cd` — were each confirmed by reading [Dockerfile.backend:138](docker/Dockerfile.backend#L138),
-[entrypoint-backend.sh:30-31](docker/entrypoint-backend.sh#L30-L31), [.gitignore:31](.gitignore#L31),
-and [run_newcas_ui.sh:72-74](scripts/run_newcas_ui.sh#L72-L74). The adversarial critique phase
+`cd` — were each confirmed by reading [Dockerfile.backend:138](../../docker/Dockerfile.backend#L138),
+[entrypoint-backend.sh:30-31](../../docker/entrypoint-backend.sh#L30-L31), [.gitignore:31](../../.gitignore#L31),
+and [run_newcas_ui.sh:72-74](../../scripts/run_newcas_ui.sh#L72-L74). The adversarial critique phase
 (cross-lens conflict reconciliation) is folded into §4, §5(a), §8, and §10.
