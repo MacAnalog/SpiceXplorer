@@ -21,6 +21,34 @@ _PARAM_LINE = re.compile(
 )
 
 
+_MEAS_LINE = re.compile(
+    r"""^\s*\.meas(?:ure)?\s+       # .meas / .measure
+        (ac|dc|tran|op|noise|sp|tf|pz|disto)\s+  # analysis type
+        ([A-Za-z_][A-Za-z0-9_]*)   # the measurement (result) name
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def parse_meas_candidates(netlist_text: str) -> List[Dict[str, str]]:
+    """Extract `.meas <type> <name> …` result names as candidate target specs.
+
+    Returns `{name, sim_type}` rows (first occurrence wins). These seed the wizard's
+    Target-Specs auto-discovery checklist — the user picks which become specs and
+    sets goal/target/tolerance. No full SPICE parse; only the `.meas` directive form.
+    """
+    seen: Dict[str, str] = {}
+    for raw in netlist_text.splitlines():
+        line = raw.split("//", 1)[0]
+        m = _MEAS_LINE.match(line)
+        if not m:
+            continue
+        sim_type, name = m.group(1).lower(), m.group(2)
+        if name not in seen:
+            seen[name] = sim_type
+    return [{"name": n, "sim_type": t} for n, t in seen.items()]
+
+
 def parse_params(netlist_text: str) -> List[Dict[str, str]]:
     """Return a list of `{name, default_val}` rows in order of first appearance.
 
