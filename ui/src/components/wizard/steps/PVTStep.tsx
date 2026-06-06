@@ -140,7 +140,7 @@ export function PVTStep() {
               </button>
             </div>
 
-            <div className="grid grid-cols-[1.4fr_0.7fr_0.8fr_0.8fr] gap-2">
+            <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,0.8fr)] gap-2">
               <Field label="Name">
                 <TextInput value={c.name} placeholder="tt_27C_1V8" onChange={(e) => updateCorner(i, { name: e.target.value })} />
                 {dupNames.has(c.name.trim()) && (
@@ -183,7 +183,7 @@ export function PVTStep() {
                 </div>
               )}
               {c.includes.map((inc, ii) => (
-                <div key={ii} className="grid grid-cols-[1fr_1fr_auto] gap-2">
+                <div key={ii} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
                   <TextInput value={inc.lib_file} placeholder="cornerMOSlv.lib" onChange={(e) => updateInclude(i, ii, { lib_file: e.target.value })} />
                   <TextInput value={inc.section} placeholder="mos_tt" onChange={(e) => updateInclude(i, ii, { section: e.target.value })} />
                   <button

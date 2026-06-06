@@ -19,7 +19,7 @@ export function BasicInfoStep() {
         </Field>
         <Field label="Simulator">
           <select
-            className={selectCn("sm")}
+            className={selectCn("sm") + " w-full"}
             value={p.simulator}
             onChange={(e) => updateProject({ simulator: e.target.value })}
           >

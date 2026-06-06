@@ -49,7 +49,7 @@ export function PDKRulesStep() {
         ) : (
           <div className="space-y-2">
             {rows.map((r, i) => (
-              <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2">
+              <div key={i} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
                 <TextInput value={r.key} placeholder="key (e.g. min_nfet_w)" onChange={(e) => updateRow(i, { key: e.target.value })} />
                 <TextInput value={r.value} placeholder="value (e.g. 0.18u)" onChange={(e) => updateRow(i, { value: e.target.value })} />
                 <button

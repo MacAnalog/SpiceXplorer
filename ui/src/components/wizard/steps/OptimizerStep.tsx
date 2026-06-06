@@ -66,7 +66,7 @@ export function OptimizerStep() {
       <div className="grid grid-cols-2 gap-3 p-4">
         <Field label="Optimizer type">
           <select
-            className={selectCn("sm")}
+            className={selectCn("sm") + " w-full"}
             value={o.type}
             onChange={(e) => handleTypeChange(e.target.value)}
           >
@@ -79,7 +79,7 @@ export function OptimizerStep() {
         <Field label="Algorithm name">
           {o.type === "nevergrad" ? (
             <select
-              className={selectCn("sm")}
+              className={selectCn("sm") + " w-full"}
               value={o.name}
               onChange={(e) => updateOptimizer({ name: e.target.value })}
             >
@@ -91,7 +91,7 @@ export function OptimizerStep() {
             </select>
           ) : o.type === "bayesian_ax" ? (
             <select
-              className={selectCn("sm")}
+              className={selectCn("sm") + " w-full"}
               value={o.name}
               onChange={(e) => updateOptimizer({ name: e.target.value })}
             >
@@ -99,7 +99,7 @@ export function OptimizerStep() {
             </select>
           ) : (
             <select
-              className={selectCn("sm")}
+              className={selectCn("sm") + " w-full"}
               value={o.name}
               onChange={(e) => updateOptimizer({ name: e.target.value })}
             >
@@ -159,11 +159,11 @@ export function OptimizerStep() {
             </div>
           ) : (
             <div className="space-y-1">
-              <div className="grid grid-cols-[1.2fr_1.6fr_auto] gap-2 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+              <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1.6fr)_auto] gap-2 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
                 <div>Key</div><div>Value (true / false / null / number / string)</div><div></div>
               </div>
               {kwargs.map((row, i) => (
-                <div key={i} className="grid grid-cols-[1.2fr_1.6fr_auto] items-center gap-2">
+                <div key={i} className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1.6fr)_auto] items-center gap-2">
                   <TextInput value={row.key} onChange={(e) => updateKwarg(i, { key: e.target.value })} placeholder="initialization" />
                   <TextInput value={row.value} onChange={(e) => updateKwarg(i, { value: e.target.value })} placeholder="LHS" />
                   <button

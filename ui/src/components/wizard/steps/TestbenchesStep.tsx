@@ -128,11 +128,11 @@ export function TestbenchesStep() {
                 </div>
               ) : (
                 <div className="space-y-1">
-                  <div className="grid grid-cols-[1.4fr_1fr_1.6fr_auto] gap-2 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+                  <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.6fr)_auto] gap-2 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
                     <div>Name</div><div>Value</div><div>Description</div><div></div>
                   </div>
                   {tb.params.map((p, pi) => (
-                    <div key={pi} className="grid grid-cols-[1.4fr_1fr_1.6fr_auto] items-center gap-2">
+                    <div key={pi} className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.6fr)_auto] items-center gap-2">
                       <div className="flex items-center gap-1">
                         <TextInput value={p.name} onChange={(e) => updateParam(i, pi, { name: e.target.value })} />
                         {p.source === "netlist" && <Badge variant="indigo">net</Badge>}
