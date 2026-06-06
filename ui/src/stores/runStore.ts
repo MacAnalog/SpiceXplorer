@@ -93,6 +93,10 @@ interface RunStore {
   checkpoints: CheckpointEvent[];
   /** Last error surfaced by the run (mid-stream {error} event or a lost connection). */
   runError: string | null;
+  /** Wall-clock ms timestamp when the active run started (for the Elapsed KPI). */
+  runStartTs: number | null;
+  /** Frozen elapsed-ms of the last finished run (so the card holds after Stop). */
+  elapsedMs: number;
   history: RunRecord[];
 
   /** Begin a run: reset state, capture meta, open the SSE stream for `id`. */
@@ -126,6 +130,8 @@ const INITIAL = {
   currentIter: 0,
   checkpoints: [] as CheckpointEvent[],
   runError: null as string | null,
+  runStartTs: null as number | null,
+  elapsedMs: 0,
 };
 
 export const useRunStore = create<RunStore>((set, get) => ({
@@ -158,6 +164,8 @@ export const useRunStore = create<RunStore>((set, get) => ({
       currentIter: 0,
       checkpoints: [],
       runError: null,
+      runStartTs: Date.now(),
+      elapsedMs: 0,
     });
 
     const source = new EventSource(api.streamUrl(id));
@@ -250,8 +258,8 @@ export const useRunStore = create<RunStore>((set, get) => ({
 
   finishRun: () => {
     closeStream();
-    const { runId, events, budget, currentIter, history } = get();
-    set({ isRunning: false });
+    const { runId, events, budget, currentIter, history, runStartTs } = get();
+    set({ isRunning: false, elapsedMs: runStartTs ? Date.now() - runStartTs : 0 });
     if (!runId || events.length === 0) return;
 
     // Build a metadata-only history record (no full event arrays persisted).

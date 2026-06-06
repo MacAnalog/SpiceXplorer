@@ -10,11 +10,13 @@ import { ScoreConvergenceChart } from "@/components/charts/ScoreConvergenceChart
 import { MetricConvergenceChart } from "@/components/charts/MetricConvergenceChart";
 import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
+import { Stat } from "@/components/ui/stat";
 import { Toolbar, ToolbarLabel, ToolbarSpacer } from "@/components/shell/Toolbar";
 import { Separator } from "@/components/ui/separator";
 import { selectCn } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CornerSelect } from "@/components/pvt/CornerSelect";
+import { formatEng, formatDuration, statusForGoal } from "@/lib/utils";
 import type { AppConfig } from "@/types/api";
 
 interface Props {
@@ -33,6 +35,11 @@ interface Props {
 export function OptimizeTab({ appConfig }: Props) {
   const { summary, isApplied } = useProjectStore();
   const { isReplay, isRunning, events, startRun, stopRun, runError } = useRunStore();
+  const bestMetrics = useRunStore((s) => s.bestMetrics);
+  const currentIter = useRunStore((s) => s.currentIter);
+  const budget = useRunStore((s) => s.budget);
+  const runStartTs = useRunStore((s) => s.runStartTs);
+  const storedElapsedMs = useRunStore((s) => s.elapsedMs);
   const env = useUIStore((s) => s.env);
   const runConfig = useUIStore((s) => s.runConfig);
   const setRunConfig = useUIStore((s) => s.setRunConfig);
@@ -40,6 +47,14 @@ export function OptimizeTab({ appConfig }: Props) {
   const [replayCheckpoint, setReplayCheckpoint] = useState<string>("");
   const [selectedMetric, setSelectedMetric] = useState<string>("");
   const [startError, setStartError] = useState<string | null>(null);
+  // Tick every second while running so the Elapsed / Est. remaining KPIs advance.
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (!isRunning) return;
+    setNowTick(Date.now());
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [isRunning]);
 
   const enabledSpecs = useMemo(
     () => summary?.target_specs.filter((s) => s.enable) ?? [],
@@ -90,6 +105,29 @@ export function OptimizeTab({ appConfig }: Props) {
     ],
     [events, isReplay],
   );
+
+  // KPI row values. Best-score mirrors the RightRail (running max over best_score).
+  const kpis = useMemo(() => {
+    const best = events.reduce((m, e) => {
+      const v = e.best_score ?? e.score;
+      return v != null && Number.isFinite(v) && v > m ? v : m;
+    }, -Infinity);
+    const passing = enabledSpecs.filter(
+      (s) => statusForGoal(s.goal, bestMetrics[s.name], s.target, s.tolerance ?? undefined) === "pass",
+    ).length;
+    return {
+      bestScore: Number.isFinite(best) ? best : null,
+      passing,
+      total: enabledSpecs.length,
+    };
+  }, [events, enabledSpecs, bestMetrics]);
+
+  const elapsedMs = isRunning && runStartTs ? Math.max(0, nowTick - runStartTs) : storedElapsedMs;
+  const estRemainingMs =
+    isRunning && currentIter > 0 && budget > currentIter
+      ? (elapsedMs / currentIter) * (budget - currentIter)
+      : null;
+  const hasRun = events.length > 0 || isRunning;
 
   const selectedSpec = enabledSpecs.find((s) => s.name === selectedMetric);
   const metricRuns = useMemo(
@@ -200,6 +238,24 @@ export function OptimizeTab({ appConfig }: Props) {
           <EmptyState bordered minHeight="min-h-32">
             Apply a project or select a preset checkpoint to enable a run.
           </EmptyState>
+        )}
+
+        {hasRun && (
+          <div className="grid grid-cols-5 gap-2.5">
+            <Stat eyebrow="best score" value={kpis.bestScore != null ? formatEng(kpis.bestScore) : "—"} />
+            <Stat
+              eyebrow="iterations"
+              value={currentIter > 0 ? String(currentIter) : "—"}
+              unit={budget > 0 ? `/ ${budget}` : undefined}
+            />
+            <Stat
+              eyebrow="specs passing"
+              value={`${kpis.passing}/${kpis.total}`}
+              tone={kpis.total > 0 && kpis.passing === kpis.total ? "ok" : kpis.passing === 0 ? "danger" : "warn"}
+            />
+            <Stat eyebrow="elapsed" value={formatDuration(elapsedMs)} />
+            <Stat eyebrow="est. remaining" value={estRemainingMs != null ? formatDuration(estRemainingMs) : "—"} />
+          </div>
         )}
 
         <div className="grid grid-cols-2 gap-2.5">
