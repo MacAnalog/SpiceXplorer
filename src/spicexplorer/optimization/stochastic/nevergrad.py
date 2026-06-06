@@ -209,8 +209,12 @@ class Nevergrad_Spice_Bode_Optimizer(NevergradMixin, Spice_Bode_Optimizer):
 class Nevergrad_Spice_Constraint_Satisfaction(NevergradMixin, Spice_Constraint_Satisfaction):
     def __init__(self,
                  setup_obj: Project_Setup,
-                 spicelib_wrappers : Dict[TestbenchParams, NGSpice_Wrapper]):
-        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers)
+                 spicelib_wrappers : Dict[TestbenchParams, NGSpice_Wrapper],
+                 output_root: Path | None = None):
+        # Accept + forward output_root so per-run checkpoint isolation works for this endpoint too,
+        # matching Nevergrad_Spice_Single_Objective (BUG-B26).
+        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers,
+                         output_root = output_root)
         self.parametrization: ng.p.Dict | None = None
         logger.info(f"started the {__class__} optimizer class")
 # ------------------------------------------------

@@ -106,10 +106,14 @@ def _target_specs_from_yaml(yaml_path: str) -> list[dict[str, Any]] | None:
         project = Project_Setup.from_yaml(vp)
     except Exception:
         return None
+    # Only ENABLED specs gate envelope `passes` / scatter feasibility — the optimizer scores only
+    # enabled_targets(), so including disabled ones makes the analysis disagree with the run (BUG-B39).
+    # tolerance is always > 0 after TargetSpec.__post_init__ (B17), so emit it directly rather than
+    # a None that would later crash `target - tol` arithmetic (BUG-B35).
     return [
         {"name": s.name, "target": float(s.target), "goal": s.goal.value,
-         "tolerance": float(s.tolerance) if s.tolerance else None}
-        for s in project.optimizer_config.target_specs.targets
+         "tolerance": float(s.tolerance)}
+        for s in project.optimizer_config.target_specs.enabled_targets()
     ]
 
 
@@ -123,8 +127,10 @@ def _resolve_checkpoint_path(checkpoint_id: str) -> Path | None:
     path = preset_checkpoint_paths().get(checkpoint_id)
     if path is not None and path.exists():
         return path
+    # Match on EXACT stem, not a `{id}*` prefix glob: a prefix like `..._trial2` would otherwise
+    # also match `..._trial2_FINAL`/`..._trial20`/`..._trial200` and resolve the wrong file (BUG-B38).
     for autosave_root in _autosave_roots():
-        candidates = sorted(autosave_root.rglob(f"{checkpoint_id}*.json"))
+        candidates = sorted(p for p in autosave_root.rglob("*.json") if p.stem == checkpoint_id)
         if candidates:
             return candidates[0]
     return None

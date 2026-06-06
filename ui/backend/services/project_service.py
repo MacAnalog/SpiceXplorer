@@ -137,7 +137,10 @@ def reconcile_stale_runs() -> int:
     """On startup, flip any ``run.json`` left ``status: running`` (a crashed/killed
     backend) to ``error`` so the run list is honest (report.md §6). Returns the count."""
     fixed = 0
-    for base in (projects_root(), runs_root()):
+    # Also scan trash_root(): a run that crashed `running` and was then soft-deleted before the
+    # next restart would otherwise keep its stale "running" status forever and resurface as such
+    # on restore (BUG-B43).
+    for base in (projects_root(), runs_root(), trash_root()):
         for rj in base.rglob("run.json"):
             try:
                 d = json.loads(rj.read_text())

@@ -112,6 +112,10 @@ def parse_value(val: Union[str, float, int]) -> np.float64:
     """
     if isinstance(val, (float, int)):
         return np.float64(val)
+    if val is None:
+        # A present-but-empty YAML key (e.g. `temp:` / supply `value:`) reaches here as None;
+        # raise a descriptive error instead of an opaque AttributeError on `None.lower()` (BUG-B18).
+        raise ValueError("parse_value received None (a YAML key was present but had no value)")
     if val.lower() == "inf":
         return np.float64(np.inf)
     
@@ -161,6 +165,13 @@ def _normalize_pvt_block(proj: dict) -> None:
     for corner in corners:
         # process bundle reference  →  concrete model_includes
         bundle_ref = corner.pop("process", None)
+        if bundle_ref is not None and "model_includes" in corner:
+            # Ambiguous: both an inline include list AND a process-bundle reference. Don't silently
+            # drop `process` (BUG-B32) — refuse so the author picks one.
+            raise ValueError(
+                f"PVT corner '{corner.get('name', '?')}' specifies BOTH 'process: {bundle_ref}' and "
+                f"an inline 'model_includes' — use one or the other."
+            )
         if bundle_ref is not None and "model_includes" not in corner:
             if bundle_ref not in bundles:
                 raise ValueError(
@@ -291,6 +302,13 @@ class PVTConfig:
                 f"active_corner '{self.active_corner}' not found among defined "
                 f"corners {available}."
             )
+        if not corner.enabled:
+            # The author explicitly disabled this corner yet left it active — warn rather than
+            # silently simulate against a corner excluded from enabled_corners() (BUG-B34).
+            logger.warning(
+                f"active_corner '{self.active_corner}' is marked enabled: false but is the "
+                f"active corner — it will still drive the simulation."
+            )
         return corner
 
     def enabled_corners(self) -> List["Corner"]:
@@ -342,8 +360,11 @@ class Param:
             raise ValueError(f"Param {self.name} min/max not resolved before normalization")
         if self.max_val is None or self.min_val is None:
             raise ValueError(f"No min/max defined for log-normalization of {self.name}")
-        log_min, log_max = np.log(self.min_val), np.log(self.max_val)
-        return np.exp(denorm_val * (log_max - log_min) + log_min)
+        # Use base-10 to match the active Nevergrad denorm path (utils.log_denormalize uses
+        # log10/10**); the prior base-e here meant the RL and Nevergrad backends mapped the same
+        # log-scale param to different physical values (BUG-B24).
+        log_min, log_max = np.log10(self.min_val), np.log10(self.max_val)
+        return np.power(10.0, denorm_val * (log_max - log_min) + log_min)
     
     def get_val(self) -> float:
         return float(self.val)
@@ -473,9 +494,15 @@ class TargetSpec:
 
         if self.tolerance is None or not(self.tolerance > 0):
             self.tolerance = abs(0.05 * self.target)
+            if not (self.tolerance > 0):
+                # target == 0 (or ~0): the 5%-of-target rule degenerates to 0, which would violate
+                # the `tolerance > 0` invariant this block exists to enforce (and leave a zero-width
+                # band). Floor to a small, scale-aware positive derived from the (already-validated,
+                # >0) normalizing `range` (BUG-B17).
+                self.tolerance = np.float64(self.range) * 1e-6
             logger.warning(
                 f"No valid tolerance specified for target '{self.name}'. "
-                f"Using default tolerance of 5%: {self.tolerance}"
+                f"Using default tolerance: {self.tolerance}"
             )
 
         # --- Initialization log ---
@@ -545,6 +572,15 @@ class TargetSpec:
 @dataclass
 class ListTargetSpec:
     targets: List[TargetSpec] = field(default_factory=list)
+
+    def __post_init__(self):
+        # Reject duplicate spec names (mirrors the dut_param and PVT-corner uniqueness checks). The
+        # performance map / fit_summary are keyed by spec name, so two specs sharing a name would
+        # silently overwrite each other and mis-score the run (BUG-B29).
+        seen: set[str] = set()
+        dups = [t.name for t in self.targets if t.name in seen or seen.add(t.name)]
+        if dups:
+            raise ValueError(f"duplicate target_spec name(s): {sorted(set(dups))}")
 
     def add_target(self, target: TargetSpec) -> None:
         logger.info(f"Adding target '{target.name}' to ListTargetSpec")

@@ -44,11 +44,19 @@ class StartRequest(BaseModel):
 async def start_run(body: StartRequest, request: Request):
     loop = asyncio.get_event_loop()
 
+    # A replay needs a checkpoint to replay — reject the no-id case up front instead of scheduling
+    # nothing and leaving the SSE stream heartbeating "running" forever (BUG-B36).
+    if body.replay and not body.checkpoint_id:
+        raise HTTPException(400, "replay requires a checkpoint_id")
+
     # Single resolver: project_id → its project.yaml; else yaml_path; else default.
     try:
         yaml_path = str(project_service.resolve_yaml(body.project_id, body.yaml_path))
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
+    except ValueError as e:
+        # malformed project_id (path separators / '..') → 400, not an opaque 500 (BUG-B37)
+        raise HTTPException(400, str(e))
 
     # Live and resume runs need real SPICE: refuse cleanly (409) when the
     # environment can't run it, instead of failing deep in the engine. Replay

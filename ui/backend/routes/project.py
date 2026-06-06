@@ -170,6 +170,9 @@ def load_project(body: LoadRequest):
             yp = project_service.resolve_yaml(body.project_id, None)
         except FileNotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e))
+        except ValueError as e:
+            # malformed project_id (path separators / '..') → 400, not an opaque 500 (BUG-B37)
+            raise HTTPException(status_code=400, detail=str(e))
         try:
             project = Project_Setup.from_yaml(yp)
             return {"ok": True, "summary": _summarise(project), "yaml_path": str(yp)}

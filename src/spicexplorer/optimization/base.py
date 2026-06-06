@@ -45,6 +45,22 @@ MAX_REWARD  = np.float64(1e6) # The maximum reward score a spec can achieve.
 CHECKPOINT_SCHEMA_VERSION = "1.0.0"
 EPSILON = np.float64(1e-12)
 
+
+def _log_space_band(curr_val, target_val, tolerance):
+    """Map (value, target, LINEAR tolerance) into log10 space for a ``log_scale`` spec.
+
+    ``tolerance`` is a band HALF-WIDTH, not a point on the axis, so ``log10(tolerance)`` is wrong —
+    it produced an absurd / negative band that inverted pass/fail (BUG-B19). Instead derive the
+    half-width in DECADES from the transformed bounds ``log10(target ± tol)``. Returns
+    ``(log_curr, log_target, log_tol_halfwidth)``."""
+    lc = np.float64(convert_linear_to_log(curr_val))
+    lt = np.float64(convert_linear_to_log(target_val))
+    lo = np.float64(convert_linear_to_log(max(target_val - tolerance, EPSILON)))
+    hi = np.float64(convert_linear_to_log(target_val + tolerance))
+    half = np.float64(max(abs(hi - lt), abs(lt - lo)))
+    return lc, lt, half
+
+
 # ----------------------------
 # --- Class Definitions ---
 # ----------------------------
@@ -70,8 +86,11 @@ class Base_Optimizer(ABC):
             self.autosave_checkpoint_dir : Path = Path(output_root)
         else:
             self.autosave_checkpoint_dir = Path(f"./auto_save/{self.setup_obj.name}_{self.setup_obj.optimizer_config.name}_{self._TIMESTAMP}")
-        self.autosave_checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        logger.critical(f"Autosave checkpoints (frequency : {self.autosave_checkpoint_freqeucny}) will be placed in {self.autosave_checkpoint_dir.absolute()}.")
+        # Do NOT mkdir here — `save_checkpoint` creates the dir lazily on the first autosave. The
+        # one-shot routes (/simulate, /sanity, /sensitivity) build an optimizer just to call
+        # evaluate()/one step and never checkpoint, so an eager mkdir leaked an empty CWD-relative
+        # ./auto_save/<...> dir per request (BUG-B41).
+        logger.debug(f"Autosave checkpoints (frequency : {self.autosave_checkpoint_freqeucny}) will be placed in {self.autosave_checkpoint_dir.absolute()}.")
         self.disable_autosave : bool = False
 
         # Instantiated & Typed by the base class
@@ -569,9 +588,15 @@ class Spice_Base_Optimizer(Base_Optimizer):
                 curr_raw, curr_log, task_name = wrapper.run_and_wait(exe_log=True)
         
                 if curr_raw is None:
-                    logger.critical("Something went wrong during simulation as no RAW file was generated")
-                    raise RuntimeError("Something went wrong during simulation as no RAW file was generated")
-                
+                    # Non-convergence on an extreme candidate is routine in analog sizing; don't
+                    # abort the whole run (losing all in-memory trials). Leave results[tb] unset —
+                    # downstream metric extraction reads the wrapper, yields NaN, and compute_fitness
+                    # scores it as MAX_PENALTY, exactly like the parallel_sim path (BUG-B28).
+                    logger.warning(
+                        f"No RAW generated for testbench '{tb}' (sim failed/diverged); this trial's "
+                        f"'{tb}' metrics will score as failures.")
+                    continue
+
                 results[tb] = curr_raw
 
             else:                
@@ -743,10 +768,13 @@ class Spice_Bode_Optimizer(Spice_Base_Optimizer):
                  spicelib_wrappers : Dict[str, NGSpice_Wrapper],
                  target_tf: Expr,
                  output_node: str = "Vout", # FIXME this needs to go into the spicelib_wrapper
-                 frequency_weight: Frequency_Weight | None = None
+                 frequency_weight: Frequency_Weight | None = None,
+                 output_root: Path | None = None,
                  ):
-        
-        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers)
+
+        # Forward output_root so per-run checkpoint isolation works for Bode runs too (BUG-B26).
+        super().__init__(setup_obj = setup_obj, spicelib_wrappers = spicelib_wrappers,
+                         output_root = output_root)
 
         self.target_tf = target_tf
         self.output_node = output_node
@@ -982,6 +1010,11 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
             else:                   penalty += spec_fitness
         # ------------------------------------------------------------------------------
         
+        # Constraint-FIRST (lexicographic) aggregation BY DESIGN: while ANY spec is violated
+        # (penalty < 0) the score is the penalty sum alone — reward from satisfied specs is only
+        # surfaced once ALL constraints are met. Intended (drive feasibility first, then optimize),
+        # but it does flatten the landscape across the infeasible region (BUG-B23 — a design note,
+        # not a defect). A future blended objective (`penalty + α·reward`) would shape it smoother.
         total_score = reward if penalty > -1*EPSILON else penalty
 
         logger.debug(f"Computed fitness: {total_score} for performance array: {performance_array}")
@@ -1007,9 +1040,7 @@ class Spice_Constraint_Satisfaction(Spice_Base_Optimizer):
         tolerance:  np.float64 = np.float64(target_spec.tolerance)
 
         if target_spec.log_scale:
-            spec_curr_val = np.float64(convert_linear_to_log(curr_val))
-            target_val    = np.float64(convert_linear_to_log(target_val))
-            tolerance     = np.float64(convert_linear_to_log(tolerance))
+            spec_curr_val, target_val, tolerance = _log_space_band(curr_val, target_val, tolerance)
 
         normalizing_coeff = np.float64(target_spec.range)
         # --------------------------
@@ -1079,19 +1110,18 @@ class Spice_Single_Objective(Spice_Constraint_Satisfaction):
         tolerance:  np.float64 = np.float64(target_spec.tolerance)
 
         if target_spec.log_scale:
-            spec_curr_val = np.float64(convert_linear_to_log(curr_val))
-            target_val    = np.float64(convert_linear_to_log(target_val))
-            tolerance     = np.float64(convert_linear_to_log(tolerance))
+            spec_curr_val, target_val, tolerance = _log_space_band(curr_val, target_val, tolerance)
 
         normalizing_coeff = np.float64(target_spec.range)
         # --------------------------
         # Case 1: Exceed the Target
         # --------------------------
         if target_spec.goal == OptimizationGoalType.EXCEED:
+            # Reward when the spec exceeds the target; otherwise no reward (the default 0.0).
+            # (The old `elif spec_curr_val > target_val + tolerance` was dead code — that condition
+            # implies the `> EPSILON` branch already fired — and only re-assigned the default; BUG-B20.)
             if (spec_curr_val - target_val) > EPSILON:
                 spec_reward = compute_reward(curr_val=spec_curr_val, target_val=target_val, reward_type=target_spec.reward_type, normalizing_coeff=normalizing_coeff)
-            elif spec_curr_val > target_val + tolerance:
-                spec_reward = np.float64(0.0)
         # --------------------------
         # Case 2: Minimize the Target
         # --------------------------

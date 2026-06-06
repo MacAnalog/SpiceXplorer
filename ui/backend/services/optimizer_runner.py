@@ -325,9 +325,15 @@ def _streaming_optimizer_class(state: RunState):
                 return self.optimization_log
             if not keep_history:
                 self.optimization_log = OptimizationLog()
+            # On a resume (keep_history), the log is preloaded with the prior trials, so run only the
+            # REMAINING budget — otherwise `budget` means "trials after resume" and the total exceeds
+            # the configured budget (BUG-B27). A fresh run keeps the full budget.
+            remaining = self.optimizer_config.budget
+            if keep_history:
+                remaining = max(0, self.optimizer_config.budget - len(self.optimization_log))
             trial = -1
             try:
-                for trial in range(self.optimizer_config.budget):
+                for trial in range(remaining):
                     self.optimization_step()
                     if (not self.disable_autosave) and self.autosave_checkpoint_freqeucny \
                             and ((trial + 1) % self.autosave_checkpoint_freqeucny == 0):
@@ -378,8 +384,12 @@ def _apply_overrides(
                         run_id[:8], project.pvt.active_corner, active_corner)
             project.pvt.active_corner = active_corner
         else:
-            logger.warning("[run %s] requested active_corner '%s' not defined; keeping '%s'",
-                           run_id[:8], active_corner, project.pvt.active_corner)
+            # Route through the `spicexplorer` logger (not this module's `ui.backend.*` logger) so
+            # the warning reaches the run's SSE log handler and the user actually sees that their
+            # requested corner was unknown and the default is being used (BUG-B31).
+            logging.getLogger("spicexplorer").warning(
+                "Requested active_corner '%s' is not defined; keeping '%s' for this run.",
+                active_corner, project.pvt.active_corner)
 
 
 def _run_live(state: RunState, project_path: str) -> None:

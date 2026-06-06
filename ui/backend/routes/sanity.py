@@ -57,6 +57,10 @@ class SanityResponse(BaseModel):
     pdk_detail: str | None = None
     # PVT corner the trial step ran at (None when the project has no `pvt:` block).
     active_corner: str | None = None
+    # Non-fatal advisories surfaced to the user — e.g. a requested corner that the project does
+    # not define (so the default was used), or that per-testbench rows run at the netlist's
+    # hardcoded corner rather than the active PVT corner (BUG-B31/B33).
+    warnings: list[str] = []
 
 
 def _tail_log(path_str: str | Path | None) -> tuple[str | None, int | None]:
@@ -110,10 +114,22 @@ def _run_sanity(yaml_path: str, active_corner: str | None = None) -> dict[str, A
     # pattern as the live run). The optimizer applies project.pvt.active_corner when
     # constructed below, so setting it here is all that's needed.
     active_corner_used: str | None = None
+    warnings: list[str] = []
     if project.pvt is not None:
         if active_corner and project.pvt.get(active_corner) is not None:
             project.pvt.active_corner = active_corner
+        elif active_corner:
+            # Requested a corner the project doesn't define — surface it instead of silently
+            # falling back and reporting the default as if it were honored (BUG-B31).
+            warnings.append(
+                f"Requested corner '{active_corner}' is not defined; using "
+                f"'{project.pvt.active_corner}'.")
         active_corner_used = project.pvt.active_corner
+        # The per-testbench checks below run the netlist as-is (use_editor=False), so the PVT
+        # corner is applied ONLY to the trial step — make that explicit (BUG-B33).
+        warnings.append(
+            f"Per-testbench checks run the netlist's hardcoded corner; the active PVT corner "
+            f"'{active_corner_used}' is applied only to the trial step.")
 
     # Own subdir so the per-wrapper rmtree (NGSpice_Wrapper._validate) can't delete a
     # concurrent live run's outdir/live tree (BUG-A8 / OPT-2).
@@ -175,6 +191,7 @@ def _run_sanity(yaml_path: str, active_corner: str | None = None) -> dict[str, A
             "pdk_ok": pdk["pdk_ok"],
             "pdk_detail": pdk["pdk_detail"],
             "active_corner": active_corner_used,
+            "warnings": warnings,
         }
 
     # One trial optimization step to validate the full pipeline
@@ -237,6 +254,7 @@ def _run_sanity(yaml_path: str, active_corner: str | None = None) -> dict[str, A
             "pdk_ok": pdk["pdk_ok"],
             "pdk_detail": pdk["pdk_detail"],
             "active_corner": active_corner_used,
+            "warnings": warnings,
         }
 
     return {
@@ -251,6 +269,7 @@ def _run_sanity(yaml_path: str, active_corner: str | None = None) -> dict[str, A
         "pdk_ok": pdk["pdk_ok"],
         "pdk_detail": pdk["pdk_detail"],
         "active_corner": active_corner_used,
+        "warnings": warnings,
     }
 
 
