@@ -52,6 +52,21 @@ def apply_spec_overrides(
                                name, patch["goal"])
 
 
+def _normalized_penalties(raw: float, rang: float) -> tuple[float, float]:
+    """raw violation → (linear, sigmoid) normalized penalties; (0, 0) when met.
+
+    Single source for the per-spec loop and the penalty-curve loop (previously
+    copy-pasted verbatim).
+    """
+    if raw <= 0.0:
+        return 0.0, 0.0
+    r, zero, rng = np.float64(raw), np.float64(0.0), np.float64(rang)
+    return (
+        float(compute_relative_absolute_error(r, zero, rng)),
+        float(compute_relative_sigmoid_error(r, zero, rng)),
+    )
+
+
 def _raw_directional_error(value: float, target: float, tolerance: float, goal: OptimizationGoalType) -> float:
     """Returns the raw (non-normalized, directional) constraint violation. Zero when met."""
     tol = abs(tolerance) if tolerance else 0.0
@@ -99,12 +114,7 @@ def compute_score(
         passes = raw <= 0.0
 
         # Normalized penalties (always ≥ 0; zero when constraint is met)
-        if raw <= 0.0:
-            linear_p = 0.0
-            sigmoid_p = 0.0
-        else:
-            linear_p = float(compute_relative_absolute_error(np.float64(raw), np.float64(0.0), np.float64(rang)))
-            sigmoid_p = float(compute_relative_sigmoid_error(np.float64(raw), np.float64(0.0), np.float64(rang)))
+        linear_p, sigmoid_p = _normalized_penalties(raw, rang)
 
         per_spec[spec.name] = {
             "linear": linear_p,
@@ -133,12 +143,9 @@ def compute_score(
             linears, sigmoids = [], []
             for x in xs:
                 raw = _raw_directional_error(x, target, tolerance, spec_obj.goal)
-                if raw <= 0.0:
-                    linears.append(0.0)
-                    sigmoids.append(0.0)
-                else:
-                    linears.append(float(compute_relative_absolute_error(np.float64(raw), np.float64(0.0), np.float64(rang))))
-                    sigmoids.append(float(compute_relative_sigmoid_error(np.float64(raw), np.float64(0.0), np.float64(rang))))
+                lin_p, sig_p = _normalized_penalties(raw, rang)
+                linears.append(lin_p)
+                sigmoids.append(sig_p)
             curve = {"values": xs, "linear": linears, "sigmoid": sigmoids,
                      "target": target, "tolerance": tolerance, "goal": spec_obj.goal.value}
 

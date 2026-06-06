@@ -12,6 +12,27 @@ from ui.backend.services.checkpoint_reader import read_checkpoint, compute_envel
 router = APIRouter()
 
 
+def _count_iters(path: Path) -> int | None:
+    """Cheap trial count for the catalog listing.
+
+    JSON: length of the top-level ``optimization_log`` array (avoids the
+    eval()-based ``Optimization_Log_Visualizer.load_checkpoint``). CSV: data rows
+    minus the header. Returns None on any error so the listing never 500s.
+    """
+    try:
+        if path.suffix == ".json":
+            import json
+            with open(path) as f:
+                data = json.load(f)
+            return len(data.get("optimization_log", []))
+        # CSV: count non-empty data lines after the header.
+        with open(path) as f:
+            rows = sum(1 for line in f if line.strip())
+        return max(0, rows - 1)
+    except Exception:
+        return None
+
+
 def _infer_score_fn(path: Path) -> str:
     name = path.name.lower()
     if "sigmoid" in name:
@@ -87,7 +108,7 @@ def _list_autosave_checkpoints() -> list[dict[str, Any]]:
                 "path": str(p),
                 "type": "json",
                 "score_fn": _infer_score_fn(p),
-                "n_iters": None,
+                "n_iters": _count_iters(p),
                 "source": "autosave",
             })
     return results
@@ -104,6 +125,7 @@ def list_checkpoints():
                 "path": str(path),
                 "type": "csv" if path.suffix == ".csv" else "json",
                 "score_fn": _infer_score_fn(path),
+                "n_iters": _count_iters(path),
                 "source": "preset",
             })
     items += _list_autosave_checkpoints()
@@ -188,3 +210,60 @@ def checkpoint_scatter(
     target_specs = _target_specs_from_yaml(yaml_path)
     points = compute_scatter(data, metric_x, metric_y, target_specs)
     return {"metric_x": metric_x, "metric_y": metric_y, "points": points}
+
+
+@router.get("/checkpoint/{checkpoint_id}/report")
+def checkpoint_report(checkpoint_id: str, yaml_path: str = Query(default="")):
+    """Bundle a run's artifacts into one downloadable zip: the checkpoint file, the
+    project YAML (when a path is given), and a generated `summary.md` (final best
+    score + the performance envelope per spec)."""
+    import io
+    import zipfile
+    from fastapi.responses import StreamingResponse
+
+    path = _resolve_checkpoint_path(checkpoint_id)
+    if path is None:
+        raise HTTPException(404, f"Checkpoint '{checkpoint_id}' not found")
+
+    data = read_checkpoint(path)
+    target_specs = _target_specs_from_yaml(yaml_path)
+    envelope = compute_envelope(data, target_specs) if target_specs else []
+
+    best_scores = [s for s in data.get("best_scores", []) if isinstance(s, (int, float))]
+    final_best = best_scores[-1] if best_scores else None
+
+    lines = [
+        f"# Run report — {checkpoint_id}",
+        "",
+        f"- Score function: `{_infer_score_fn(path)}`",
+        f"- Iterations: {data.get('n_iters', '?')}",
+        f"- Final best score: {final_best if final_best is not None else 'n/a'}",
+        "",
+        "## Performance envelope (best per spec)",
+        "",
+        "| spec | goal | best | target | pass |",
+        "|---|---|---|---|---|",
+    ]
+    for e in envelope:
+        passes = e.get("passes")
+        mark = "PASS" if passes else ("FAIL" if passes is False else "—")
+        lines.append(
+            f"| {e['metric']} | {e.get('goal', '')} | {e.get('best_ever')} | "
+            f"{e.get('target')} | {mark} |"
+        )
+    summary_md = "\n".join(lines) + "\n"
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(path.name, path.read_text())
+        if yaml_path:
+            yp = Path(yaml_path)
+            if yp.exists() and yp.is_file():
+                z.writestr("project_setup.yaml", yp.read_text())
+        z.writestr("summary.md", summary_md)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{checkpoint_id}-report.zip"'},
+    )
