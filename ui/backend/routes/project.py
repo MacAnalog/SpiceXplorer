@@ -126,6 +126,40 @@ def _summarise(project: Project_Setup) -> dict[str, Any]:
     }
 
 
+def _write_content_to_temp(yaml_content: str, base_yaml_path: str | None) -> str:
+    """Persist edited/uploaded YAML to a real temp path and return it.
+
+    When `base_yaml_path` is given (the user edited a loaded example in Monaco and
+    hit Apply), a relative/empty ``ws_root`` is rewritten to an ABSOLUTE path
+    anchored at the ORIGINAL YAML's directory before writing — so netlist/ws_root
+    resolution is identical to applying the on-disk file, even though the temp lives
+    elsewhere. Without this, the committed examples (``ws_root: ..``) would resolve
+    against the temp dir and break live runs.
+    """
+    import tempfile
+    text = yaml_content
+    if base_yaml_path:
+        try:
+            data = yaml.safe_load(yaml_content)
+            proj = data.get("project") if isinstance(data, dict) else None
+            if isinstance(proj, dict):
+                base = Path(base_yaml_path).expanduser().resolve().parent
+                wsr = proj.get("ws_root")
+                wsr_s = "" if wsr is None else str(wsr).strip()
+                if not wsr_s:
+                    proj["ws_root"] = str(base)
+                elif not wsr_s.startswith("~") and not Path(wsr_s).is_absolute():
+                    proj["ws_root"] = str((base / wsr_s).resolve())
+                text = yaml.safe_dump(data, sort_keys=False)
+        except yaml.YAMLError:
+            text = yaml_content  # let from_yaml surface the real parse error below
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".yaml", delete=False, prefix="spx_uploaded_"
+    ) as tmp:
+        tmp.write(text)
+        return tmp.name
+
+
 @router.post("/project/load")
 def load_project(body: LoadRequest):
     # Apply from raw content (uploaded or edited YAML with no on-disk path). The
@@ -133,16 +167,11 @@ def load_project(body: LoadRequest):
     # matter for live SPICE — so a project with relative paths still summarises.
     if body.yaml_content:
         import os
-        import tempfile
         # Persist the uploaded/edited YAML to a real path and RETURN that path, so
         # every path-keyed endpoint (optimize/score/sanity/sensitivity) resolves to
         # THIS project. Previously this returned yaml_path="", which made a live run
         # silently optimize the default cascode example instead of the applied YAML.
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False, prefix="spx_uploaded_"
-        ) as tmp:
-            tmp.write(body.yaml_content)
-            tmp_path = tmp.name
+        tmp_path = _write_content_to_temp(body.yaml_content, body.yaml_path)
         try:
             project = Project_Setup.from_yaml(tmp_path)
             return {"ok": True, "summary": _summarise(project), "yaml_path": tmp_path}
