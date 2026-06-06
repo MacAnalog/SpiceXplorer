@@ -17,6 +17,50 @@
 > items that would need a live UI/sim to confirm are tagged **needs runtime verification (deferred)**.
 > The §11 list (prior audit) stays as historical record — most of it shipped; do not re-derive it.
 
+## 0. 2026-06 completion pass (this branch) ✅
+
+A focused pass landed the bulk of the remaining bounded/medium items below. Verified by
+`uv run pytest` (70 passed; the 1 failure is the PDK-gated `test_ngspice_sanity_check`, which
+only passes in the Docker backend), `tsc --noEmit`, `eslint --max-warnings=0`, and
+`next build` (all green), plus +12 backend regression tests in
+[tests/test_ui_phase_completion.py](tests/test_ui_phase_completion.py).
+
+**Landed:**
+- **§2** Apply-from-editor: edited Monaco buffer is now applied (not a stale disk re-read);
+  the backend anchors a relative `ws_root` to the original YAML's dir so resolution is preserved.
+- **§3** Score Shaping: per-row inline try-value inputs, a **score-contribution waterfall** chart,
+  and a **sigmoid/linear global toggle** (drives the waterfall + F(x) KPI).
+- **§5** Wizard DSL: **spec library** (`examples/spec_library.yaml` + `/api/spec-library` + one-click
+  add), **`.meas` auto-discovery** (upload → candidate checklist), preview **Copy/Download**. (`§5b`/`§5d`
+  manual-add were already done.)
+- **§6** Plot interactivity: curated **modebar** (`displayModeBar:'hover'`, no lasso/logo) + a custom
+  **Download-CSV** button, centralized in `PlotlyChart`.
+- **§7** KPI **stat-card rows** on Setup, Optimize (incl. elapsed/est-remaining via `runStartTs`),
+  Score Shaping, and Explorer (A vs B + delta).
+- **§8** Explore: **Pareto-front overlay**, **parallel-coordinates** chart, and a **design-point
+  inspector** (click a scatter point → params/metrics → **Re-simulate** via `/api/simulate/once`).
+- **§9** `g`-chord view nav + **`?` shortcut-help sheet**; sticky tab actions were already satisfied by
+  the shell layout.
+- **§10** **Monaco inline validation markers**, and a **run-report zip** (`/api/checkpoint/{id}/report`
+  → checkpoint + YAML + `summary.md`).
+- **§15** all wizard layout/overflow fixes (PVT/Testbenches/PDK/Optimizer/TargetSpecs/BasicInfo grids +
+  selects, RightRail `<td>` truncation, wizard wrapper height).
+- **§16** deleted the broken orphan `symbolic.py`; populated `n_iters` in the checkpoint listing;
+  deduped the `score_service` penalty block; one shared `goalSymbol` helper across 8 sites; routed
+  `PipelineView` pass/fail through `statusForGoal`.
+
+**Deferred (with rationale — NOT done this pass):**
+- **Needs product sign-off** (irreversible / possibly-intentional): §16 RL backend + demo-runner
+  deletion, §16 score-service↔library scorer unification, §16 dual-schematic-path retirement.
+- **Blocked**: §3 worst-case-corner (PVT Phase 2), §4 JSON demo checkpoints (needs curated real-run data;
+  the reader already supports JSON).
+- **Large / lower-ROI**: §3 equi-score contour, §6 per-chart prefs popover + synced-hover + drag-annotations,
+  §8 brushing-&-linking + 3+-run ribbon + per-spec score small-multiples, §9 expandable rows + hover-popover
+  edit + density toggle (primitive `CollapsiblePanel` added but not retrofitted), §5 params.yaml enrichment +
+  per-step validation + live-diff highlighting.
+
+---
+
 ## 1. Create Wizard ✅
 
 Adds a step-by-step YAML generator to the Setup tab. Full spec in `PLAN_UI_DESIGN.md`.
