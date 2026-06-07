@@ -93,7 +93,6 @@ def test_b39_b35_target_specs_only_enabled_and_no_none_tolerance(tmp_path):
     import yaml
     from ui.backend.routes.checkpoint import _target_specs_from_yaml
     d = yaml.safe_load(CASCODE_YAML.read_text())
-    specs = None
     # find target_specs list and disable the first, blank-tolerance a target:0 one
     def find(o, k):
         if isinstance(o, dict):

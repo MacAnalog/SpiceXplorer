@@ -145,10 +145,12 @@ export function WizardShell({ onSaved, defaultSavePath }: Props) {
 
       {/* Two-column body: form on the left, live YAML preview on the right */}
       <div className="grid min-h-0 flex-1 gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        {/* LEFT column: step form + navigation */}
-        <div className="flex min-h-0 min-w-0 flex-col gap-3 overflow-auto">
-          <Panel>{StepBody}</Panel>
-          <div className="flex items-center justify-between">
+        {/* LEFT column: step form (scrolls internally) + pinned navigation */}
+        <div className="flex min-h-0 min-w-0 flex-col gap-3">
+          <Panel className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 overflow-y-auto">{StepBody}</div>
+          </Panel>
+          <div className="flex shrink-0 items-center justify-between">
             <Button variant="ghost" onClick={reset}>
               Reset wizard
             </Button>

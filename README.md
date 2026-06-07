@@ -1,5 +1,17 @@
 # SpiceXplorer
 
+> [!IMPORTANT]
+> **This repository is archived.** SpiceXplorer has been split into a multi-repo
+> platform, and active development continues there. Start at
+> **[spicexplorer-workspace](https://github.com/MacAnalog/spicexplorer-workspace)** —
+> the meta-repo that wires the three first-party repos together as submodules:
+> [`spicexplorer-platform`](https://github.com/MacAnalog/spicexplorer-platform)
+> (Python library + REST API),
+> [`spicexplorer-ui`](https://github.com/MacAnalog/spicexplorer-ui) (Next.js Studio),
+> and [`spicexplorer-orchestration`](https://github.com/MacAnalog/spicexplorer-orchestration)
+> (workflows + MCP server).
+> This repo is kept read-only for history; please open issues and PRs against the new repos.
+
 **A Pythonic toolkit for analog circuit sizing and SPICE-based optimization research.**
 
 SpiceXplorer turns a single declarative project file into a complete, reproducible design-exploration run. You describe the circuit, the technology constraints, the testbenches, and the performance targets once in YAML; SpiceXplorer parses it into typed Python datamodels, drives a SPICE-in-the-loop optimization, scores each candidate against your specs, and emits checkpoints, logs, and interactive Plotly reports.
